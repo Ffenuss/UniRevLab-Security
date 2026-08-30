@@ -48,8 +48,11 @@ jobs:
           mkdir -p /tmp/unirevlab-v022
           unzip -q "${SOURCE_ARCHIVE}" -d /tmp/unirevlab-v022
           test -d "/tmp/unirevlab-v022/${SOURCE_DIR}"
-          rsync -a --delete --exclude='.git/' "/tmp/unirevlab-v022/${SOURCE_DIR}/" ./
-          rm -f "${SOURCE_ARCHIVE}" .bootstrap .github/workflows/bootstrap-v022.yml
+          rsync -a --delete \
+            --exclude='.git/' \
+            --exclude='.github/workflows/' \
+            "/tmp/unirevlab-v022/${SOURCE_DIR}/" ./
+          rm -f "${SOURCE_ARCHIVE}" .bootstrap
 
       - name: Commit imported source tree
         shell: bash
@@ -59,9 +62,17 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           if ! git diff --cached --quiet; then
-            git commit -m "Import UniRevLab Security v0.22 performance UX checkpoint"
+            git commit -m "Import UniRevLab Security v0.22 performance UX checkpoint [skip ci]"
             git push origin HEAD:main
           fi
+
+      - name: Restore canonical workflows locally for verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .github/workflows
+          mkdir -p .github
+          cp -a "/tmp/unirevlab-v022/${SOURCE_DIR}/.github/workflows" .github/workflows
 
       - uses: actions/setup-java@v4
         with:
