@@ -47,8 +47,11 @@ class ElfNativeScannerTest {
 
     private fun fixture(name: String): File {
         javaClass.classLoader?.getResource("fixtures/$name")?.let { return File(it.toURI()) }
-        return File("app/src/test/resources/fixtures/$name").also {
-            check(it.isFile) { "Missing native test fixture: ${it.absolutePath}" }
-        }
+        val candidates = listOf(
+            File("src/test/resources/fixtures/$name"),
+            File("app/src/test/resources/fixtures/$name"),
+        )
+        return candidates.firstOrNull { it.isFile }
+            ?: error("Missing native test fixture: ${candidates.joinToString { it.absolutePath }}")
     }
 }

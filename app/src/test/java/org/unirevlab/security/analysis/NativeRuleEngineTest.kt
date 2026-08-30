@@ -17,7 +17,6 @@ class NativeRuleEngineTest {
         assertTrue(findings.any { it.id == "NATIVE-JNI-ATTACK-SURFACE" })
     }
 
-
     @Test
     fun importInventoryProducesReviewSignalsWithoutClaimingExploitability() {
         val base = ElfNativeScanner.scan("assets/libplugin.so", fixture("libjni_hardened.so"))
@@ -37,8 +36,11 @@ class NativeRuleEngineTest {
 
     private fun fixture(name: String): File {
         javaClass.classLoader?.getResource("fixtures/$name")?.let { return File(it.toURI()) }
-        return File("app/src/test/resources/fixtures/$name").also {
-            check(it.isFile) { "Missing native test fixture: ${it.absolutePath}" }
-        }
+        val candidates = listOf(
+            File("src/test/resources/fixtures/$name"),
+            File("app/src/test/resources/fixtures/$name"),
+        )
+        return candidates.firstOrNull { it.isFile }
+            ?: error("Missing native test fixture: ${candidates.joinToString { it.absolutePath }}")
     }
 }
