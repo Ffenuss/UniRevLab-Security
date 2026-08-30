@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-debug-apk:
@@ -23,83 +23,41 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Apply connected build fixes
+      - name: Apply connected build fixes locally
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
 
-          inspector = Path("app/src/main/java/org/unirevlab/security/analysis/LocalArtifactInspector.kt")
-          text = inspector.read_text()
-          old = "val fingerprints = BoundedDistinctCollector<org.unirevlab.security.model.RuntimeFileReference, Pair<String, String?>>(256) { it.entryName to it.sha256 }"
-          new = "val fingerprints = BoundedDistinctCollector<org.unirevlab.security.model.RuntimeArtifactFingerprint, Pair<String, String>>(256) { it.entryName to it.sha256 }"
-          if old in text:
-              inspector.write_text(text.replace(old, new))
-          elif new not in text:
-              raise SystemExit("Unexpected RuntimeArtifactFingerprint merge source")
-
-          for name in ("AgreementScreen.kt", "DashboardScreen.kt", "HelpScreen.kt", "InstalledAppsScreen.kt"):
-              path = Path("app/src/main/java/org/unirevlab/security/ui") / name
-              source = path.read_text()
-              bad_import = "import androidx.compose.foundation.layout.weight\n"
-              if bad_import in source:
-                  path.write_text(source.replace(bad_import, ""))
-
-          scanner = Path("app/src/main/java/org/unirevlab/security/analysis/RuntimeArtifactScanner.kt")
-          source = scanner.read_text()
-          old_classifier = "\n".join([
-              '            if (n.contains("flutter_assets/")) flutterAssets += entry',
-              '            if (base == "vm_snapshot_data" || base == "vm_snapshot_instr" || base == "isolate_snapshot_data" || base == "isolate_snapshot_instr") snapshots += entry',
-              '            if (base == "kernel_blob.bin" || base.endsWith(".dill")) kernels += entry',
-              '',
-          ])
-          new_classifier = "\n".join([
-              '            val isFlutterSnapshot = base == "vm_snapshot_data" || base == "vm_snapshot_instr" || base == "isolate_snapshot_data" || base == "isolate_snapshot_instr"',
-              '            val isFlutterKernel = base == "kernel_blob.bin" || base.endsWith(".dill")',
-              '            if (n.contains("flutter_assets/") && !isFlutterSnapshot && !isFlutterKernel) flutterAssets += entry',
-              '            if (isFlutterSnapshot) snapshots += entry',
-              '            if (isFlutterKernel) kernels += entry',
-              '',
-          ])
-          if old_classifier in source:
-              scanner.write_text(source.replace(old_classifier, new_classifier))
-          elif new_classifier not in source:
-              raise SystemExit("Unexpected RuntimeArtifactScanner Flutter classifier")
-
-          old_fixture = "\n".join([
-              '    private fun fixture(name: String): File {',
-              '        val url = checkNotNull(javaClass.classLoader?.getResource("fixtures/$name"))',
-              '        return File(url.toURI())',
-              '    }',
-              '',
-          ])
-          new_fixture = "\n".join([
-              '    private fun fixture(name: String): File {',
-              '        javaClass.classLoader?.getResource("fixtures/$name")?.let { return File(it.toURI()) }',
-              '        return File("app/src/test/resources/fixtures/$name").also {',
-              '            check(it.isFile) { "Missing native test fixture: ${it.absolutePath}" }',
-              '        }',
-              '    }',
-              '',
-          ])
           for test_name in ("ElfNativeScannerTest.kt", "NativeRuleEngineTest.kt"):
-              test_path = Path("app/src/test/java/org/unirevlab/security/analysis") / test_name
-              test_source = test_path.read_text()
-              if old_fixture in test_source:
-                  test_path.write_text(test_source.replace(old_fixture, new_fixture))
-              elif new_fixture not in test_source:
+              path = Path("app/src/test/java/org/unirevlab/security/analysis") / test_name
+              source = path.read_text()
+              bad = "\n".join([
+                  '    private fun fixture(name: String): File {',
+                  '        javaClass.classLoader?.getResource("fixtures/$name")?.let { return File(it.toURI()) }',
+                  '        return File("app/src/test/resources/fixtures/$name").also {',
+                  '            check(it.isFile) { "Missing native test fixture: ${it.absolutePath}" }',
+                  '        }',
+                  '    }',
+              ])
+              good = "\n".join([
+                  '    private fun fixture(name: String): File {',
+                  '        javaClass.classLoader?.getResource("fixtures/$name")?.let { return File(it.toURI()) }',
+                  '        val candidates = listOf(',
+                  '            File("src/test/resources/fixtures/$name"),',
+                  '            File("app/src/test/resources/fixtures/$name"),',
+                  '        )',
+                  '        return candidates.firstOrNull { it.isFile }',
+                  '            ?: error("Missing native test fixture: ${candidates.joinToString { it.absolutePath }}")',
+                  '    }',
+              ])
+              if bad in source:
+                  path.write_text(source.replace(bad, good))
+              elif good not in source:
                   raise SystemExit(f"Unexpected fixture helper in {test_name}")
           PY
-
           git diff --check
-          if ! git diff --quiet -- app/src; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add app/src
-            git commit -m "Fix connected unit test regressions [skip ci]"
-            git push origin HEAD:main
-          fi
 
       - uses: actions/setup-java@v4
         with:
