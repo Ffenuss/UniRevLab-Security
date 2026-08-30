@@ -1,0 +1,122 @@
+name: Bootstrap v0.22 and build APK
+
+on:
+  push:
+    paths:
+      - 'unirevlab-security-platform-v0.22.0-dev-performance-ux.zip'
+      - '.github/workflows/bootstrap-v022.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  SOURCE_ARCHIVE: unirevlab-security-platform-v0.22.0-dev-performance-ux.zip
+  SOURCE_SHA256: 6215429ed7cfd5ccd431beee3228ab93564df3ae3a589a761ae699f48f75a7de
+  SOURCE_DIR: unirevlab-security-platform-v0.22.0-dev-performance-ux
+
+jobs:
+  import-and-build:
+    if: ${{ hashFiles('unirevlab-security-platform-v0.22.0-dev-performance-ux.zip') != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "${SOURCE_SHA256}  ${SOURCE_ARCHIVE}" | sha256sum -c -
+
+      - name: Import canonical v0.22 source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/unirevlab-v022
+          mkdir -p /tmp/unirevlab-v022
+          unzip -q "${SOURCE_ARCHIVE}" -d /tmp/unirevlab-v022
+          test -d "/tmp/unirevlab-v022/${SOURCE_DIR}"
+          rsync -a --delete --exclude='.git/' "/tmp/unirevlab-v022/${SOURCE_DIR}/" ./
+          rm -f "${SOURCE_ARCHIVE}" .bootstrap .github/workflows/bootstrap-v022.yml
+
+      - name: Commit imported source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "Import UniRevLab Security v0.22 performance UX checkpoint"
+            git push origin HEAD:main
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK and NDK
+        shell: bash
+        run: sdkmanager "platforms;android-37" "build-tools;36.0.0" "ndk;28.2.13676358"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+
+      - name: Install pinned cargo-ndk
+        shell: bash
+        run: cargo install cargo-ndk --version 4.1.2 --locked
+
+      - name: Build Rust JNI libraries
+        shell: bash
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/28.2.13676358
+        run: |
+          set -euo pipefail
+          rm -rf app/src/main/jniLibs
+          cargo ndk \
+            --manifest-path native-core/Cargo.toml \
+            -t arm64-v8a -t armeabi-v7a -t x86_64 -t x86 \
+            -o app/src/main/jniLibs \
+            build --release
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+
+      - name: Preflight
+        shell: bash
+        run: |
+          python scripts/check_android_build_config.py
+          python scripts/validate_schemas.py
+          python scripts/check_secrets.py .
+
+      - name: Build benign native fixtures
+        shell: bash
+        run: ./test-corpus/native/build-fixtures.sh
+
+      - name: Unit tests, lint and APK build
+        shell: bash
+        run: gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          test -n "${APK}"
+          unzip -t "${APK}" >/dev/null
+          sha256sum "${APK}" | tee UniRevLab-Security-v0.22.0-debug.apk.sha256
+          cp "${APK}" UniRevLab-Security-v0.22.0-debug.apk
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: UniRevLab-Security-v0.22.0-debug
+          path: |
+            UniRevLab-Security-v0.22.0-debug.apk
+            UniRevLab-Security-v0.22.0-debug.apk.sha256
+          if-no-files-found: error
