@@ -16,7 +16,6 @@ env:
 
 jobs:
   import-and-build:
-    if: ${{ hashFiles('unirevlab-security-platform-v0.22.0-dev-performance-ux*.zip') != '' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
