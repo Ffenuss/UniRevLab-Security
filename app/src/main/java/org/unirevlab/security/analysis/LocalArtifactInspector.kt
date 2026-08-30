@@ -359,7 +359,7 @@ class LocalArtifactInspector(
 
         val flutter = flutterValues.takeIf { it.isNotEmpty() }?.let { list ->
             val representativeAssets = BoundedDistinctCollector<org.unirevlab.security.model.RuntimeFileReference, String>(256) { it.entryName }
-            val fingerprints = BoundedDistinctCollector<org.unirevlab.security.model.RuntimeFileReference, Pair<String, String?>>(256) { it.entryName to it.sha256 }
+            val fingerprints = BoundedDistinctCollector<org.unirevlab.security.model.RuntimeArtifactFingerprint, Pair<String, String>>(256) { it.entryName to it.sha256 }
             val manifests = java.util.TreeSet<String>()
             val snapshots = java.util.TreeSet<String>()
             val kernels = java.util.TreeSet<String>()
