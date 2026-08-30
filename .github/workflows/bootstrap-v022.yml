@@ -15,13 +15,46 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-debug-apk:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Apply connected Kotlin compile fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          inspector = Path("app/src/main/java/org/unirevlab/security/analysis/LocalArtifactInspector.kt")
+          text = inspector.read_text()
+          old = "val fingerprints = BoundedDistinctCollector<org.unirevlab.security.model.RuntimeFileReference, Pair<String, String?>>(256) { it.entryName to it.sha256 }"
+          new = "val fingerprints = BoundedDistinctCollector<org.unirevlab.security.model.RuntimeArtifactFingerprint, Pair<String, String>>(256) { it.entryName to it.sha256 }"
+          if old in text:
+              inspector.write_text(text.replace(old, new))
+          elif new not in text:
+              raise SystemExit("Unexpected RuntimeArtifactFingerprint merge source")
+
+          for name in ("AgreementScreen.kt", "DashboardScreen.kt", "HelpScreen.kt", "InstalledAppsScreen.kt"):
+              path = Path("app/src/main/java/org/unirevlab/security/ui") / name
+              source = path.read_text()
+              bad_import = "import androidx.compose.foundation.layout.weight\n"
+              if bad_import in source:
+                  path.write_text(source.replace(bad_import, ""))
+          PY
+
+          git diff --check
+          if ! git diff --quiet -- app/src/main/java/org/unirevlab/security; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add app/src/main/java/org/unirevlab/security
+            git commit -m "Fix connected Android Kotlin compilation [skip ci]"
+            git push origin HEAD:main
+          fi
 
       - uses: actions/setup-java@v4
         with:
