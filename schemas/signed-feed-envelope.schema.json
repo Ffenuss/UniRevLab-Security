@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unirevlab.org/schemas/signed-feed-envelope-1.0.json",
+  "title": "UniRevLab Signed Feed/Package Index Envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "payloadType", "payloadSha256", "keyId", "algorithm", "signatureBase64"],
+  "properties": {
+    "schemaVersion": {"const": "1.0"},
+    "payloadType": {"enum": ["ADVISORY_FEED", "PACKAGE_INDEX"]},
+    "payloadSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "keyId": {"type": "string", "minLength": 1, "maxLength": 128},
+    "algorithm": {"const": "ED25519"},
+    "signatureBase64": {"type": "string", "minLength": 40, "maxLength": 512}
+  }
+}

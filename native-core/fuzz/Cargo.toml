@@ -1,0 +1,19 @@
+[package]
+name = "unirevlab-native-core-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+unirevlab-native-core = { path = ".." }
+
+[[bin]]
+name = "parse_axml"
+path = "fuzz_targets/parse_axml.rs"
+test = false
+doc = false
+bench = false

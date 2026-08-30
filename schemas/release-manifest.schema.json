@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unirevlab.org/schemas/release-manifest-1.1.json",
+  "title": "UniRevLab Release Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "product", "versionName", "versionCode", "commit",
+    "sourceDateEpoch", "generatedAt", "sourceManifestSha256", "signing",
+    "toolchainEvidenceSha256", "toolchain", "requiredConnectedGates", "artifacts"
+  ],
+  "properties": {
+    "schemaVersion": {"const": "1.1"},
+    "product": {"const": "UniRevLab Security"},
+    "versionName": {"type": "string", "minLength": 1, "maxLength": 128},
+    "versionCode": {"type": "integer", "minimum": 1},
+    "commit": {"type": "string", "minLength": 1, "maxLength": 128},
+    "sourceDateEpoch": {"type": "integer", "minimum": 0},
+    "generatedAt": {"type": "string", "minLength": 1, "maxLength": 128},
+    "sourceManifestSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "signing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["certificateSha256", "evidenceSha256"],
+      "properties": {
+        "certificateSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "evidenceSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "toolchainEvidenceSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "toolchain": {"type": "object", "minProperties": 5},
+    "requiredConnectedGates": {
+      "type": "array",
+      "minItems": 2,
+      "uniqueItems": true,
+      "items": {"enum": ["ANDROID_SIGNED_RELEASE", "GHIDRA_MULTIABI_IL2CPP"]}
+    },
+    "artifacts": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "name", "sizeBytes", "sha256"],
+        "properties": {
+          "kind": {"enum": ["APK", "AAB"]},
+          "name": {"type": "string", "minLength": 1},
+          "sizeBytes": {"type": "integer", "minimum": 1},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    }
+  }
+}

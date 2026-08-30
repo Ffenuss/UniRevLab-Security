@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unirevlab.org/schemas/release-attestation-1.0.json",
+  "title": "UniRevLab Connected Release Attestation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "predicateType", "commit", "releaseManifestSha256", "sourceManifestSha256", "signerCertificateSha256", "subjects", "connectedGates"],
+  "properties": {
+    "schemaVersion": {"const": "1.0"},
+    "predicateType": {"const": "https://unirevlab.org/attestation/release/v1"},
+    "commit": {"type": "string", "minLength": 1, "maxLength": 128},
+    "releaseManifestSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "sourceManifestSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "signerCertificateSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "subjects": {
+      "type": "array", "minItems": 2, "maxItems": 2,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["kind", "name", "sha256"],
+        "properties": {
+          "kind": {"enum": ["APK", "AAB"]},
+          "name": {"type": "string", "minLength": 1},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    },
+    "connectedGates": {
+      "type": "array", "minItems": 2, "maxItems": 2,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["name", "status", "evidence"],
+        "properties": {
+          "name": {"enum": ["ANDROID_SIGNED_RELEASE", "GHIDRA_MULTIABI_IL2CPP"]},
+          "status": {"const": "PASS"},
+          "evidence": {
+            "type": "array", "minItems": 1, "maxItems": 16,
+            "items": {
+              "type": "object", "additionalProperties": false,
+              "required": ["name", "sha256"],
+              "properties": {
+                "name": {"type": "string", "minLength": 1, "maxLength": 512},
+                "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

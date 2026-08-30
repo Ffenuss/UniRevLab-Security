@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unirevlab.org/schemas/ghidra-worker-job-1.1.json",
+  "title": "UniRevLab Ghidra Worker Job",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "assessmentId", "artifactSha256", "scopeReceiptSha256",
+    "libraryEntry", "inputObjectId", "analysisModes", "analysisProfile", "limits"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.1" },
+    "assessmentId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "artifactSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "scopeReceiptSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "libraryEntry": { "type": "string", "minLength": 1, "maxLength": 1024 },
+    "inputObjectId": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "analysisProfile": { "enum": ["DEFAULT", "DEEP"] },
+    "analysisModes": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": {
+        "enum": [
+          "FUNCTION_INDEX", "CFG_INDEX", "XREF_INDEX", "JNI_REGISTRATION_RECOVERY",
+          "IL2CPP_REGISTRATION_CORRELATION", "DECOMPILER"
+        ]
+      }
+    },
+    "decompilerTargets": {
+      "type": "array", "uniqueItems": true, "maxItems": 100000,
+      "items": { "type": "integer", "minimum": 0 }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wallClockSeconds", "memoryMiB", "maxFunctions", "maxCfgBlocks", "maxXrefs", "maxDecompilerCharsPerFunction", "maxDecompilerTotalChars"],
+      "properties": {
+        "wallClockSeconds": { "type": "integer", "minimum": 1, "maximum": 14400 },
+        "memoryMiB": { "type": "integer", "minimum": 512, "maximum": 65536 },
+        "maxFunctions": { "type": "integer", "minimum": 1, "maximum": 5000000 },
+        "maxCfgBlocks": { "type": "integer", "minimum": 1, "maximum": 20000000 },
+        "maxXrefs": { "type": "integer", "minimum": 1, "maximum": 20000000 },
+        "maxDecompilerCharsPerFunction": { "type": "integer", "minimum": 0, "maximum": 5000000 },
+        "maxDecompilerTotalChars": { "type": "integer", "minimum": 0, "maximum": 500000000 }
+      }
+    }
+  }
+}

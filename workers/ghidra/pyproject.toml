@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "unirevlab-ghidra-worker"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["jsonschema>=4.26,<5"]
+
+[project.optional-dependencies]
+test = ["pytest>=8.4,<9"]
+
+[project.scripts]
+unirevlab-ghidra-worker = "unirevlab_ghidra_worker.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

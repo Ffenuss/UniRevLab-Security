@@ -1,0 +1,17 @@
+[package]
+name = "unirevlab-native-core"
+version = "0.2.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Memory-safe native analysis core for UniRevLab Security"
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+sha2 = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"

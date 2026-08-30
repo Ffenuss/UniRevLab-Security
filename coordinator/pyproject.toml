@@ -1,0 +1,12 @@
+[project]
+name = "unirevlab-coordinator"
+version = "0.2.0"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.116,<1",
+  "uvicorn[standard]>=0.35,<1",
+  "pydantic>=2.11,<3"
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.4,<9", "httpx>=0.28,<1"]

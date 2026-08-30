@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unirevlab.org/schemas/release-toolchain-1.0.json",
+  "title": "UniRevLab Release Toolchain Evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "generatedAt", "sourceDateEpoch", "toolchain"],
+  "properties": {
+    "schemaVersion": {"const": "1.0"},
+    "generatedAt": {"type": "string", "minLength": 1},
+    "sourceDateEpoch": {"type": "integer", "minimum": 0},
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["java", "gradle", "rustc", "cargo", "cargoNdk", "sdkmanager", "apksigner", "ghidra", "androidPlatform", "androidBuildTools", "androidNdk"],
+      "properties": {
+        "java": {"type": "string"}, "gradle": {"type": "string"}, "rustc": {"type": "string"},
+        "cargo": {"type": "string"}, "cargoNdk": {"type": "string"}, "sdkmanager": {"type": "string"},
+        "apksigner": {"type": "string"}, "ghidra": {"type": "string"}, "androidPlatform": {"type": "string"},
+        "androidBuildTools": {"type": "string"}, "androidNdk": {"type": "string"}
+      }
+    }
+  }
+}

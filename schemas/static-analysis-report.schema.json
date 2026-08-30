@@ -1,0 +1,4797 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unirevlab.org/schemas/static-analysis-report-1.19.json",
+  "title": "UniRevLab Static Analysis Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "engineVersion",
+    "assessment",
+    "artifact",
+    "manifest",
+    "resources",
+    "dex",
+    "native",
+    "il2cpp",
+    "ghidra",
+    "correlations",
+    "manifestDexReachability",
+    "runtimes",
+    "runtimeArtifacts",
+    "supplyChain",
+    "findings"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.19"
+    },
+    "engineVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "assessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assessmentId",
+        "createdAtEpochMs",
+        "projectName",
+        "organization",
+        "purpose",
+        "authorityConfirmed",
+        "modes"
+      ],
+      "properties": {
+        "assessmentId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "createdAtEpochMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "projectName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "organization": {
+          "type": "string",
+          "minLength": 1
+        },
+        "purpose": {
+          "type": "string",
+          "minLength": 1
+        },
+        "authorityConfirmed": {
+          "const": true
+        },
+        "modes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "static",
+              "reverse",
+              "dynamic",
+              "network"
+            ]
+          }
+        }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "displayName",
+        "sourceKind",
+        "sizeBytes",
+        "sha256",
+        "archiveEntries",
+        "dexFiles",
+        "nativeLibraries",
+        "hasAndroidManifest",
+        "suspiciousArchivePaths",
+        "truncatedArchiveScan",
+        "sourcePackageName",
+        "sourceInstallerPackageName",
+        "splitApkCount"
+      ],
+      "properties": {
+        "displayName": {
+          "type": "string"
+        },
+        "sourceKind": {
+          "type": "string",
+          "enum": [
+            "FILE",
+            "INSTALLED_APP"
+          ]
+        },
+        "sourcePackageName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sourceInstallerPackageName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "splitApkCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sizeBytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "archiveEntries": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "dexFiles": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "nativeLibraries": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "hasAndroidManifest": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "suspiciousArchivePaths": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "truncatedArchiveScan": {
+          "type": "boolean"
+        }
+      }
+    },
+    "manifest": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/manifest"
+        }
+      ]
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/finding"
+      }
+    },
+    "dex": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/dex"
+        }
+      ]
+    },
+    "native": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/native"
+        }
+      ]
+    },
+    "il2cpp": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/il2cpp"
+        }
+      ]
+    },
+    "runtimes": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/runtimeSummary"
+        }
+      ]
+    },
+    "runtimeArtifacts": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/runtimeArtifacts"
+        }
+      ]
+    },
+    "supplyChain": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/supplyChain"
+        }
+      ]
+    },
+    "ghidra": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ghidraLibraryAnalysis"
+      }
+    },
+    "correlations": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/crossRuntimeCorrelations"
+        }
+      ]
+    },
+    "resources": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/resourceTableSummary"
+        }
+      ]
+    },
+    "manifestDexReachability": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/manifestDexReachabilitySummary"
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "packageName",
+        "versionName",
+        "versionCode",
+        "minSdk",
+        "targetSdk",
+        "debuggable",
+        "allowBackup",
+        "fullBackupContentConfigured",
+        "dataExtractionRulesConfigured",
+        "usesCleartextTraffic",
+        "networkSecurityConfigConfigured",
+        "requestedPermissions",
+        "dangerousPermissions",
+        "declaredPermissions",
+        "signingCertificateSha256",
+        "signingCertificates",
+        "components",
+        "deepLinks",
+        "providers",
+        "signingSchemes",
+        "signingBlockIds",
+        "v1SignatureFiles",
+        "signingParseError",
+        "networkSecurity"
+      ],
+      "properties": {
+        "packageName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "versionName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "versionCode": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "minSdk": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "targetSdk": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "debuggable": {
+          "type": "boolean"
+        },
+        "allowBackup": {
+          "type": "boolean"
+        },
+        "fullBackupContentConfigured": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "dataExtractionRulesConfigured": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "usesCleartextTraffic": {
+          "type": "boolean"
+        },
+        "networkSecurityConfigConfigured": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "requestedPermissions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "dangerousPermissions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "signingCertificateSha256": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "components": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "name",
+              "exported",
+              "permissions"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "activity",
+                  "service",
+                  "receiver",
+                  "provider"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "exported": {
+                "type": "boolean"
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "declaredPermissions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "protectionLevel"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "protectionLevel": {
+                "enum": [
+                  "NORMAL",
+                  "DANGEROUS",
+                  "SIGNATURE",
+                  "OTHER",
+                  "UNKNOWN"
+                ]
+              }
+            }
+          }
+        },
+        "deepLinks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "componentName",
+              "schemes",
+              "hosts",
+              "ports",
+              "paths",
+              "pathPrefixes",
+              "pathPatterns",
+              "mimeTypes",
+              "autoVerify",
+              "browsable",
+              "viewAction"
+            ],
+            "properties": {
+              "componentName": {
+                "type": "string",
+                "minLength": 1
+              },
+              "schemes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "hosts": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "autoVerify": {
+                "type": "boolean"
+              },
+              "browsable": {
+                "type": "boolean"
+              },
+              "viewAction": {
+                "type": "boolean"
+              },
+              "ports": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "paths": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "pathPrefixes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "pathPatterns": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "mimeTypes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "networkSecurity": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "manifestReference",
+                "resolvedManifestEntry",
+                "configEntries",
+                "baseCleartextTrafficPermitted",
+                "domainConfigs",
+                "trustAnchors",
+                "debugOverridesPresent",
+                "pinSetPresent",
+                "parseErrors",
+                "truncated"
+              ],
+              "properties": {
+                "manifestReference": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "configEntries": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "baseCleartextTrafficPermitted": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "domainConfigs": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "cleartextTrafficPermitted",
+                      "includeSubdomains",
+                      "domains"
+                    ],
+                    "properties": {
+                      "cleartextTrafficPermitted": {
+                        "type": [
+                          "boolean",
+                          "null"
+                        ]
+                      },
+                      "includeSubdomains": {
+                        "type": "boolean"
+                      },
+                      "domains": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
+                "trustAnchors": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "source",
+                      "inDebugOverrides",
+                      "overridePins"
+                    ],
+                    "properties": {
+                      "source": {
+                        "type": "string"
+                      },
+                      "inDebugOverrides": {
+                        "type": "boolean"
+                      },
+                      "overridePins": {
+                        "type": [
+                          "boolean",
+                          "null"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "debugOverridesPresent": {
+                  "type": "boolean"
+                },
+                "pinSetPresent": {
+                  "type": "boolean"
+                },
+                "parseErrors": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "truncated": {
+                  "type": "boolean"
+                },
+                "resolvedManifestEntry": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "signingCertificates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "sha256",
+              "subjectDn",
+              "issuerDn",
+              "serialNumberHex",
+              "notBeforeEpochMs",
+              "notAfterEpochMs",
+              "signatureAlgorithm",
+              "publicKeyAlgorithm",
+              "publicKeySizeBits",
+              "currentSigner",
+              "lineageIndex"
+            ],
+            "properties": {
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "subjectDn": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "issuerDn": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "serialNumberHex": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "notBeforeEpochMs": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "notAfterEpochMs": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "signatureAlgorithm": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "publicKeyAlgorithm": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "publicKeySizeBits": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 1
+              },
+              "currentSigner": {
+                "type": "boolean"
+              },
+              "lineageIndex": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "providers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "authorities",
+              "exported",
+              "grantUriPermissions",
+              "readPermission",
+              "writePermission",
+              "pathPermissions"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "authorities": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "exported": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "grantUriPermissions": {
+                "type": "boolean"
+              },
+              "readPermission": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "writePermission": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "pathPermissions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "path",
+                    "pathPrefix",
+                    "pathPattern",
+                    "readPermission",
+                    "writePermission"
+                  ],
+                  "properties": {
+                    "path": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "pathPrefix": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "pathPattern": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "readPermission": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "writePermission": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "signingSchemes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "signingBlockIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "v1SignatureFiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "signingParseError": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "severity",
+        "confidence",
+        "category",
+        "description",
+        "requiresManualReview",
+        "remediation",
+        "evidence",
+        "references"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "severity": {
+          "enum": [
+            "CRITICAL",
+            "HIGH",
+            "MEDIUM",
+            "LOW",
+            "INFORMATIONAL"
+          ]
+        },
+        "confidence": {
+          "enum": [
+            "CONFIRMED",
+            "HIGH",
+            "MEDIUM",
+            "LOW"
+          ]
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requiresManualReview": {
+          "type": "boolean"
+        },
+        "remediation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "location",
+              "value"
+            ],
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "location": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "references": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "standard",
+              "id"
+            ],
+            "properties": {
+              "standard": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "dexStringReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dexEntry",
+        "stringIndex",
+        "value"
+      ],
+      "properties": {
+        "dexEntry": {
+          "type": "string",
+          "minLength": 1
+        },
+        "stringIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "value": {
+          "type": "string"
+        }
+      }
+    },
+    "secretCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "dexEntry",
+        "stringIndex",
+        "valueSha256",
+        "redactedPreview"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dexEntry": {
+          "type": "string",
+          "minLength": 1
+        },
+        "stringIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "valueSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "redactedPreview": {
+          "type": "string"
+        }
+      }
+    },
+    "dex": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dexFilesDiscovered",
+        "dexFilesScanned",
+        "stringsDeclared",
+        "stringsScanned",
+        "typesDeclared",
+        "typesIndexed",
+        "classesDeclared",
+        "classesIndexed",
+        "methodsDeclared",
+        "methodsIndexed",
+        "classes",
+        "methods",
+        "nativeMethods",
+        "codeMethods",
+        "callXrefs",
+        "stringXrefs",
+        "typeXrefs",
+        "parseErrors",
+        "truncated",
+        "httpUrls",
+        "httpsUrls",
+        "secretCandidates",
+        "fieldXrefs",
+        "basicBlocks",
+        "constants",
+        "invokeObservations"
+      ],
+      "properties": {
+        "dexFilesDiscovered": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dexFilesScanned": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stringsDeclared": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stringsScanned": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "parseErrors": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "httpUrls": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dexStringReference"
+          }
+        },
+        "httpsUrls": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dexStringReference"
+          }
+        },
+        "secretCandidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/secretCandidate"
+          }
+        },
+        "typesDeclared": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "typesIndexed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "classesDeclared": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "classesIndexed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "methodsDeclared": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "methodsIndexed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "classes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dexClass"
+          }
+        },
+        "methods": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dexMethod"
+          }
+        },
+        "nativeMethods": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dexNativeMethod"
+          }
+        },
+        "codeMethods": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dexMethodCode"
+          }
+        },
+        "callXrefs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dexCallXref"
+          }
+        },
+        "stringXrefs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dexStringXref"
+          }
+        },
+        "typeXrefs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dexTypeXref"
+          }
+        },
+        "fieldXrefs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dexFieldXref"
+          }
+        },
+        "basicBlocks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dexBasicBlock"
+          }
+        },
+        "constants": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dexConstant"
+          }
+        },
+        "invokeObservations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dexInvokeObservation"
+          }
+        }
+      }
+    },
+    "nativeSymbol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "libraryEntry",
+        "name",
+        "binding",
+        "symbolType",
+        "defined",
+        "virtualAddress",
+        "sizeBytes"
+      ],
+      "properties": {
+        "libraryEntry": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "binding": {
+          "type": "string"
+        },
+        "symbolType": {
+          "type": "string"
+        },
+        "defined": {
+          "type": "boolean"
+        },
+        "virtualAddress": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "sizeBytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
+    "nativeLibrary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entryName",
+        "abi",
+        "elfClass",
+        "machine",
+        "fileType",
+        "sizeBytes",
+        "buildId",
+        "neededLibraries",
+        "importedSymbols",
+        "exportedSymbols",
+        "jniSymbols",
+        "hasJniOnLoad",
+        "registerNativesIndicator",
+        "executableStack",
+        "hasGnuRelro",
+        "bindNow",
+        "hasStackCanaryImport",
+        "stripped",
+        "httpUrls",
+        "secretCandidates",
+        "parseError",
+        "truncated"
+      ],
+      "properties": {
+        "entryName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "abi": {
+          "type": "string"
+        },
+        "elfClass": {
+          "type": "string"
+        },
+        "machine": {
+          "type": "string"
+        },
+        "fileType": {
+          "type": "string"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "buildId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "neededLibraries": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "importedSymbols": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nativeSymbol"
+          }
+        },
+        "exportedSymbols": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nativeSymbol"
+          }
+        },
+        "jniSymbols": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "hasJniOnLoad": {
+          "type": "boolean"
+        },
+        "registerNativesIndicator": {
+          "type": "boolean"
+        },
+        "executableStack": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "hasGnuRelro": {
+          "type": "boolean"
+        },
+        "bindNow": {
+          "type": "boolean"
+        },
+        "hasStackCanaryImport": {
+          "type": "boolean"
+        },
+        "stripped": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "httpUrls": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "parseError": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "secretCandidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nativeSecretCandidate"
+          }
+        }
+      }
+    },
+    "native": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "librariesDiscovered",
+        "librariesScanned",
+        "parseErrors",
+        "truncated",
+        "jniBridges",
+        "libraries"
+      ],
+      "properties": {
+        "librariesDiscovered": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "librariesScanned": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "parseErrors": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "libraries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nativeLibrary"
+          }
+        },
+        "jniBridges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/jniBridge"
+          }
+        }
+      }
+    },
+    "dexClass": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dexEntry",
+        "classIndex",
+        "descriptor",
+        "superDescriptor",
+        "accessFlags"
+      ],
+      "properties": {
+        "dexEntry": {
+          "type": "string"
+        },
+        "classIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "descriptor": {
+          "type": "string"
+        },
+        "superDescriptor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "accessFlags": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "dexMethod": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dexEntry",
+        "methodIndex",
+        "declaringClass",
+        "name",
+        "prototype"
+      ],
+      "properties": {
+        "dexEntry": {
+          "type": "string"
+        },
+        "methodIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "declaringClass": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "prototype": {
+          "type": "string"
+        }
+      }
+    },
+    "dexNativeMethod": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dexEntry",
+        "methodIndex",
+        "declaringClass",
+        "name",
+        "prototype",
+        "accessFlags"
+      ],
+      "properties": {
+        "dexEntry": {
+          "type": "string"
+        },
+        "methodIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "declaringClass": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "prototype": {
+          "type": "string"
+        },
+        "accessFlags": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "jniBridge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dexEntry",
+        "declaringClass",
+        "methodName",
+        "prototype",
+        "resolution",
+        "libraryEntry",
+        "nativeSymbol"
+      ],
+      "properties": {
+        "dexEntry": {
+          "type": "string"
+        },
+        "declaringClass": {
+          "type": "string"
+        },
+        "methodName": {
+          "type": "string"
+        },
+        "prototype": {
+          "type": "string"
+        },
+        "resolution": {
+          "enum": [
+            "STATIC_SYMBOL_MATCH",
+            "DYNAMIC_REGISTRATION_POSSIBLE",
+            "UNRESOLVED"
+          ]
+        },
+        "libraryEntry": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "nativeSymbol": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "nativeSecretCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "libraryEntry",
+        "valueSha256",
+        "redactedPreview"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "libraryEntry": {
+          "type": "string",
+          "minLength": 1
+        },
+        "valueSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "redactedPreview": {
+          "type": "string"
+        }
+      }
+    },
+    "dexMethodCode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dexEntry",
+        "methodIndex",
+        "declaringClass",
+        "name",
+        "prototype",
+        "codeOffset",
+        "registersSize",
+        "insSize",
+        "outsSize",
+        "triesSize",
+        "instructionUnits"
+      ],
+      "properties": {
+        "dexEntry": {
+          "type": "string",
+          "minLength": 1
+        },
+        "methodIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "declaringClass": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "prototype": {
+          "type": "string"
+        },
+        "codeOffset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "registersSize": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "insSize": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "outsSize": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "triesSize": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "instructionUnits": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "dexCallXref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dexEntry",
+        "callerMethodIndex",
+        "callerClass",
+        "callerName",
+        "calleeMethodIndex",
+        "calleeClass",
+        "calleeName",
+        "calleePrototype",
+        "instructionOffsetCodeUnits"
+      ],
+      "properties": {
+        "dexEntry": {
+          "type": "string",
+          "minLength": 1
+        },
+        "callerMethodIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "callerClass": {
+          "type": "string"
+        },
+        "callerName": {
+          "type": "string"
+        },
+        "calleeMethodIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "calleeClass": {
+          "type": "string"
+        },
+        "calleeName": {
+          "type": "string"
+        },
+        "calleePrototype": {
+          "type": "string"
+        },
+        "instructionOffsetCodeUnits": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "dexStringXref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dexEntry",
+        "callerMethodIndex",
+        "callerClass",
+        "callerName",
+        "stringIndex",
+        "value",
+        "instructionOffsetCodeUnits"
+      ],
+      "properties": {
+        "dexEntry": {
+          "type": "string",
+          "minLength": 1
+        },
+        "callerMethodIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "callerClass": {
+          "type": "string"
+        },
+        "callerName": {
+          "type": "string"
+        },
+        "stringIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "value": {
+          "type": "string"
+        },
+        "instructionOffsetCodeUnits": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "dexTypeXref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dexEntry",
+        "callerMethodIndex",
+        "callerClass",
+        "callerName",
+        "typeIndex",
+        "descriptor",
+        "kind",
+        "instructionOffsetCodeUnits"
+      ],
+      "properties": {
+        "dexEntry": {
+          "type": "string",
+          "minLength": 1
+        },
+        "callerMethodIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "callerClass": {
+          "type": "string"
+        },
+        "callerName": {
+          "type": "string"
+        },
+        "typeIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "descriptor": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "instructionOffsetCodeUnits": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "il2cppMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entryName",
+        "sizeBytes",
+        "magicValid",
+        "metadataVersion",
+        "headerPairsScanned",
+        "assemblyNameCandidates",
+        "managedNameCandidates",
+        "unityVersionCandidates",
+        "parseError",
+        "truncated",
+        "layoutProfile",
+        "tableRanges",
+        "typeDefinitions",
+        "methodDefinitions",
+        "reconstructionTruncated"
+      ],
+      "properties": {
+        "entryName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "magicValid": {
+          "type": "boolean"
+        },
+        "metadataVersion": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "headerPairsScanned": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "assemblyNameCandidates": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "managedNameCandidates": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "unityVersionCandidates": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "parseError": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "layoutProfile": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tableRanges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/il2cppTableRange"
+          }
+        },
+        "typeDefinitions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/il2cppTypeDefinition"
+          }
+        },
+        "methodDefinitions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/il2cppMethodDefinition"
+          }
+        },
+        "reconstructionTruncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "il2cpp": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "detected",
+        "confidence",
+        "parseErrors",
+        "truncated",
+        "libil2cppLibraries",
+        "il2cppApiSymbols",
+        "registrationIndicators",
+        "registrationCandidates",
+        "metadata"
+      ],
+      "properties": {
+        "detected": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW"
+          ]
+        },
+        "parseErrors": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "libil2cppLibraries": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "il2cppApiSymbols": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "registrationIndicators": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/il2cppMetadata"
+            }
+          ]
+        },
+        "registrationCandidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/il2cppRegistrationCandidate"
+          }
+        }
+      }
+    },
+    "dexFieldXref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dexEntry",
+        "callerMethodIndex",
+        "callerClass",
+        "callerName",
+        "fieldIndex",
+        "declaringClass",
+        "fieldName",
+        "fieldType",
+        "kind",
+        "instructionOffsetCodeUnits"
+      ],
+      "properties": {
+        "dexEntry": {
+          "type": "string"
+        },
+        "callerMethodIndex": {
+          "type": "integer"
+        },
+        "callerClass": {
+          "type": "string"
+        },
+        "callerName": {
+          "type": "string"
+        },
+        "fieldIndex": {
+          "type": "integer"
+        },
+        "declaringClass": {
+          "type": "string"
+        },
+        "fieldName": {
+          "type": "string"
+        },
+        "fieldType": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "instructionOffsetCodeUnits": {
+          "type": "integer"
+        }
+      }
+    },
+    "dexBasicBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dexEntry",
+        "methodIndex",
+        "blockIndex",
+        "startCodeUnit",
+        "endCodeUnitExclusive",
+        "successorCodeUnits",
+        "terminalKind"
+      ],
+      "properties": {
+        "dexEntry": {
+          "type": "string"
+        },
+        "methodIndex": {
+          "type": "integer"
+        },
+        "blockIndex": {
+          "type": "integer"
+        },
+        "startCodeUnit": {
+          "type": "integer"
+        },
+        "endCodeUnitExclusive": {
+          "type": "integer"
+        },
+        "successorCodeUnits": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "terminalKind": {
+          "type": "string"
+        }
+      }
+    },
+    "dexConstant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dexEntry",
+        "methodIndex",
+        "register",
+        "kind",
+        "value",
+        "instructionOffsetCodeUnits"
+      ],
+      "properties": {
+        "dexEntry": {
+          "type": "string"
+        },
+        "methodIndex": {
+          "type": "integer"
+        },
+        "register": {
+          "type": "integer"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "instructionOffsetCodeUnits": {
+          "type": "integer"
+        }
+      }
+    },
+    "runtimeProfileDetection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "confidence",
+        "indicators"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "string"
+        },
+        "indicators": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "runtimeSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profiles"
+      ],
+      "properties": {
+        "profiles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/runtimeProfileDetection"
+          }
+        }
+      }
+    },
+    "dexInvokeArgument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "argumentIndex",
+        "register",
+        "kind",
+        "value"
+      ],
+      "properties": {
+        "argumentIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "register": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      }
+    },
+    "dexInvokeObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dexEntry",
+        "callerMethodIndex",
+        "callerClass",
+        "callerName",
+        "calleeMethodIndex",
+        "calleeClass",
+        "calleeName",
+        "calleePrototype",
+        "instructionOffsetCodeUnits",
+        "arguments"
+      ],
+      "properties": {
+        "dexEntry": {
+          "type": "string"
+        },
+        "callerMethodIndex": {
+          "type": "integer"
+        },
+        "callerClass": {
+          "type": "string"
+        },
+        "callerName": {
+          "type": "string"
+        },
+        "calleeMethodIndex": {
+          "type": "integer"
+        },
+        "calleeClass": {
+          "type": "string"
+        },
+        "calleeName": {
+          "type": "string"
+        },
+        "calleePrototype": {
+          "type": "string"
+        },
+        "instructionOffsetCodeUnits": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "arguments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dexInvokeArgument"
+          }
+        }
+      }
+    },
+    "il2cppTableRange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "offset",
+        "sizeBytes"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "il2cppTypeDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "namespace",
+        "name",
+        "fullName",
+        "methodStart",
+        "methodCount",
+        "fieldStart",
+        "fieldCount",
+        "token"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "fullName": {
+          "type": "string"
+        },
+        "methodStart": {
+          "type": "integer"
+        },
+        "methodCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fieldStart": {
+          "type": "integer"
+        },
+        "fieldCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "token": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "il2cppMethodDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "declaringTypeIndex",
+        "declaringType",
+        "name",
+        "parameterCount",
+        "token",
+        "flags"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "declaringTypeIndex": {
+          "type": "integer"
+        },
+        "declaringType": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parameterCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "token": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "flags": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "runtimeFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entryName",
+        "sizeBytes"
+      ],
+      "properties": {
+        "entryName": {
+          "type": "string"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "hermesBytecode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entryName",
+        "sizeBytes",
+        "magicValid",
+        "bytecodeVersion",
+        "declaredFileLength",
+        "globalCodeIndex",
+        "functionCount",
+        "stringKindCount",
+        "identifierCount",
+        "stringCount",
+        "overflowStringCount",
+        "stringStorageSize",
+        "bigIntCount",
+        "regExpCount",
+        "literalValueBufferSize",
+        "objKeyBufferSize",
+        "objShapeTableCount",
+        "segmentId",
+        "cjsModuleCount",
+        "functionSourceCount",
+        "debugInfoOffset",
+        "staticBuiltins",
+        "structuredPrefixBytes",
+        "functionsScanned",
+        "functions",
+        "sourceHashSha1",
+        "parseError",
+        "truncated"
+      ],
+      "properties": {
+        "entryName": {
+          "type": "string"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "magicValid": {
+          "type": "boolean"
+        },
+        "bytecodeVersion": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "declaredFileLength": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "globalCodeIndex": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "functionCount": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "identifierCount": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "stringCount": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "sourceHashSha1": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parseError": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "stringKindCount": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "overflowStringCount": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "stringStorageSize": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "bigIntCount": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "regExpCount": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "literalValueBufferSize": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "objKeyBufferSize": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "objShapeTableCount": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "segmentId": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "cjsModuleCount": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "functionSourceCount": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "debugInfoOffset": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "structuredPrefixBytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "staticBuiltins": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "functionsScanned": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "functions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hermesFunction"
+          }
+        }
+      }
+    },
+    "managedAssembly": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entryName",
+        "sizeBytes",
+        "peValid",
+        "cliMetadataPresent",
+        "metadataVersion",
+        "assemblyName",
+        "assemblyVersion",
+        "nameCandidates",
+        "metadataStreams",
+        "metadataTables",
+        "typeReferences",
+        "typeDefinitions",
+        "methodDefinitions",
+        "memberReferences",
+        "assemblyReferences",
+        "reconstructionTruncated",
+        "parseError",
+        "truncated"
+      ],
+      "properties": {
+        "entryName": {
+          "type": "string"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "peValid": {
+          "type": "boolean"
+        },
+        "cliMetadataPresent": {
+          "type": "boolean"
+        },
+        "metadataVersion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "nameCandidates": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "parseError": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "metadataStreams": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/managedMetadataStream"
+          }
+        },
+        "metadataTables": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/managedMetadataTable"
+          }
+        },
+        "assemblyName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "assemblyVersion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "typeReferences": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/managedTypeReference"
+          }
+        },
+        "typeDefinitions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/managedTypeDefinition"
+          }
+        },
+        "methodDefinitions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/managedMethodDefinition"
+          }
+        },
+        "memberReferences": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/managedMemberReference"
+          }
+        },
+        "assemblyReferences": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/managedAssemblyReference"
+          }
+        },
+        "reconstructionTruncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "unrealContainer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entryName",
+        "kind",
+        "sizeBytes",
+        "probeSha256",
+        "probeBytes"
+      ],
+      "properties": {
+        "entryName": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "probeSha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "probeBytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "runtimeArtifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "flutter",
+        "hermes",
+        "unityMono",
+        "unreal"
+      ],
+      "properties": {
+        "flutter": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/flutterRuntime"
+            }
+          ]
+        },
+        "hermes": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/hermesRuntime"
+            }
+          ]
+        },
+        "unityMono": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/unityMonoRuntime"
+            }
+          ]
+        },
+        "unreal": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/unrealRuntime"
+            }
+          ]
+        }
+      }
+    },
+    "flutterRuntime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "detected",
+        "confidence",
+        "flutterLibraries",
+        "appLibraries",
+        "engineBuildIds",
+        "assetCount",
+        "representativeAssets",
+        "manifestEntries",
+        "snapshotEntries",
+        "kernelBlobEntries",
+        "aotLikely",
+        "artifactFingerprints",
+        "truncated"
+      ],
+      "properties": {
+        "detected": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "string"
+        },
+        "flutterLibraries": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "appLibraries": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "engineBuildIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "assetCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "representativeAssets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/runtimeFile"
+          }
+        },
+        "manifestEntries": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "snapshotEntries": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "kernelBlobEntries": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "aotLikely": {
+          "type": "boolean"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "artifactFingerprints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/runtimeArtifactFingerprint"
+          }
+        }
+      }
+    },
+    "hermesRuntime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "detected",
+        "confidence",
+        "hermesLibraries",
+        "bytecodeFiles",
+        "javascriptBundles",
+        "truncated"
+      ],
+      "properties": {
+        "detected": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "string"
+        },
+        "hermesLibraries": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "bytecodeFiles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hermesBytecode"
+          }
+        },
+        "javascriptBundles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/runtimeFile"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "unityMonoRuntime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "detected",
+        "confidence",
+        "monoLibraries",
+        "unityLibraries",
+        "assemblies",
+        "truncated"
+      ],
+      "properties": {
+        "detected": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "string"
+        },
+        "monoLibraries": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "unityLibraries": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "assemblies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/managedAssembly"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "unrealRuntime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "detected",
+        "confidence",
+        "engineLibraries",
+        "containers",
+        "obbEntries",
+        "commandLineEntries",
+        "truncated"
+      ],
+      "properties": {
+        "detected": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "string"
+        },
+        "engineLibraries": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "containers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/unrealContainer"
+          }
+        },
+        "obbEntries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/runtimeFile"
+          }
+        },
+        "commandLineEntries": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "il2cppRegistrationCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "libraryEntry",
+        "symbolName",
+        "virtualAddress",
+        "sizeBytes",
+        "validatedDefinedSymbol"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "libraryEntry": {
+          "type": "string"
+        },
+        "symbolName": {
+          "type": "string"
+        },
+        "virtualAddress": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "sizeBytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "validatedDefinedSymbol": {
+          "type": "boolean"
+        }
+      }
+    },
+    "runtimeArtifactFingerprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entryName",
+        "kind",
+        "sizeBytes",
+        "sha256"
+      ],
+      "properties": {
+        "entryName": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "managedMetadataStream": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "offset",
+        "sizeBytes"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "managedMetadataTable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tableId",
+        "name",
+        "rowCount"
+      ],
+      "properties": {
+        "tableId": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 63
+        },
+        "name": {
+          "type": "string"
+        },
+        "rowCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "dependencyComponent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "ecosystem",
+        "version",
+        "purl",
+        "confidence",
+        "versionEvidence",
+        "evidence"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "ecosystem": {
+          "type": "string"
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "purl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confidence": {
+          "type": "string"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "versionEvidence": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "supplyChain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "components",
+        "nativeDependencies",
+        "truncated",
+        "advisoryFeed",
+        "vulnerabilities"
+      ],
+      "properties": {
+        "components": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dependencyComponent"
+          }
+        },
+        "nativeDependencies": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "advisoryFeed": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "feedId",
+                "source",
+                "generatedAt",
+                "sha256",
+                "advisoryCount",
+                "format",
+                "adapterVersion",
+                "skippedAdvisoryCount",
+                "signatureVerified",
+                "signingKeyId",
+                "signatureAlgorithm",
+                "envelopeSha256"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "1.0"
+                },
+                "feedId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "source": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "generatedAt": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "advisoryCount": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "format": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "adapterVersion": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 80
+                },
+                "skippedAdvisoryCount": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "signatureVerified": {
+                  "type": "boolean"
+                },
+                "signingKeyId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 128
+                },
+                "signatureAlgorithm": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 32
+                },
+                "envelopeSha256": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              }
+            }
+          ]
+        },
+        "vulnerabilities": {
+          "type": "array",
+          "maxItems": 2000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "advisoryId",
+              "aliases",
+              "componentId",
+              "componentVersion",
+              "severity",
+              "summary",
+              "source",
+              "matchBasis"
+            ],
+            "properties": {
+              "advisoryId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "aliases": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "componentId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "componentVersion": {
+                "type": "string",
+                "minLength": 1
+              },
+              "severity": {
+                "enum": [
+                  "CRITICAL",
+                  "HIGH",
+                  "MEDIUM",
+                  "LOW",
+                  "INFORMATIONAL"
+                ]
+              },
+              "summary": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string",
+                "minLength": 1
+              },
+              "matchBasis": {
+                "oneOf": [
+                  {
+                    "const": "EXACT_COMPONENT_VERSION"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^ECOSYSTEM_VERSION_RANGE:[A-Z0-9_]+:.{1,160}$",
+                    "maxLength": 256
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "hermesFunction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "bytecodeOffset",
+        "bytecodeSizeBytes",
+        "parameterCount",
+        "loopDepth",
+        "functionNameId",
+        "frameSize",
+        "strictMode",
+        "hasExceptionHandler",
+        "hasDebugInfo",
+        "overflowed",
+        "largeHeaderOffset"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bytecodeOffset": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "bytecodeSizeBytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "parameterCount": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "loopDepth": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "functionNameId": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "frameSize": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "strictMode": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "hasExceptionHandler": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "hasDebugInfo": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "overflowed": {
+          "type": "boolean"
+        },
+        "largeHeaderOffset": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
+    "managedTypeReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "namespace",
+        "name",
+        "fullName",
+        "resolutionScopeToken"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "fullName": {
+          "type": "string"
+        },
+        "resolutionScopeToken": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
+    "managedTypeDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "namespace",
+        "name",
+        "fullName",
+        "flags",
+        "extendsToken",
+        "fieldStart",
+        "fieldCount",
+        "methodStart",
+        "methodCount"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "fullName": {
+          "type": "string"
+        },
+        "flags": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "extendsToken": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "fieldStart": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fieldCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "methodStart": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "methodCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "managedMethodDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "declaringType",
+        "rva",
+        "implFlags",
+        "flags",
+        "name",
+        "signatureBlobIndex",
+        "paramStart"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "declaringType": {
+          "type": "string"
+        },
+        "rva": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "implFlags": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "flags": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "name": {
+          "type": "string"
+        },
+        "signatureBlobIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "paramStart": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "managedMemberReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "parentToken",
+        "name",
+        "signatureBlobIndex"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "parentToken": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "name": {
+          "type": "string"
+        },
+        "signatureBlobIndex": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "managedAssemblyReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "name",
+        "version",
+        "culture",
+        "flags"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "culture": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "flags": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "ghidraLibraryAnalysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "assessmentId",
+        "artifactSha256",
+        "libraryEntry",
+        "status",
+        "engine",
+        "architecture",
+        "coverage",
+        "functions",
+        "cfg",
+        "xrefs",
+        "jniRegistrations",
+        "il2cppRegistrations",
+        "il2cppCodegenCalls",
+        "il2cppPointerTables",
+        "il2cppCodegenModules",
+        "warnings"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "enum": [
+            "1.1",
+            "1.2",
+            "1.3"
+          ]
+        },
+        "assessmentId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "artifactSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "libraryEntry": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "COMPLETE",
+            "PARTIAL",
+            "FAILED"
+          ]
+        },
+        "engine": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "version",
+            "pyGhidra",
+            "analysisProfile"
+          ],
+          "properties": {
+            "name": {
+              "const": "Ghidra"
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1
+            },
+            "pyGhidra": {
+              "type": "boolean"
+            },
+            "analysisProfile": {
+              "enum": [
+                "DEFAULT",
+                "DEEP"
+              ]
+            }
+          }
+        },
+        "coverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "functionsDiscovered",
+            "functionsReported",
+            "cfgBlocksReported",
+            "xrefsReported",
+            "decompilerFunctionsReported",
+            "truncated"
+          ],
+          "properties": {
+            "functionsDiscovered": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "functionsReported": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "cfgBlocksReported": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "xrefsReported": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "decompilerFunctionsReported": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          }
+        },
+        "functions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "rva",
+              "name",
+              "namespace",
+              "signature",
+              "sizeBytes",
+              "isThunk",
+              "decompilerPreview"
+            ],
+            "properties": {
+              "rva": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "signature": {
+                "type": "string"
+              },
+              "sizeBytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "isThunk": {
+                "type": "boolean"
+              },
+              "decompilerPreview": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "cfg": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "functionRva",
+              "blocks",
+              "edges"
+            ],
+            "properties": {
+              "functionRva": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "blocks": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "startRva",
+                    "endRva",
+                    "flowType"
+                  ],
+                  "properties": {
+                    "startRva": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "endRva": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "flowType": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "edges": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "fromRva",
+                    "toRva",
+                    "kind"
+                  ],
+                  "properties": {
+                    "fromRva": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "toRva": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "kind": {
+                      "enum": [
+                        "FALL_THROUGH",
+                        "CONDITIONAL",
+                        "UNCONDITIONAL",
+                        "CALL",
+                        "COMPUTED",
+                        "OTHER"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "xrefs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "fromRva",
+              "toRva",
+              "kind"
+            ],
+            "properties": {
+              "fromRva": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "toRva": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "kind": {
+                "enum": [
+                  "CALL",
+                  "JUMP",
+                  "DATA",
+                  "READ",
+                  "WRITE",
+                  "OTHER"
+                ]
+              }
+            }
+          }
+        },
+        "jniRegistrations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "className",
+              "methodName",
+              "signature",
+              "functionRva",
+              "confidence",
+              "tableRva",
+              "registerNativesCallsiteRva",
+              "findClassCallsiteRva",
+              "classEvidence"
+            ],
+            "properties": {
+              "source": {
+                "enum": [
+                  "STATIC_EXPORT",
+                  "REGISTER_NATIVES_TABLE"
+                ]
+              },
+              "className": {
+                "type": "string"
+              },
+              "methodName": {
+                "type": "string"
+              },
+              "signature": {
+                "type": "string"
+              },
+              "functionRva": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "confidence": {
+                "enum": [
+                  "HIGH",
+                  "MEDIUM",
+                  "LOW"
+                ]
+              },
+              "tableRva": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "registerNativesCallsiteRva": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "findClassCallsiteRva": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "classEvidence": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 128
+              }
+            }
+          }
+        },
+        "il2cppRegistrations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "rva",
+              "symbolName",
+              "evidence",
+              "confidence"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "CODE_REGISTRATION",
+                  "METADATA_REGISTRATION",
+                  "CODEGEN_REGISTER"
+                ]
+              },
+              "rva": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "symbolName": {
+                "type": "string"
+              },
+              "evidence": {
+                "enum": [
+                  "DEFINED_SYMBOL",
+                  "CALLSITE_REFERENCE",
+                  "STRUCTURAL_CANDIDATE"
+                ]
+              },
+              "confidence": {
+                "enum": [
+                  "HIGH",
+                  "MEDIUM",
+                  "LOW"
+                ]
+              }
+            }
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "architecture": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "processor",
+                "pointerSize",
+                "endian"
+              ],
+              "properties": {
+                "processor": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "pointerSize": {
+                  "enum": [
+                    4,
+                    8
+                  ]
+                },
+                "endian": {
+                  "enum": [
+                    "LITTLE",
+                    "BIG"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "il2cppCodegenCalls": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "callsiteRva",
+              "codeRegistrationRva",
+              "metadataRegistrationRva",
+              "codegenOptionsRva",
+              "evidence",
+              "confidence"
+            ],
+            "properties": {
+              "callsiteRva": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "codeRegistrationRva": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "metadataRegistrationRva": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "codegenOptionsRva": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "evidence": {
+                "const": "DECOMPILER_PCODE_CALL_ARGUMENTS"
+              },
+              "confidence": {
+                "enum": [
+                  "HIGH",
+                  "MEDIUM",
+                  "LOW"
+                ]
+              }
+            }
+          }
+        },
+        "il2cppPointerTables": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "ownerRva",
+              "fieldOffsetBytes",
+              "entryCount",
+              "tableRva",
+              "sampledEntries",
+              "executableEntries",
+              "sampleFunctionRvas",
+              "confidence"
+            ],
+            "properties": {
+              "ownerRva": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "fieldOffsetBytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4096
+              },
+              "entryCount": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5000000
+              },
+              "tableRva": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sampledEntries": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 32
+              },
+              "executableEntries": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 32
+              },
+              "sampleFunctionRvas": {
+                "type": "array",
+                "maxItems": 16,
+                "uniqueItems": true,
+                "items": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "confidence": {
+                "enum": [
+                  "HIGH",
+                  "MEDIUM"
+                ]
+              }
+            }
+          }
+        },
+        "il2cppCodegenModules": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "ownerCodeRegistrationRva",
+              "moduleRva",
+              "moduleName",
+              "methodPointerCount",
+              "methodPointersRva",
+              "sampledMethodPointers",
+              "evidence",
+              "confidence"
+            ],
+            "properties": {
+              "ownerCodeRegistrationRva": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "moduleRva": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "moduleName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "methodPointerCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 5000000
+              },
+              "methodPointersRva": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sampledMethodPointers": {
+                "type": "array",
+                "maxItems": 4096,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "slotIndex",
+                    "functionRva"
+                  ],
+                  "properties": {
+                    "slotIndex": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "functionRva": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              },
+              "evidence": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "confidence": {
+                "enum": [
+                  "LOW",
+                  "MEDIUM",
+                  "HIGH"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "jniNativeCorrelation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dexEntry",
+        "dexMethodIndex",
+        "declaringClass",
+        "methodName",
+        "prototype",
+        "libraryEntry",
+        "functionRva",
+        "functionName",
+        "source",
+        "confidence",
+        "evidence"
+      ],
+      "properties": {
+        "dexEntry": {
+          "type": "string"
+        },
+        "dexMethodIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "declaringClass": {
+          "type": "string"
+        },
+        "methodName": {
+          "type": "string"
+        },
+        "prototype": {
+          "type": "string"
+        },
+        "libraryEntry": {
+          "type": "string"
+        },
+        "functionRva": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "functionName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "type": "string"
+        },
+        "confidence": {
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW"
+          ]
+        },
+        "evidence": {
+          "type": "string"
+        }
+      }
+    },
+    "il2cppRegistrationCorrelation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "libraryEntry",
+        "staticSymbolName",
+        "staticVirtualAddress",
+        "ghidraSymbolName",
+        "ghidraRva",
+        "evidence",
+        "confidence"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "libraryEntry": {
+          "type": "string"
+        },
+        "staticSymbolName": {
+          "type": "string"
+        },
+        "staticVirtualAddress": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "ghidraSymbolName": {
+          "type": "string"
+        },
+        "ghidraRva": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "evidence": {
+          "type": "string"
+        },
+        "confidence": {
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW"
+          ]
+        }
+      }
+    },
+    "il2cppMethodNativeCorrelation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "metadataEntry",
+        "methodIndex",
+        "declaringType",
+        "methodName",
+        "token",
+        "libraryEntry",
+        "functionRva",
+        "functionName",
+        "evidence",
+        "confidence"
+      ],
+      "properties": {
+        "metadataEntry": {
+          "type": "string"
+        },
+        "methodIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "declaringType": {
+          "type": "string"
+        },
+        "methodName": {
+          "type": "string"
+        },
+        "token": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "libraryEntry": {
+          "type": "string"
+        },
+        "functionRva": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "functionName": {
+          "type": "string"
+        },
+        "evidence": {
+          "type": "string"
+        },
+        "confidence": {
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW"
+          ]
+        }
+      }
+    },
+    "crossRuntimeCorrelations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dexNativeMethodsConsidered",
+        "dexNativeMethodsResolved",
+        "il2cppMethodsConsidered",
+        "il2cppMethodsResolved",
+        "truncated",
+        "jniNative",
+        "il2cppRegistrations",
+        "il2cppMethods"
+      ],
+      "properties": {
+        "dexNativeMethodsConsidered": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dexNativeMethodsResolved": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "il2cppMethodsConsidered": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "il2cppMethodsResolved": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "jniNative": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/jniNativeCorrelation"
+          }
+        },
+        "il2cppRegistrations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/il2cppRegistrationCorrelation"
+          }
+        },
+        "il2cppMethods": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/il2cppMethodNativeCorrelation"
+          }
+        }
+      }
+    },
+    "resourceTableSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "packages",
+        "parseErrors",
+        "truncated",
+        "resolutions",
+        "referenceChains",
+        "sources"
+      ],
+      "properties": {
+        "packages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "parseErrors": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "resolutions": {
+          "type": "array",
+          "maxItems": 200000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "resourceId",
+              "packageId",
+              "typeId",
+              "entryId",
+              "packageName",
+              "typeName",
+              "entryName",
+              "dataType",
+              "dataValue",
+              "stringValue",
+              "fileEntry",
+              "complex",
+              "parentResourceId",
+              "mapEntryCount",
+              "sourceArchive",
+              "configurationSha256"
+            ],
+            "properties": {
+              "resourceId": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              "packageId": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 255
+              },
+              "typeId": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 255
+              },
+              "entryId": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 65535
+              },
+              "packageName": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "typeName": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "entryName": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "dataType": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 255
+              },
+              "dataValue": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              "stringValue": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "fileEntry": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "complex": {
+                "type": "boolean"
+              },
+              "parentResourceId": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              "mapEntryCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 65536
+              },
+              "sourceArchive": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              "configurationSha256": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
+          }
+        },
+        "referenceChains": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "requestedResourceId",
+              "terminalResourceId",
+              "terminalFileEntry",
+              "cycleDetected",
+              "depthExceeded",
+              "unresolved",
+              "hops",
+              "ambiguousVariant",
+              "sourceArchive",
+              "configurationSha256"
+            ],
+            "properties": {
+              "requestedResourceId": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              "terminalResourceId": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              "terminalFileEntry": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "cycleDetected": {
+                "type": "boolean"
+              },
+              "depthExceeded": {
+                "type": "boolean"
+              },
+              "unresolved": {
+                "type": "boolean"
+              },
+              "hops": {
+                "type": "array",
+                "maxItems": 16,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "resourceId",
+                    "dataType",
+                    "dataValue",
+                    "typeName",
+                    "entryName",
+                    "stringValue",
+                    "fileEntry",
+                    "sourceArchive",
+                    "configurationSha256"
+                  ],
+                  "properties": {
+                    "resourceId": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 4294967295
+                    },
+                    "dataType": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 255
+                    },
+                    "dataValue": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 4294967295
+                    },
+                    "typeName": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "entryName": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "stringValue": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "fileEntry": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "sourceArchive": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "configurationSha256": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "pattern": "^[0-9a-f]{64}$"
+                    }
+                  }
+                }
+              },
+              "ambiguousVariant": {
+                "type": "boolean"
+              },
+              "sourceArchive": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "configurationSha256": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
+          }
+        },
+        "sources": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "sourceArchive",
+              "packages",
+              "resolutionCount",
+              "configurationCount",
+              "parseErrors",
+              "truncated"
+            ],
+            "properties": {
+              "sourceArchive": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              "packages": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "resolutionCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "configurationCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "parseErrors": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "truncated": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    },
+    "manifestDexReachabilitySummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "externallyAddressableComponents",
+        "reachableMethods",
+        "truncated",
+        "components"
+      ],
+      "properties": {
+        "externallyAddressableComponents": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reachableMethods": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "components": {
+          "type": "array",
+          "maxItems": 2000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "componentKind",
+              "componentName",
+              "classDescriptor",
+              "exported",
+              "externallyAddressable",
+              "classPresent",
+              "entryMethodIndexes",
+              "reachableMethodIndexes",
+              "reachableMethodCount",
+              "maxDepthReached",
+              "truncated"
+            ],
+            "properties": {
+              "componentKind": {
+                "type": "string"
+              },
+              "componentName": {
+                "type": "string"
+              },
+              "classDescriptor": {
+                "type": "string"
+              },
+              "exported": {
+                "type": "boolean"
+              },
+              "externallyAddressable": {
+                "type": "boolean"
+              },
+              "classPresent": {
+                "type": "boolean"
+              },
+              "entryMethodIndexes": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "reachableMethodIndexes": {
+                "type": "array",
+                "maxItems": 10000,
+                "items": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "reachableMethodCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "maxDepthReached": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "truncated": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

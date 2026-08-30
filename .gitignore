@@ -1,0 +1,20 @@
+.gradle/
+.idea/
+*.iml
+local.properties
+/build/
+**/build/
+.externalNativeBuild/
+.cxx/
+__pycache__/
+.pytest_cache/
+.venv/
+target/
+.DS_Store
+
+# Optional repository-local toolchain cache
+.unirevlab-toolchain/
+
+# Local coordinator SQLite state
+.unirevlab/
+**/.unirevlab/
