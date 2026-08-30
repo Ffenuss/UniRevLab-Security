@@ -112,9 +112,11 @@ object RuntimeArtifactScanner {
         for (entry in entries) {
             val n = entry.name.lowercase()
             val base = n.substringAfterLast('/')
-            if (n.contains("flutter_assets/")) flutterAssets += entry
-            if (base == "vm_snapshot_data" || base == "vm_snapshot_instr" || base == "isolate_snapshot_data" || base == "isolate_snapshot_instr") snapshots += entry
-            if (base == "kernel_blob.bin" || base.endsWith(".dill")) kernels += entry
+            val isFlutterSnapshot = base == "vm_snapshot_data" || base == "vm_snapshot_instr" || base == "isolate_snapshot_data" || base == "isolate_snapshot_instr"
+            val isFlutterKernel = base == "kernel_blob.bin" || base.endsWith(".dill")
+            if (n.contains("flutter_assets/") && !isFlutterSnapshot && !isFlutterKernel) flutterAssets += entry
+            if (isFlutterSnapshot) snapshots += entry
+            if (isFlutterKernel) kernels += entry
             if (n.endsWith(".hbc") || n.endsWith(".hermes") || n.endsWith(".bundle") || n.endsWith("index.android.bundle") || n.endsWith("index.android.bundle.hbc")) hermes += entry
             if (n.endsWith(".dll") && (n.contains("/managed/") || n.startsWith("assemblies/") || n.contains("/assemblies/"))) assemblies += entry
             if (n.endsWith(".pak") || n.endsWith(".utoc") || n.endsWith(".ucas")) unreal += entry

@@ -36,7 +36,9 @@ class NativeRuleEngineTest {
     }
 
     private fun fixture(name: String): File {
-        val url = checkNotNull(javaClass.classLoader?.getResource("fixtures/$name"))
-        return File(url.toURI())
+        javaClass.classLoader?.getResource("fixtures/$name")?.let { return File(it.toURI()) }
+        return File("app/src/test/resources/fixtures/$name").also {
+            check(it.isFile) { "Missing native test fixture: ${it.absolutePath}" }
+        }
     }
 }
