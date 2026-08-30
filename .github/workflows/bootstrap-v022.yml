@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Apply connected Kotlin compile fixes
+      - name: Apply connected build fixes
         shell: bash
         run: |
           set -euo pipefail
@@ -45,14 +45,51 @@ jobs:
               bad_import = "import androidx.compose.foundation.layout.weight\n"
               if bad_import in source:
                   path.write_text(source.replace(bad_import, ""))
+
+          scanner = Path("app/src/main/java/org/unirevlab/security/analysis/RuntimeArtifactScanner.kt")
+          source = scanner.read_text()
+          old_classifier = '''            if (n.contains("flutter_assets/")) flutterAssets += entry
+            if (base == "vm_snapshot_data" || base == "vm_snapshot_instr" || base == "isolate_snapshot_data" || base == "isolate_snapshot_instr") snapshots += entry
+            if (base == "kernel_blob.bin" || base.endsWith(".dill")) kernels += entry
+'''
+          new_classifier = '''            val isFlutterSnapshot = base == "vm_snapshot_data" || base == "vm_snapshot_instr" || base == "isolate_snapshot_data" || base == "isolate_snapshot_instr"
+            val isFlutterKernel = base == "kernel_blob.bin" || base.endsWith(".dill")
+            if (n.contains("flutter_assets/") && !isFlutterSnapshot && !isFlutterKernel) flutterAssets += entry
+            if (isFlutterSnapshot) snapshots += entry
+            if (isFlutterKernel) kernels += entry
+'''
+          if old_classifier in source:
+              scanner.write_text(source.replace(old_classifier, new_classifier))
+          elif new_classifier not in source:
+              raise SystemExit("Unexpected RuntimeArtifactScanner Flutter classifier")
+
+          old_fixture = '''    private fun fixture(name: String): File {
+        val url = checkNotNull(javaClass.classLoader?.getResource("fixtures/$name"))
+        return File(url.toURI())
+    }
+'''
+          new_fixture = '''    private fun fixture(name: String): File {
+        javaClass.classLoader?.getResource("fixtures/$name")?.let { return File(it.toURI()) }
+        return File("app/src/test/resources/fixtures/$name").also {
+            check(it.isFile) { "Missing native test fixture: ${it.absolutePath}" }
+        }
+    }
+'''
+          for test_name in ("ElfNativeScannerTest.kt", "NativeRuleEngineTest.kt"):
+              test_path = Path("app/src/test/java/org/unirevlab/security/analysis") / test_name
+              test_source = test_path.read_text()
+              if old_fixture in test_source:
+                  test_path.write_text(test_source.replace(old_fixture, new_fixture))
+              elif new_fixture not in test_source:
+                  raise SystemExit(f"Unexpected fixture helper in {test_name}")
           PY
 
           git diff --check
-          if ! git diff --quiet -- app/src/main/java/org/unirevlab/security; then
+          if ! git diff --quiet -- app/src; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add app/src/main/java/org/unirevlab/security
-            git commit -m "Fix connected Android Kotlin compilation [skip ci]"
+            git add app/src
+            git commit -m "Fix connected unit test regressions [skip ci]"
             git push origin HEAD:main
           fi
 
