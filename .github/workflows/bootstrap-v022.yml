@@ -1,78 +1,27 @@
-name: Bootstrap v0.22 and build APK
+name: Build UniRevLab v0.22 APK
 
 on:
   push:
+    branches: [ main ]
     paths:
-      - 'unirevlab-security-platform-v0.22.0-dev-performance-ux*.zip'
+      - 'app/**'
+      - 'native-core/**'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle.properties'
+      - 'scripts/**'
+      - 'test-corpus/**'
       - '.github/workflows/bootstrap-v022.yml'
   workflow_dispatch:
 
 permissions:
-  contents: write
-
-env:
-  SOURCE_SHA256: 6215429ed7cfd5ccd431beee3228ab93564df3ae3a589a761ae699f48f75a7de
-  SOURCE_DIR: unirevlab-security-platform-v0.22.0-dev-performance-ux
+  contents: read
 
 jobs:
-  import-and-build:
+  build-debug-apk:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Resolve and verify canonical source archive
-        shell: bash
-        run: |
-          set -euo pipefail
-          SOURCE_ARCHIVE=""
-          for candidate in unirevlab-security-platform-v0.22.0-dev-performance-ux*.zip; do
-            [ -f "${candidate}" ] || continue
-            actual="$(sha256sum "${candidate}" | awk '{print $1}')"
-            if [ "${actual}" = "${SOURCE_SHA256}" ]; then
-              SOURCE_ARCHIVE="${candidate}"
-              break
-            fi
-          done
-          if [ -z "${SOURCE_ARCHIVE}" ]; then
-            echo "No matching v0.22 source archive with expected SHA-256 was found." >&2
-            exit 1
-          fi
-          echo "Using source archive: ${SOURCE_ARCHIVE}"
-          echo "SOURCE_ARCHIVE=${SOURCE_ARCHIVE}" >> "${GITHUB_ENV}"
-
-      - name: Import canonical v0.22 source tree
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf /tmp/unirevlab-v022
-          mkdir -p /tmp/unirevlab-v022
-          unzip -q "${SOURCE_ARCHIVE}" -d /tmp/unirevlab-v022
-          test -d "/tmp/unirevlab-v022/${SOURCE_DIR}"
-          rsync -a --delete \
-            --exclude='.git/' \
-            --exclude='.github/workflows/' \
-            "/tmp/unirevlab-v022/${SOURCE_DIR}/" ./
-          rm -f "${SOURCE_ARCHIVE}" .bootstrap
-
-      - name: Commit imported source tree
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          if ! git diff --cached --quiet; then
-            git commit -m "Import UniRevLab Security v0.22 performance UX checkpoint [skip ci]"
-            git push origin HEAD:main
-          fi
-
-      - name: Restore canonical workflows locally for verification
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf .github/workflows
-          mkdir -p .github
-          cp -a "/tmp/unirevlab-v022/${SOURCE_DIR}/.github/workflows" .github/workflows
 
       - uses: actions/setup-java@v4
         with:
@@ -81,9 +30,14 @@ jobs:
 
       - uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK and NDK
+      - name: Install Android 17 SDK 37.0 and NDK
         shell: bash
-        run: sdkmanager "platforms;android-37" "build-tools;36.0.0" "ndk;28.2.13676358"
+        run: |
+          set -euo pipefail
+          sdkmanager "platforms;android-37.0" "build-tools;36.0.0" "ndk;28.2.13676358"
+          test -f "${ANDROID_HOME}/platforms/android-37.0/android.jar"
+          test -x "${ANDROID_HOME}/build-tools/36.0.0/aapt2"
+          test -d "${ANDROID_HOME}/ndk/28.2.13676358"
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -110,10 +64,10 @@ jobs:
         with:
           gradle-version: '9.5.0'
 
-      - name: Preflight
+      - name: Host preflight
         shell: bash
         run: |
-          python scripts/check_android_build_config.py
+          set -euo pipefail
           python scripts/validate_schemas.py
           python scripts/check_secrets.py .
 
@@ -132,8 +86,8 @@ jobs:
           APK="$(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | head -n 1)"
           test -n "${APK}"
           unzip -t "${APK}" >/dev/null
-          sha256sum "${APK}" | tee UniRevLab-Security-v0.22.0-debug.apk.sha256
           cp "${APK}" UniRevLab-Security-v0.22.0-debug.apk
+          sha256sum UniRevLab-Security-v0.22.0-debug.apk | tee UniRevLab-Security-v0.22.0-debug.apk.sha256
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
