@@ -3,7 +3,7 @@ name: Bootstrap v0.22 and build APK
 on:
   push:
     paths:
-      - 'unirevlab-security-platform-v0.22.0-dev-performance-ux.zip'
+      - 'unirevlab-security-platform-v0.22.0-dev-performance-ux*.zip'
       - '.github/workflows/bootstrap-v022.yml'
   workflow_dispatch:
 
@@ -11,22 +11,35 @@ permissions:
   contents: write
 
 env:
-  SOURCE_ARCHIVE: unirevlab-security-platform-v0.22.0-dev-performance-ux.zip
   SOURCE_SHA256: 6215429ed7cfd5ccd431beee3228ab93564df3ae3a589a761ae699f48f75a7de
   SOURCE_DIR: unirevlab-security-platform-v0.22.0-dev-performance-ux
 
 jobs:
   import-and-build:
-    if: ${{ hashFiles('unirevlab-security-platform-v0.22.0-dev-performance-ux.zip') != '' }}
+    if: ${{ hashFiles('unirevlab-security-platform-v0.22.0-dev-performance-ux*.zip') != '' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify source archive
+      - name: Resolve and verify canonical source archive
         shell: bash
         run: |
           set -euo pipefail
-          echo "${SOURCE_SHA256}  ${SOURCE_ARCHIVE}" | sha256sum -c -
+          SOURCE_ARCHIVE=""
+          for candidate in unirevlab-security-platform-v0.22.0-dev-performance-ux*.zip; do
+            [ -f "${candidate}" ] || continue
+            actual="$(sha256sum "${candidate}" | awk '{print $1}')"
+            if [ "${actual}" = "${SOURCE_SHA256}" ]; then
+              SOURCE_ARCHIVE="${candidate}"
+              break
+            fi
+          done
+          if [ -z "${SOURCE_ARCHIVE}" ]; then
+            echo "No matching v0.22 source archive with expected SHA-256 was found." >&2
+            exit 1
+          fi
+          echo "Using source archive: ${SOURCE_ARCHIVE}"
+          echo "SOURCE_ARCHIVE=${SOURCE_ARCHIVE}" >> "${GITHUB_ENV}"
 
       - name: Import canonical v0.22 source tree
         shell: bash
