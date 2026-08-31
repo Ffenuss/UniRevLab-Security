@@ -20,9 +20,24 @@ PATTERNS = {
     "google-api-key": re.compile(r"\bAIza[0-9A-Za-z_-]{30,}\b"),
 }
 
+
+def is_intentional_detector_literal(relative: Path, line: str, kind: str) -> bool:
+    """Allow only the PEM signatures used by the defensive scanner itself.
+
+    This remains deliberately path- and syntax-specific so an actual credential elsewhere in the
+    repository, or even elsewhere in the detector source, is still rejected by preflight.
+    """
+    if kind != "private-key":
+        return False
+    if relative.name not in {"TamperAssessmentEngine.kt", "TamperAssessmentEngine.kt.txt"}:
+        return False
+    return "text.contains(" in line and "PRIVATE KEY-----" in line
+
+
 findings: list[tuple[str, int, str]] = []
 for path in ROOT.rglob("*"):
-    if not path.is_file() or any(part in SKIP_DIRS for part in path.relative_to(ROOT).parts):
+    relative = path.relative_to(ROOT)
+    if not path.is_file() or any(part in SKIP_DIRS for part in relative.parts):
         continue
     try:
         if path.stat().st_size > MAX_BYTES:
@@ -32,8 +47,8 @@ for path in ROOT.rglob("*"):
         continue
     for lineno, line in enumerate(text.splitlines(), 1):
         for name, pattern in PATTERNS.items():
-            if pattern.search(line):
-                findings.append((str(path.relative_to(ROOT)), lineno, name))
+            if pattern.search(line) and not is_intentional_detector_literal(relative, line, name):
+                findings.append((str(relative), lineno, name))
 
 if findings:
     for file, line, kind in findings:
