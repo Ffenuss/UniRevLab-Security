@@ -3,6 +3,7 @@ package org.unirevlab.security.analysis
 import java.io.File
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import kotlin.io.path.createTempDirectory
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -10,7 +11,7 @@ import org.junit.Test
 class ApkMutationDiffEngineTest {
     @Test
     fun contentDiffIgnoresUnchangedEntriesAndMarksExpectedChange() {
-        val dir = createTempDir(prefix = "apk-diff-")
+        val dir = createTempDirectory("apk-diff-").toFile()
         val before = File(dir, "before.apk")
         val after = File(dir, "after.apk")
         zip(before, mapOf("classes.dex" to "old", "assets/a.txt" to "same", "META-INF/X.SF" to "old-sig"))
