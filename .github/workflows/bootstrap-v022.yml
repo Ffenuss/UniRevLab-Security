@@ -37,6 +37,7 @@ jobs:
             echo "Expected v0.25.0 or v0.25.1 source on this branch" >&2
             exit 1
           fi
+          python tools/fix_v0251_test_dollar.py
           test -f app/src/main/java/org/unirevlab/security/analysis/EasyAuditEngine.kt
           test -f app/src/main/java/org/unirevlab/security/analysis/FlagSweepEngine.kt
           test -f app/src/main/java/org/unirevlab/security/analysis/TamperAssessmentEngine.kt
