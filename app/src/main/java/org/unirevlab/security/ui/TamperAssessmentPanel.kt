@@ -60,6 +60,14 @@ fun TamperAssessmentPanel(
                 "Ищет client-side trust/state/config, значения, файлы и redacted secret candidates. Авто-hooks только наблюдают выполнение и не генерируют обход лицензий/IAP.",
                 style = MaterialTheme.typography.bodySmall,
             )
+            EasyAuditPanel(
+                report = report,
+                workspace = workspace,
+                busy = busy,
+                onApplyHook = onApplyHook,
+                onStatus = onStatus,
+                onError = onError,
+            )
             if (assessment == null) {
                 LinearProgressIndicator(Modifier.fillMaxWidth())
                 Text("Индексируем DEX/native/assets для Patch Lab…", style = MaterialTheme.typography.bodySmall)
