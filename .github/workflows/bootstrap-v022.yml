@@ -27,7 +27,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python scripts/apply_v0221_bugfix.py
+          python scripts/apply_v0221_bugfix_chunks.py
           git diff --check
 
       - uses: actions/setup-java@v4
