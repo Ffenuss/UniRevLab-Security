@@ -199,7 +199,7 @@ fun SecretExposurePanel(
                                     }
                                 }
 
-                                if (hit.editableTextEntry) {
+                                if (hit.editableTextEntry && revealUnlocked) {
                                     OutlinedButton(
                                         onClick = {
                                             scope.launch {

@@ -29,7 +29,8 @@ class SecretExposureEngineTest {
 
         val artifactSha = "a".repeat(64)
         val report = SecretExposureEngine.scanApk(apk, artifactSha)
-        assertTrue(report.hits.any { it.kind == "GOOGLE_API_KEY" && it.exposure == "PLAINTEXT_EXPOSED" })
+        val google = report.hits.first { it.kind == "GOOGLE_API_KEY" && it.exposure == "PLAINTEXT_EXPOSED" }
+        assertEquals(1, report.hits.count { it.entryName == google.entryName && it.valueSha256 == google.valueSha256 })
         val encoded = report.hits.first { it.kind == "CLIENT_SECRET" }
         assertEquals("RECOVERABLE_ENCODING", encoded.exposure)
         assertEquals("BASE64", encoded.storage)

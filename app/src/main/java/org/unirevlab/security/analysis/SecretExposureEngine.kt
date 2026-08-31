@@ -250,7 +250,9 @@ object SecretExposureEngine {
         val rawSha = sha256(rawValue)
         val effective = recoveredValue ?: rawValue
         val recoveredSha = recoveredValue?.let(::sha256)
-        val dedupeKey = "$entryName|$offset|$kind|$rawSha"
+        // Prefer the concrete detector that runs first; generic assignment detection must not
+        // duplicate the same bytes under a second kind.
+        val dedupeKey = "$entryName|$offset|$rawSha"
         if (!dedupe.add(dedupeKey)) return
         val id = sha256("$artifactSha256|$dedupeKey")
         synchronized(vault) {
