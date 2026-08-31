@@ -226,14 +226,26 @@ object TamperAssessmentEngine {
                 ),
             )
         }
-        if (assessment.secrets.isNotEmpty()) {
+        val highRiskSecrets = assessment.secrets.filterNot { it.kind == "GOOGLE_API_KEY_LIKE" || it.kind == "PRIVATE_KEY_MARKER" }
+        if (highRiskSecrets.isNotEmpty()) {
             out += HardeningSuggestion(
-                "CRITICAL", "Удалить глобальные секреты из клиентского APK",
-                "Найдено redacted secret/key candidates: ${assessment.secrets.size}.",
+                "CRITICAL", "Удалить подтверждённые глобальные секреты из клиентского APK",
+                "Найдено high-risk redacted secret/key candidates: ${highRiskSecrets.size}.",
                 listOf(
                     "Считать любой общий secret, поставляемый в APK/DEX/.so/assets, извлекаемым.",
                     "Ротировать подтверждённые утечки и переносить привилегированные операции на backend/broker.",
                     "Android Keystore использовать для per-install ключей; серверные private keys и общие API secrets в APK не хранить.",
+                ),
+            )
+        }
+        if (assessment.secrets.any { it.kind == "GOOGLE_API_KEY_LIKE" }) {
+            out += HardeningSuggestion(
+                "MEDIUM", "Проверить ограничения Google API key",
+                "Найден Google API-key-like identifier в клиентском артефакте; само присутствие такого ключа не всегда является утечкой.",
+                listOf(
+                    "Проверить Android package/certificate restrictions и разрешённые API.",
+                    "Не использовать клиентский API key как доказательство авторизации пользователя или как серверный secret.",
+                    "Проверить quotas и ротацию, если ключ ранее использовался без ограничений.",
                 ),
             )
         }
@@ -291,36 +303,42 @@ object TamperAssessmentEngine {
         val packagePrefix = report.manifest?.packageName?.takeIf { it.isNotBlank() }?.replace('.', '/')?.let { "L$it/" }
         val dex = report.dex
         val methodsByKey = dex?.methods.orEmpty().associateBy { it.dexEntry to it.methodIndex }
-        dex?.methods.orEmpty().forEach { method ->
+        val codeMethodKeys = dex?.codeMethods.orEmpty().map { "${it.dexEntry}|${it.declaringClass}|${it.name}|${it.prototype}" }.toSet()
+        fun isEditableProjectMethod(method: DexMethodReference): Boolean =
+            "${method.dexEntry}|${method.declaringClass}|${method.name}|${method.prototype}" in codeMethodKeys &&
+                isProjectCode(method.declaringClass, packagePrefix)
+
+        dex?.methods.orEmpty().filter(::isEditableProjectMethod).forEach { method ->
             val label = "${method.declaringClass}->${method.name}${method.prototype}"
             categoriesFor(label).forEach { (category, score) ->
                 hit(methodHit(category, score, method, label))
             }
-            if (DECISION_METHOD.matches(method.name) && isAppOwned(method.declaringClass, packagePrefix)) {
+            if (DECISION_METHOD.matches(method.name)) {
                 hit(methodHit("CLIENT_DECISION", 36, method, label))
             }
         }
         dex?.stringXrefs.orEmpty().forEach { xref ->
-            val method = methodsByKey[xref.dexEntry to xref.callerMethodIndex]
+            val method = methodsByKey[xref.dexEntry to xref.callerMethodIndex] ?: return@forEach
+            if (!isEditableProjectMethod(method)) return@forEach
             categoriesFor("${xref.value} ${xref.callerClass} ${xref.callerName}").forEach { (category, score) ->
                 hit(
                     SurfaceHit(
                         category, "DEX_STRING", "${xref.dexEntry}:${xref.callerClass}->${xref.callerName}@${xref.instructionOffsetCodeUnits}",
-                        safePreview(xref.value), score, method?.dexEntry ?: xref.dexEntry,
-                        method?.declaringClass ?: xref.callerClass, method?.name ?: xref.callerName, method?.prototype,
+                        safePreview(xref.value), score, method.dexEntry,
+                        method.declaringClass, method.name, method.prototype,
                     ),
                 )
             }
         }
         dex?.fieldXrefs.orEmpty().forEach { xref ->
-            val method = methodsByKey[xref.dexEntry to xref.callerMethodIndex]
+            val method = methodsByKey[xref.dexEntry to xref.callerMethodIndex] ?: return@forEach
+            if (!isEditableProjectMethod(method)) return@forEach
             categoriesFor("${xref.fieldName} ${xref.declaringClass} ${xref.callerClass} ${xref.callerName}").forEach { (category, score) ->
                 hit(
                     SurfaceHit(
                         category, "DEX_FIELD", "${xref.dexEntry}:${xref.declaringClass}->${xref.fieldName}:${xref.fieldType}",
                         "${xref.kind}; caller=${xref.callerClass}->${xref.callerName}", score,
-                        method?.dexEntry ?: xref.dexEntry, method?.declaringClass ?: xref.callerClass,
-                        method?.name ?: xref.callerName, method?.prototype,
+                        method.dexEntry, method.declaringClass, method.name, method.prototype,
                     ),
                 )
             }
@@ -328,13 +346,14 @@ object TamperAssessmentEngine {
         var genericConstants = 0
         dex?.constants.orEmpty().forEach { constant ->
             val method = methodsByKey[constant.dexEntry to constant.methodIndex] ?: return@forEach
+            if (!isEditableProjectMethod(method)) return@forEach
             val methodLabel = "${method.declaringClass}->${method.name}${method.prototype}"
             val categories = categoriesFor(methodLabel)
             if (categories.isNotEmpty()) {
                 categories.forEach { (category, score) ->
                     hit(SurfaceHit(category, "DEX_CONSTANT", "${constant.dexEntry}:$methodLabel@${constant.instructionOffsetCodeUnits}", "${constant.kind}=${safePreview(constant.value)}", score - 5, method.dexEntry, method.declaringClass, method.name, method.prototype))
                 }
-            } else if (genericConstants < MAX_GENERIC_CONSTANTS && isAppOwned(method.declaringClass, packagePrefix) && isInterestingConstant(constant.value)) {
+            } else if (genericConstants < MAX_GENERIC_CONSTANTS && isInterestingConstant(constant.value)) {
                 genericConstants++
                 hit(SurfaceHit("APP_CONSTANT", "DEX_CONSTANT", "${constant.dexEntry}:$methodLabel@${constant.instructionOffsetCodeUnits}", "${constant.kind}=${safePreview(constant.value)}", 30, method.dexEntry, method.declaringClass, method.name, method.prototype))
             }
@@ -396,10 +415,10 @@ object TamperAssessmentEngine {
         val distinctSecrets = secrets.distinctBy { it.sha256 }.take(MAX_SECRETS)
         val categories = distinctHits.groupBy { it.category }.map { (category, values) -> CategorySummary(category, values.size, values.maxOf { it.score }) }
             .sortedWith(compareByDescending<CategorySummary> { it.maxScore }.thenByDescending { it.count })
-        val codeMethodKeys = dex?.codeMethods.orEmpty().map { "${it.dexEntry}|${it.declaringClass}|${it.name}|${it.prototype}" }.toSet()
         val proposals = distinctHits.asSequence()
             .filter { it.dexEntry != null && it.classDescriptor != null && it.methodName != null && it.prototype != null }
             .filter { "${it.dexEntry}|${it.classDescriptor}|${it.methodName}|${it.prototype}" in codeMethodKeys }
+            .filter { isProjectCode(requireNotNull(it.classDescriptor), packagePrefix) }
             .distinctBy { "${it.dexEntry}|${it.classDescriptor}|${it.methodName}|${it.prototype}" }
             .take(MAX_HOOK_PROPOSALS)
             .mapIndexed { index, hit ->
@@ -441,10 +460,21 @@ object TamperAssessmentEngine {
     )
 
     private fun categoriesFor(text: String): List<Pair<String, Int>> {
-        val lower = text.lowercase(Locale.ROOT)
+        val tokens = identifierTokens(text)
+        val compact = tokens.joinToString("")
         return CATEGORY_TERMS.mapNotNull { (category, terms) ->
-            if (terms.any { lower.contains(it) }) category to CATEGORY_SCORES.getValue(category) else null
+            val matched = terms.any { term ->
+                val normalized = term.lowercase(Locale.ROOT).replace("_", "")
+                if (normalized in COMPOUND_TERMS) compact.contains(normalized) else normalized in tokens
+            }
+            if (matched) category to CATEGORY_SCORES.getValue(category) else null
         }
+    }
+
+    private fun identifierTokens(text: String): Set<String> {
+        val expanded = text.replace(Regex("([a-z0-9])([A-Z])"), "$1 $2")
+        return expanded.lowercase(Locale.ROOT).split(Regex("[^a-z0-9]+"))
+            .asSequence().filter { it.isNotBlank() }.toSet()
     }
 
     private fun parseQuery(raw: String): Pair<String?, String> {
@@ -458,9 +488,9 @@ object TamperAssessmentEngine {
 
     private fun scanTextSecrets(entry: String, text: String, out: MutableList<SecretHit>) {
         if (out.size >= MAX_SECRETS) return
-        if (text.contains("-----BEGIN PRIVATE KEY-----") || text.contains("-----BEGIN RSA PRIVATE KEY-----") || text.contains("-----BEGIN EC PRIVATE KEY-----")) {
-            val marker = "private-key-marker:$entry"
-            out += SecretHit("PRIVATE_KEY_MATERIAL", entry, "-----BEGIN … PRIVATE KEY-----", sha256(marker))
+        PRIVATE_KEY_BLOCK.find(text)?.let { match ->
+            val material = match.value
+            out += SecretHit("PRIVATE_KEY_MATERIAL", entry, "-----BEGIN … PRIVATE KEY-----", sha256(material))
         }
         GENERIC_SECRET.findAll(text).take(8).forEach { match ->
             if (out.size >= MAX_SECRETS) return@forEach
@@ -513,6 +543,10 @@ object TamperAssessmentEngine {
     }
 
     private fun isAppOwned(descriptor: String, packagePrefix: String?): Boolean = packagePrefix != null && descriptor.startsWith(packagePrefix)
+    private fun isProjectCode(descriptor: String, packagePrefix: String?): Boolean {
+        if (isAppOwned(descriptor, packagePrefix)) return true
+        return NON_PROJECT_PREFIXES.none { descriptor.startsWith(it) }
+    }
     private fun isInterestingConstant(value: String): Boolean {
         val normalized = value.trim().lowercase(Locale.ROOT)
         if (normalized in setOf("0", "0x0", "1", "0x1", "-1")) return false
@@ -547,8 +581,20 @@ object TamperAssessmentEngine {
         "AUTH_SESSION" to listOf("apikey", "api_key", "clientsecret", "client_secret", "bearer", "sessiontoken", "auth_token", "accesstoken", "access_token"),
     )
     private val CATEGORY_SCORES = mapOf("ENTITLEMENT_TRUST" to 70, "LOCAL_STATE" to 60, "FEATURE_CONFIG" to 48, "INTEGRITY" to 56, "AUTH_SESSION" to 68)
+    private val COMPOUND_TERMS = setOf("isowned", "hasaccess", "accesslevel", "featureflag", "remoteconfig", "playintegrity", "rootcheck", "emulatorcheck", "apikey", "clientsecret", "sessiontoken", "authtoken", "accesstoken")
+    private val NON_PROJECT_PREFIXES = listOf(
+        "Landroid/", "Landroidx/", "Ljava/", "Ljavax/", "Lkotlin/", "Lkotlinx/",
+        "Ldalvik/", "Lsun/", "Lorg/apache/", "Lorg/chromium/", "Lorg/json/",
+        "Lcom/google/", "Lcom/android/", "Lcom/facebook/", "Lcom/squareup/",
+        "Lokhttp3/", "Lokio/", "Lretrofit2/", "Lio/flutter/", "Lio/sentry/",
+        "Lcom/applovin/", "Lcom/adjust/", "Lcom/bugsnag/", "Lcom/onesignal/",
+    )
     private val DECISION_METHOD = Regex("^(is|has|can|allow|check|verify|validate|enable|should|may)[A-Z_].*|^(is|has|can|allow|check|verify|validate|enable|should|may).*$", RegexOption.IGNORE_CASE)
     private val GENERIC_SECRET = Regex("(?i)[\\\"']?(api[_-]?key|client[_-]?secret|secret|access[_-]?token|auth[_-]?token)[\\\"']?\\s*[:=]\\s*[\\\"']?([A-Za-z0-9+/_=.-]{12,})")
+    private val PRIVATE_KEY_BLOCK = Regex(
+        "-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----\\s+[A-Za-z0-9+/=\\r\\n]{128,}\\s+-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----",
+        setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
+    )
     private val TEXT_EXTENSIONS = listOf(".json", ".txt", ".xml", ".yaml", ".yml", ".properties", ".ini", ".cfg", ".conf", ".csv", ".toml", ".js", ".html", ".md")
     private const val MAX_HITS = 360
     private const val MAX_SECRETS = 80

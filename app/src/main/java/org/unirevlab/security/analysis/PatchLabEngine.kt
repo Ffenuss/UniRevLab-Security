@@ -90,24 +90,48 @@ object PatchLabEngine {
         val directMethod = Regex("(L[^;\\s]+;)->([^\\s(]+)(\\([^\\n]*?\\)[VZBSCIJFDL\\[][^\\s:]*)")
             .find(joined)
         if (directMethod != null) {
-            return PatchTarget(
-                findingId = finding.id,
-                dexEntry = dexEntry,
-                classDescriptor = directMethod.groupValues[1],
-                methodName = directMethod.groupValues[2],
-                prototype = directMethod.groupValues[3],
-                nativeEntry = nativeEntry,
-                evidenceLocation = evidence.firstOrNull()?.location,
-                evidenceValue = evidence.firstOrNull()?.value,
-            )
+            val targetClass = directMethod.groupValues[1]
+            val targetName = directMethod.groupValues[2]
+            val targetPrototype = directMethod.groupValues[3]
+            val dexSummary = report.dex
+            val codeKeys = dexSummary?.codeMethods.orEmpty().map { "${it.dexEntry}|${it.declaringClass}|${it.name}|${it.prototype}" }.toSet()
+            val direct = dexSummary?.methods.orEmpty().firstOrNull { method ->
+                method.declaringClass == targetClass && method.name == targetName && method.prototype == targetPrototype &&
+                    "${method.dexEntry}|${method.declaringClass}|${method.name}|${method.prototype}" in codeKeys
+            }
+            if (direct != null) {
+                return PatchTarget(
+                    findingId = finding.id, dexEntry = direct.dexEntry, classDescriptor = direct.declaringClass,
+                    methodName = direct.name, prototype = direct.prototype, nativeEntry = nativeEntry,
+                    evidenceLocation = evidence.firstOrNull()?.location, evidenceValue = evidence.firstOrNull()?.value,
+                )
+            }
+            val methodsByKey = dexSummary?.methods.orEmpty().associateBy { it.dexEntry to it.methodIndex }
+            val packagePrefix = report.manifest?.packageName?.takeIf { it.isNotBlank() }?.replace('.', '/')?.let { "L$it/" }
+            val caller = dexSummary?.callXrefs.orEmpty().asSequence()
+                .filter { it.calleeClass == targetClass && it.calleeName == targetName && it.calleePrototype == targetPrototype }
+                .mapNotNull { xref -> methodsByKey[xref.dexEntry to xref.callerMethodIndex] }
+                .filter { method -> "${method.dexEntry}|${method.declaringClass}|${method.name}|${method.prototype}" in codeKeys }
+                .sortedByDescending { method -> packagePrefix != null && method.declaringClass.startsWith(packagePrefix) }
+                .firstOrNull()
+            if (caller != null) {
+                return PatchTarget(
+                    findingId = finding.id, dexEntry = caller.dexEntry, classDescriptor = caller.declaringClass,
+                    methodName = caller.name, prototype = caller.prototype, nativeEntry = nativeEntry,
+                    evidenceLocation = evidence.firstOrNull()?.location,
+                    evidenceValue = "External callee: $targetClass->$targetName$targetPrototype",
+                )
+            }
         }
 
         // Findings are intentionally schema-agnostic. Fall back to the bounded DEX index and pick
         // an exact indexed method whose class/name/prototype is present in the evidence text.
+        val fallbackCodeKeys = report.dex?.codeMethods.orEmpty().map { "${it.dexEntry}|${it.declaringClass}|${it.name}|${it.prototype}" }.toSet()
         val method = report.dex?.methods?.firstOrNull { candidate ->
             joined.contains(candidate.declaringClass, ignoreCase = false) &&
                 joined.contains(candidate.name, ignoreCase = false) &&
-                joined.contains(candidate.prototype, ignoreCase = false)
+                joined.contains(candidate.prototype, ignoreCase = false) &&
+                "${candidate.dexEntry}|${candidate.declaringClass}|${candidate.name}|${candidate.prototype}" in fallbackCodeKeys
         }
         return PatchTarget(
             findingId = finding.id,

@@ -53,8 +53,15 @@ class TamperAssessmentEngineTest {
                 dexFilesScanned = 1,
                 stringsDeclared = 1,
                 stringsScanned = 1,
-                methods = listOf(DexMethodReference("classes.dex", 1, "Lorg/example/Access;", "hasPremium", "()Z")),
-                codeMethods = listOf(DexMethodCodeReference("classes.dex", 1, "Lorg/example/Access;", "hasPremium", "()Z", 1L, 2, 0, 0, 0, 1)),
+                methods = listOf(
+                    DexMethodReference("classes.dex", 1, "Lorg/example/Access;", "hasPremium", "()Z"),
+                    DexMethodReference("classes.dex", 2, "Landroid/media/MediaDrm;", "getOfflineLicenseKeySetIds", "()Ljava/util/List;"),
+                    DexMethodReference("classes.dex", 3, "Landroid/support/customtabs/ICustomTabsService\$Default;", "isEngagementSignalsApiAvailable", "()Z"),
+                ),
+                codeMethods = listOf(
+                    DexMethodCodeReference("classes.dex", 1, "Lorg/example/Access;", "hasPremium", "()Z", 1L, 2, 0, 0, 0, 1),
+                    DexMethodCodeReference("classes.dex", 3, "Landroid/support/customtabs/ICustomTabsService\$Default;", "isEngagementSignalsApiAvailable", "()Z", 2L, 2, 0, 0, 0, 1),
+                ),
                 httpUrls = emptyList(),
                 httpsUrls = emptyList(),
                 secretCandidates = emptyList(),
@@ -76,6 +83,8 @@ class TamperAssessmentEngineTest {
         val assessment = TamperAssessmentEngine.scan(report, workspace)
         assertTrue(assessment.categories.any { it.category == "ENTITLEMENT_TRUST" })
         assertTrue(assessment.hookProposals.any { it.methodName == "hasPremium" })
+        assertTrue(assessment.hits.none { it.classDescriptor?.startsWith("Landroid/") == true })
+        assertTrue(assessment.hookProposals.none { it.classDescriptor.startsWith("Landroid/") })
         assertTrue(assessment.secrets.isNotEmpty())
         assertTrue(assessment.secrets.none { it.redactedPreview.contains("abcdefghijklmnop") })
         dir.deleteRecursively()

@@ -8,7 +8,7 @@ object SensitiveStringClassifier {
         // Most DEX strings are class names, resources or ordinary literals. Avoid allocating
         // trim() results and invoking regex engines unless a cheap marker can possibly match.
         if (value.indexOf("PRIVATE KEY", ignoreCase = false) >= 0 && PRIVATE_KEY_MARKERS.any { value.contains(it) }) {
-            return "PRIVATE_KEY_MATERIAL"
+            return "PRIVATE_KEY_MARKER"
         }
         if (value.indexOf("eyJ", ignoreCase = false) >= 0 && JWT_REGEX.containsMatchIn(value)) return "JWT_LIKE_TOKEN"
         if (value.indexOf("AIza", ignoreCase = false) >= 0 && GOOGLE_API_KEY_REGEX.containsMatchIn(value)) return "GOOGLE_API_KEY_LIKE"
