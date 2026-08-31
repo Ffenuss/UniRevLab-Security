@@ -31,8 +31,12 @@ jobs:
           set -euo pipefail
           python scripts/apply_v0221_bugfix_chunks.py
           python tools/apply_v0222_stability_fix.py
-          python tools/apply_v0224_performance_fix.py
-          python tools/apply_v0225_native_speed_fix.py
+          if grep -Eq 'versionName = "0\.22\.(5-dev-native-speed|6-dev-stream-export)"' app/build.gradle.kts; then
+            echo "v0.22.4/v0.22.5 performance and native patches already integrated"
+          else
+            python tools/apply_v0224_performance_fix.py
+            python tools/apply_v0225_native_speed_fix.py
+          fi
           python tools/apply_v0226_streaming_export_fix.py
           git diff --check
 
