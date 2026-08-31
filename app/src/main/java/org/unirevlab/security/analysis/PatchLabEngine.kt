@@ -8,6 +8,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InputStream
+import java.io.OutputStream
 import java.security.KeyFactory
 import java.security.MessageDigest
 import java.security.PrivateKey
@@ -265,6 +266,18 @@ object PatchLabEngine {
         require(replacement.isFile) { "Файл замены не найден" }
         val stored = File(workspace.root, "replacements/${sha256Text(entryName)}.bin").apply { parentFile?.mkdirs() }
         replacement.inputStream().use { input -> stored.outputStream().use { output -> input.copyTo(output, COPY_BUFFER) } }
+        require(stored.length() > 0L) { "Файл замены пуст" }
+        workspace.replacements[entryName] = stored
+    }
+
+    fun replaceArchiveEntry(context: Context, workspace: Workspace, entryName: String, replacementUri: Uri) {
+        require(entryName in workspace.archiveEntries) { "Файл не найден в APK: $entryName" }
+        val stored = File(workspace.root, "replacements/${sha256Text(entryName)}.bin").apply { parentFile?.mkdirs() }
+        context.contentResolver.openInputStream(replacementUri).use { input ->
+            requireNotNull(input) { "Не удалось открыть файл замены" }
+            FileOutputStream(stored).buffered(COPY_BUFFER).use { output -> input.copyTo(output, COPY_BUFFER) }
+        }
+        require(stored.length() > 0L) { "Файл замены пуст" }
         workspace.replacements[entryName] = stored
     }
 
@@ -304,23 +317,42 @@ object PatchLabEngine {
 
     private fun repack(workspace: Workspace, rebuiltDex: Map<String, File>, outputApk: File) {
         ZipFile(workspace.originalApk).use { source ->
-            ZipOutputStream(FileOutputStream(outputApk).buffered(COPY_BUFFER)).use { out ->
+            val counting = CountingOutputStream(FileOutputStream(outputApk).buffered(COPY_BUFFER))
+            ZipOutputStream(counting).use { out ->
                 val entries = source.entries()
                 while (entries.hasMoreElements()) {
                     val originalEntry = entries.nextElement()
                     val name = originalEntry.name
                     if (isSignatureEntry(name)) continue
                     val replacement = rebuiltDex[name] ?: workspace.replacements[name]
+                    val isStoredNative = name.lowercase(Locale.ROOT).endsWith(".so") && originalEntry.method == ZipEntry.STORED
                     if (replacement != null) {
-                        val entry = ZipEntry(name).apply {
-                            time = originalEntry.time
-                            method = ZipEntry.DEFLATED
+                        val entry = if (isStoredNative) {
+                            val size = replacement.length()
+                            ZipEntry(name).apply {
+                                time = originalEntry.time
+                                method = ZipEntry.STORED
+                                this.size = size
+                                compressedSize = size
+                                crc = crc32(replacement)
+                                extra = alignedExtra(counting.count, name, originalEntry.extra, NATIVE_ALIGNMENT)
+                            }
+                        } else {
+                            ZipEntry(name).apply {
+                                time = originalEntry.time
+                                method = ZipEntry.DEFLATED
+                            }
                         }
                         out.putNextEntry(entry)
                         FileInputStream(replacement).buffered(COPY_BUFFER).use { it.copyTo(out, COPY_BUFFER) }
                         out.closeEntry()
                     } else {
                         val copy = ZipEntry(originalEntry)
+                        if (isStoredNative) {
+                            // Modern APKs can load uncompressed native code directly from the APK. Repacking
+                            // changes every local-header offset, so preserve a 16 KiB-aligned data start.
+                            copy.extra = alignedExtra(counting.count, name, originalEntry.extra, NATIVE_ALIGNMENT)
+                        }
                         out.putNextEntry(copy)
                         if (!originalEntry.isDirectory) {
                             source.getInputStream(originalEntry).buffered(COPY_BUFFER).use { it.copyTo(out, COPY_BUFFER) }
@@ -330,6 +362,37 @@ object PatchLabEngine {
                 }
             }
         }
+    }
+
+    internal fun alignedExtra(currentOffset: Long, entryName: String, originalExtra: ByteArray?, alignment: Int = NATIVE_ALIGNMENT): ByteArray? {
+        require(alignment > 0 && alignment and (alignment - 1) == 0) { "alignment must be a power of two" }
+        val baseExtra = originalExtra ?: ByteArray(0)
+        val nameBytes = entryName.toByteArray(Charsets.UTF_8)
+        val baseDataOffset = currentOffset + ZIP_LOCAL_HEADER_FIXED + nameBytes.size + baseExtra.size
+        var padding = ((alignment - (baseDataOffset % alignment)) % alignment).toInt()
+        if (padding == 0) return originalExtra
+        if (padding < ZIP_EXTRA_HEADER_SIZE) padding += alignment
+        require(baseExtra.size + padding <= 0xffff) { "ZIP extra field exceeds 64 KiB while aligning $entryName" }
+        val added = ByteArray(padding)
+        added[0] = (ALIGNMENT_EXTRA_ID and 0xff).toByte()
+        added[1] = ((ALIGNMENT_EXTRA_ID ushr 8) and 0xff).toByte()
+        val payload = padding - ZIP_EXTRA_HEADER_SIZE
+        added[2] = (payload and 0xff).toByte()
+        added[3] = ((payload ushr 8) and 0xff).toByte()
+        return baseExtra + added
+    }
+
+    private fun crc32(file: File): Long {
+        val crc = java.util.zip.CRC32()
+        FileInputStream(file).buffered(COPY_BUFFER).use { input ->
+            val buffer = ByteArray(COPY_BUFFER)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                if (read > 0) crc.update(buffer, 0, read)
+            }
+        }
+        return crc.value
     }
 
     private fun signTestApk(input: File, output: File, minSdk: Int) {
@@ -440,7 +503,21 @@ object PatchLabEngine {
     private val DEX_ENTRY = Regex("classes(?:\\d+)?\\.dex", RegexOption.IGNORE_CASE)
     private val LOCALS = Regex("(?m)^(\\s*)\\.locals\\s+(\\d+)\\s*$")
 
+    private class CountingOutputStream(private val delegate: OutputStream) : OutputStream() {
+        var count: Long = 0L
+            private set
+
+        override fun write(b: Int) { delegate.write(b); count++ }
+        override fun write(b: ByteArray, off: Int, len: Int) { delegate.write(b, off, len); count += len.toLong() }
+        override fun flush() = delegate.flush()
+        override fun close() = delegate.close()
+    }
+
     private const val COPY_BUFFER = 128 * 1024
+    internal const val NATIVE_ALIGNMENT = 16 * 1024
+    private const val ZIP_LOCAL_HEADER_FIXED = 30L
+    private const val ZIP_EXTRA_HEADER_SIZE = 4
+    private const val ALIGNMENT_EXTRA_ID = 0xFEEF
     private const val MAX_EDITABLE_TEXT_BYTES = 4L * 1024L * 1024L
 
     // Fixed non-secret laboratory signer. It intentionally does not impersonate the original APK

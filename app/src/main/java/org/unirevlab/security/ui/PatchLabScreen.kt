@@ -63,6 +63,7 @@ fun PatchLabScreen(
     var selectedClass by remember(report.artifact.sha256) { mutableStateOf(initialTarget?.classDescriptor) }
     var selectedMethodName by remember(report.artifact.sha256) { mutableStateOf(initialTarget?.methodName) }
     var selectedPrototype by remember(report.artifact.sha256) { mutableStateOf(initialTarget?.prototype) }
+    var selectedReplacementEntry by remember(report.artifact.sha256) { mutableStateOf(initialTarget?.nativeEntry) }
     var classQuery by remember { mutableStateOf("") }
     var smaliText by remember { mutableStateOf("") }
     var originalSmaliText by remember { mutableStateOf("") }
@@ -82,6 +83,26 @@ fun PatchLabScreen(
             built = null
             status = "Исходный APK выбран. Подготовьте workspace."
             error = null
+        }
+    }
+
+    val replacementPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val ws = workspace
+        val entry = selectedReplacementEntry
+        if (uri != null && ws != null && entry != null) {
+            scope.launch {
+                busy = true
+                error = null
+                val result = runCatching {
+                    withContext(Dispatchers.IO) { PatchLabEngine.replaceArchiveEntry(context, ws, entry, uri) }
+                }
+                if (result.isSuccess) {
+                    built = null
+                    status = "Файл замены сохранён: $entry"
+                }
+                error = result.exceptionOrNull()?.message
+                busy = false
+            }
         }
     }
 
@@ -117,6 +138,9 @@ fun PatchLabScreen(
                 selectedClass = initialTarget?.classDescriptor
                 selectedMethodName = initialTarget?.methodName
                 selectedPrototype = initialTarget?.prototype
+                if (selectedReplacementEntry?.let { it in ws.archiveEntries } != true) {
+                    selectedReplacementEntry = initialTarget?.nativeEntry?.takeIf { it in ws.archiveEntries } ?: ws.nativeEntries.firstOrNull()
+                }
                 status = "Workspace готов: DEX=${ws.dexEntries.size}, native=${ws.nativeEntries.size}."
             }
             error = result.exceptionOrNull()?.message
@@ -351,10 +375,34 @@ fun PatchLabScreen(
 
                 if (ws.nativeEntries.isNotEmpty()) {
                     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))) {
-                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("Native workspace", fontWeight = FontWeight.SemiBold)
-                            Text("Найдено ELF/.so: ${ws.nativeEntries.size}. Замена .so уже поддержана engine; UI выбора replacement-файла будет следующим слоем.", style = MaterialTheme.typography.bodySmall)
-                            ws.nativeEntries.take(8).forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("Native / file replacement", fontWeight = FontWeight.SemiBold)
+                            Text("Найдено ELF/.so: ${ws.nativeEntries.size}. Несжатые .so при пересборке выравниваются на 16 KiB.", style = MaterialTheme.typography.bodySmall)
+                            ws.nativeEntries.take(20).forEach { entry ->
+                                OutlinedButton(
+                                    onClick = { selectedReplacementEntry = entry },
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Text(if (entry == selectedReplacementEntry) "✓ $entry" else entry)
+                                }
+                            }
+                            OutlinedTextField(
+                                value = selectedReplacementEntry.orEmpty(),
+                                onValueChange = { value -> selectedReplacementEntry = value.take(512) },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                label = { Text("Путь файла внутри APK") },
+                                supportingText = { Text("Можно указать любой существующий entry из APK, не только .so") },
+                            )
+                            Button(
+                                onClick = { replacementPicker.launch(arrayOf("*/*")) },
+                                enabled = selectedReplacementEntry?.let { it in ws.archiveEntries } == true && !busy,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text("Выбрать файл замены") }
+                            if (ws.replacements.isNotEmpty()) {
+                                Text("Запланированные замены:", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
+                                ws.replacements.keys.sorted().forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+                            }
                         }
                     }
                 }

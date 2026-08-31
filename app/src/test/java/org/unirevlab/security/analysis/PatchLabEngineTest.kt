@@ -43,4 +43,13 @@ class PatchLabEngineTest {
         assertTrue(patched.contains("const/16 v0, 0x0"))
         assertTrue(patched.contains("return v0"))
     }
+
+    @Test
+    fun nativeAlignmentPadsStoredSoTo16KiB() {
+        val offset = 1_237L
+        val name = "lib/arm64-v8a/libsample.so"
+        val extra = PatchLabEngine.alignedExtra(offset, name, null)
+        val dataOffset = offset + 30L + name.toByteArray(Charsets.UTF_8).size + (extra?.size ?: 0)
+        assertTrue(dataOffset % PatchLabEngine.NATIVE_ALIGNMENT == 0L)
+    }
 }
