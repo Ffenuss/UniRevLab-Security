@@ -11,6 +11,7 @@ on:
       - 'gradle.properties'
       - 'scripts/**'
       - '.ci/**'
+      - 'tools/apply_v0222_stability_fix.py'
       - 'test-corpus/**'
       - '.github/workflows/bootstrap-v022.yml'
   workflow_dispatch:
@@ -29,7 +30,7 @@ jobs:
         run: |
           set -euo pipefail
           python scripts/apply_v0221_bugfix_chunks.py
-          python .ci/apply_v0222_stability_fix.py
+          python tools/apply_v0222_stability_fix.py
           git diff --check
 
       - uses: actions/setup-java@v4
