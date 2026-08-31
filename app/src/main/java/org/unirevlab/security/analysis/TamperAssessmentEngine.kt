@@ -398,11 +398,23 @@ object TamperAssessmentEngine {
                 if (!isTextCandidate(name) || textBytes >= MAX_AUTO_TEXT_BYTES) continue
                 val text = runCatching { readText(zip, entry.name, MAX_AUTO_TEXT_ENTRY_BYTES) }.getOrNull() ?: continue
                 textBytes += text.toByteArray(Charsets.UTF_8).size
-                val lower = text.lowercase(Locale.ROOT)
-                CATEGORY_TERMS.forEach { (category, terms) ->
-                    val term = terms.firstOrNull { lower.contains(it) } ?: return@forEach
-                    val line = text.lineSequence().firstOrNull { it.lowercase(Locale.ROOT).contains(term) }.orEmpty()
-                    hit(SurfaceHit(category, "TEXT_ASSET", name, safePreview(line), CATEGORY_SCORES.getValue(category) - 6, archiveEntry = name))
+                val matchedTextCategories = linkedMapOf<String, Pair<String, Int>>()
+                text.lineSequence().forEach { line ->
+                    categoriesFor(line).forEach { (category, score) ->
+                        matchedTextCategories.putIfAbsent(category, line to score)
+                    }
+                }
+                matchedTextCategories.forEach { (category, evidence) ->
+                    hit(
+                        SurfaceHit(
+                            category,
+                            "TEXT_ASSET",
+                            name,
+                            safePreview(evidence.first),
+                            evidence.second - 6,
+                            archiveEntry = name,
+                        ),
+                    )
                 }
                 scanTextSecrets(name, text, secrets)
             }
@@ -429,8 +441,7 @@ object TamperAssessmentEngine {
                     methodName = requireNotNull(hit.methodName), prototype = requireNotNull(hit.prototype),
                 )
             }.toList()
-        val rawScore = categories.sumOf { (it.maxScore * (1.0 + minOf(it.count, 8) / 10.0)).toInt() } + distinctSecrets.size * 18
-        val score = rawScore.coerceIn(0, 100)
+        val score = assessmentScore(distinctHits, distinctSecrets)
         return Assessment(score, band(score), categories, distinctHits, distinctSecrets, proposals, truncated)
     }
 
@@ -475,6 +486,74 @@ object TamperAssessmentEngine {
         val expanded = text.replace(Regex("([a-z0-9])([A-Z])"), "$1 $2")
         return expanded.lowercase(Locale.ROOT).split(Regex("[^a-z0-9]+"))
             .asSequence().filter { it.isNotBlank() }.toSet()
+    }
+
+    internal fun categoriesForTesting(text: String): Set<String> =
+        categoriesFor(text).map { it.first }.toSet()
+
+    internal fun assessmentScoreForTesting(hits: List<SurfaceHit>, secrets: List<SecretHit> = emptyList()): Int =
+        assessmentScore(hits, secrets)
+
+    private fun assessmentScore(hits: List<SurfaceHit>, secrets: List<SecretHit>): Int {
+        val categoryConfidence = hits.groupBy { it.category }.values.map { values ->
+            values.asSequence()
+                .distinctBy(::scoreTargetKey)
+                .map { it.score.coerceIn(0, 100) * evidenceWeight(it.kind) }
+                .sortedDescending()
+                .take(CATEGORY_SCORE_WEIGHTS.size)
+                .toList()
+                .mapIndexed { index, value -> value * CATEGORY_SCORE_WEIGHTS[index] }
+                .sum()
+        }.sortedDescending()
+
+        val surfaceScore = categoryConfidence
+            .take(SURFACE_SCORE_WEIGHTS.size)
+            .mapIndexed { index, value -> value * SURFACE_SCORE_WEIGHTS[index] }
+            .sum()
+
+        val secretScore = secrets.asSequence()
+            .distinctBy { it.sha256 }
+            .map(::secretEvidenceScore)
+            .sortedDescending()
+            .take(SECRET_SCORE_WEIGHTS.size)
+            .toList()
+            .mapIndexed { index, value -> value * SECRET_SCORE_WEIGHTS[index] }
+            .sum()
+
+        return (surfaceScore + secretScore).toInt().coerceIn(0, 100)
+    }
+
+    private fun scoreTargetKey(hit: SurfaceHit): String =
+        listOf(
+            hit.category,
+            hit.kind,
+            hit.dexEntry.orEmpty(),
+            hit.classDescriptor.orEmpty(),
+            hit.methodName.orEmpty(),
+            hit.prototype.orEmpty(),
+            hit.archiveEntry.orEmpty(),
+            hit.location,
+        ).joinToString("|")
+
+    private fun evidenceWeight(kind: String): Double = when (kind) {
+        "DEX_METHOD" -> 1.00
+        "DEX_FIELD" -> 0.95
+        "NATIVE_SYMBOL" -> 0.90
+        "IL2CPP_METHOD", "MANAGED_METHOD" -> 0.85
+        "DEX_STRING" -> 0.80
+        "DEX_CONSTANT" -> 0.72
+        "TEXT_ASSET" -> 0.65
+        "ARCHIVE_ENTRY" -> 0.45
+        else -> 0.40
+    }
+
+    private fun secretEvidenceScore(secret: SecretHit): Double = when (secret.kind) {
+        "PRIVATE_KEY_MATERIAL" -> 45.0
+        "AWS_ACCESS_KEY_ID_LIKE" -> 30.0
+        "JWT_LIKE_TOKEN" -> 24.0
+        "GOOGLE_API_KEY_LIKE" -> 10.0
+        "PRIVATE_KEY_MARKER" -> 6.0
+        else -> 18.0
     }
 
     private fun parseQuery(raw: String): Pair<String?, String> {
@@ -538,8 +617,9 @@ object TamperAssessmentEngine {
     }
 
     private fun isConfigLike(name: String): Boolean {
-        val lower = name.lowercase(Locale.ROOT)
-        return isTextCandidate(name) && listOf("config", "setting", "feature", "flag", "remote", "property", "profile", "balance", "rule").any { lower.contains(it) }
+        if (!isTextCandidate(name)) return false
+        val tokens = identifierTokens(name.substringAfterLast('/'))
+        return CONFIG_FILE_TERMS.any { it in tokens }
     }
 
     private fun isAppOwned(descriptor: String, packagePrefix: String?): Boolean = packagePrefix != null && descriptor.startsWith(packagePrefix)
@@ -581,7 +661,7 @@ object TamperAssessmentEngine {
         "AUTH_SESSION" to listOf("apikey", "api_key", "clientsecret", "client_secret", "bearer", "sessiontoken", "auth_token", "accesstoken", "access_token"),
     )
     private val CATEGORY_SCORES = mapOf("ENTITLEMENT_TRUST" to 70, "LOCAL_STATE" to 60, "FEATURE_CONFIG" to 48, "INTEGRITY" to 56, "AUTH_SESSION" to 68)
-    private val COMPOUND_TERMS = setOf("isowned", "hasaccess", "accesslevel", "featureflag", "remoteconfig", "playintegrity", "rootcheck", "emulatorcheck", "apikey", "clientsecret", "sessiontoken", "authtoken", "accesstoken")
+    private val COMPOUND_TERMS = setOf("isowned", "ispro", "hasaccess", "accesslevel", "featureflag", "remoteconfig", "playintegrity", "rootcheck", "emulatorcheck", "apikey", "clientsecret", "sessiontoken", "authtoken", "accesstoken")
     private val NON_PROJECT_PREFIXES = listOf(
         "Landroid/", "Landroidx/", "Ljava/", "Ljavax/", "Lkotlin/", "Lkotlinx/",
         "Ldalvik/", "Lsun/", "Lorg/apache/", "Lorg/chromium/", "Lorg/json/",
@@ -596,6 +676,10 @@ object TamperAssessmentEngine {
         setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
     )
     private val TEXT_EXTENSIONS = listOf(".json", ".txt", ".xml", ".yaml", ".yml", ".properties", ".ini", ".cfg", ".conf", ".csv", ".toml", ".js", ".html", ".md")
+    private val CONFIG_FILE_TERMS = setOf("config", "setting", "settings", "feature", "flag", "remote", "property", "properties", "balance", "rule", "rules")
+    private val CATEGORY_SCORE_WEIGHTS = doubleArrayOf(0.55, 0.22, 0.12, 0.07, 0.04)
+    private val SURFACE_SCORE_WEIGHTS = doubleArrayOf(1.00, 0.50, 0.30, 0.20)
+    private val SECRET_SCORE_WEIGHTS = doubleArrayOf(1.00, 0.45, 0.25, 0.15)
     private const val MAX_HITS = 360
     private const val MAX_SECRETS = 80
     private const val MAX_HOOK_PROPOSALS = 32

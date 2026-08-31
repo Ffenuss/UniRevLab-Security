@@ -57,7 +57,7 @@ fun TamperAssessmentPanel(
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
             Text("Tamper Assessment — автоматический поиск поверхностей", fontWeight = FontWeight.Bold)
             Text(
-                "Ищет client-side trust/state/config, значения и файлы. Предварительные secret candidates можно перепроверить через Secret Exposure Proof; авто-hooks только наблюдают выполнение.",
+                "Ищет client-side trust/state/config, значения и файлы. Предварительные secret candidates можно перепроверить через Secret Exposure Proof; trace hooks только наблюдают выполнение, а AutoMod Demo вынесен в отдельный режим с подтверждением прав.",
                 style = MaterialTheme.typography.bodySmall,
             )
             EasyAuditPanel(
@@ -73,7 +73,7 @@ fun TamperAssessmentPanel(
                 Text("Индексируем DEX/native/assets для Patch Lab…", style = MaterialTheme.typography.bodySmall)
             } else {
                 val a = requireNotNull(assessment)
-                Text("Tamper surface score: ${a.score}/100 (${a.band})", fontWeight = FontWeight.SemiBold)
+                Text("Calibrated tamper score: ${a.score}/100 (${a.band})", fontWeight = FontWeight.SemiBold)
                 Text("Поверхностей: ${a.hits.size}; secret/key candidates: ${a.secrets.size}; trace hooks: ${a.hookProposals.size}${if (a.truncated) "; индекс ограничен" else ""}", style = MaterialTheme.typography.bodySmall)
                 a.categories.take(8).forEach { category ->
                     Text("• ${category.category}: ${category.count}, max=${category.maxScore}", style = MaterialTheme.typography.bodySmall)

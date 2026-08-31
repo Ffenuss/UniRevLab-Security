@@ -15,8 +15,8 @@ android {
         applicationId = "org.unirevlab.security"
         minSdk = 26
         targetSdk = 36
-        versionCode = 31
-        versionName = "0.25.2-dev-secret-proof"
+        versionCode = 32
+        versionName = "0.25.3-dev-classifier-automod"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

@@ -337,6 +337,14 @@ fun PatchLabScreen(
                     onStatus = { status = it },
                     onError = { error = it },
                 )
+                AutoModPanel(
+                    report = report,
+                    workspace = ws,
+                    busy = busy,
+                    onAnalyzeBuilt = onAnalyzeBuilt,
+                    onStatus = { status = it },
+                    onError = { error = it },
+                )
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ws.dexEntries.forEach { dex ->
                         if (dex == selectedDex) Button(onClick = { selectedDex = dex; classes = emptyList(); smaliText = "" }) { Text(dex) }

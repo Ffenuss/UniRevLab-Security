@@ -159,7 +159,7 @@ object FlagSweepEngine {
                     val index = text.indexOf(term, from)
                     if (index < 0) break
                     from = index + maxOf(1, term.length)
-                    if (requiresTokenBoundary(term) && !hasTokenBoundary(text, index, term.length)) continue
+                    if (!isValidTermOccurrence(text, original, index, rawTerm)) continue
                     matches += FlagMatch(
                         category = definition.category,
                         term = rawTerm,
@@ -206,13 +206,46 @@ object FlagSweepEngine {
         }
     }
 
-    private fun requiresTokenBoundary(term: String): Boolean = term.length <= 3 || term in BOUNDARY_TERMS
+    private fun isValidTermOccurrence(text: String, original: String, index: Int, rawTerm: String): Boolean {
+        val length = rawTerm.length
+        if (hasTokenBoundary(text, index, length)) return true
+
+        // A raw substring can still be a valid identifier token in camelCase/snake_case
+        // (highScore, isPremiumEnabled), but must not match inside ordinary words such as
+        // scoreboard, professional, prepaid, lifestyle, ranking or balanced.
+        val span = enclosingIdentifier(original, index, length)
+        val spanTokens = identifierTokens(span)
+        val termTokens = identifierTokens(rawTerm)
+        if (termTokens.isEmpty() || spanTokens.size < termTokens.size) return false
+        return spanTokens.windowed(termTokens.size).any { it == termTokens }
+    }
 
     private fun hasTokenBoundary(text: String, index: Int, length: Int): Boolean {
         val leftOk = index == 0 || !text[index - 1].isLetterOrDigit()
         val end = index + length
         val rightOk = end >= text.length || !text[end].isLetterOrDigit()
         return leftOk && rightOk
+    }
+
+    private fun enclosingIdentifier(original: String, index: Int, length: Int): String {
+        if (original.isEmpty()) return original
+        val safeStart = index.coerceIn(0, original.length)
+        val safeEnd = (index + length).coerceIn(safeStart, original.length)
+        var start = safeStart
+        var end = safeEnd
+        while (start > 0 && isIdentifierChar(original[start - 1])) start--
+        while (end < original.length && isIdentifierChar(original[end])) end++
+        return original.substring(start, end)
+    }
+
+    private fun isIdentifierChar(value: Char): Boolean =
+        value.isLetterOrDigit() || value == '_' || value == '$'
+
+    private fun identifierTokens(value: String): List<String> {
+        val expanded = value.replace(Regex("([a-z0-9])([A-Z])"), "$1 $2")
+        return expanded.lowercase(Locale.ROOT)
+            .split(Regex("[^a-z0-9]+"))
+            .filter { it.isNotBlank() }
     }
 
     private fun preview(value: String, index: Int, length: Int): String {
@@ -257,7 +290,6 @@ object FlagSweepEngine {
         )),
     )
 
-    private val BOUNDARY_TERMS = setOf("pro", "vip", "paid", "trial", "sku", "hp", "life", "coin", "gem")
     private const val MAX_CUSTOM_TERMS = 24
     private const val MAX_MATCHES = 800
     private const val MAX_MATCHES_PER_TERM_ENTRY = 3
