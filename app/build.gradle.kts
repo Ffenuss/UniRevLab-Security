@@ -15,8 +15,8 @@ android {
         applicationId = "org.unirevlab.security"
         minSdk = 26
         targetSdk = 36
-        versionCode = 28
-        versionName = "0.24.0-dev-tamper-assessment"
+        versionCode = 29
+        versionName = "0.25.0-dev-easy-audit"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
