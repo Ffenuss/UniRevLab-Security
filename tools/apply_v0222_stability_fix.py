@@ -30,4 +30,21 @@ if new not in text:
     state.write_text(text.replace(old, new, 1), encoding="utf-8")
     print("patched: AnalysisRunState.kt")
 
-runpy.run_path(str(root / ".ci/apply_v0222_stability_fix.py"), run_name="__main__")
+# Once the verified v0.22.2 analyzer sources have been committed back to the branch, later UI/version
+# changes must not be forced to match the historical patch byte-for-byte. Use stable integration
+# markers and skip the bootstrap patch in that state.
+inspector = root / "app/src/main/java/org/unirevlab/security/analysis/LocalArtifactInspector.kt"
+eta = root / "app/src/main/java/org/unirevlab/security/analysis/AnalysisEtaEstimator.kt"
+manifest = root / "app/src/main/AndroidManifest.xml"
+fully_integrated = (
+    inspector.is_file()
+    and eta.is_file()
+    and 'ENGINE_VERSION = "0.22.2-dev-dex-stability-eta"' in inspector.read_text(encoding="utf-8")
+    and 'android:largeHeap="true"' in manifest.read_text(encoding="utf-8")
+    and "fractionComplete" in state.read_text(encoding="utf-8")
+)
+
+if fully_integrated:
+    print("v0.22.2 stability patch already integrated; preserving newer UI/source edits")
+else:
+    runpy.run_path(str(root / ".ci/apply_v0222_stability_fix.py"), run_name="__main__")
