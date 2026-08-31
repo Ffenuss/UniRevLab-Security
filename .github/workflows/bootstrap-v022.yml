@@ -1,4 +1,4 @@
-name: Build UniRevLab v0.23.2 Report Export APK
+name: Build UniRevLab v0.24.0 Tamper Assessment APK
 
 on:
   push:
@@ -25,11 +25,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Apply verified base and v0.23.2 report export fix
+      - name: Apply verified base and v0.24.0 tamper assessment
         shell: bash
         run: |
           set -euo pipefail
-          if ! grep -q 'versionName = "0.23.2-dev-report-export"' app/build.gradle.kts; then
+          if ! grep -Eq 'versionName = "0\.23\.2-dev-report-export"|versionName = "0\.24\.0-dev-tamper-assessment"' app/build.gradle.kts; then
             if ! grep -q 'versionName = "0.23.1-dev-patch-lab-native"' app/build.gradle.kts; then
               if ! grep -q 'versionName = "0.23.0-dev-patch-lab"' app/build.gradle.kts; then
                 python scripts/apply_v0221_bugfix_chunks.py
@@ -49,10 +49,13 @@ jobs:
             fi
             python tools/fix_v0231_patch_lab_nullable.py
             python tools/apply_v0232_report_export_fix.py
-          else
-            echo "v0.23.2 report export fix already integrated"
           fi
           python tools/fix_v0231_patch_lab_nullable.py
+          if ! grep -q 'versionName = "0.24.0-dev-tamper-assessment"' app/build.gradle.kts; then
+            python tools/apply_v0240_tamper_assessment.py
+          else
+            echo "v0.24.0 tamper assessment already integrated"
+          fi
           git diff --check
 
       - uses: actions/setup-java@v4
@@ -118,10 +121,10 @@ jobs:
           APK="$(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | head -n 1)"
           test -n "${APK}"
           unzip -t "${APK}" >/dev/null
-          cp "${APK}" UniRevLab-Security-v0.23.2-report-export-debug.apk
-          sha256sum UniRevLab-Security-v0.23.2-report-export-debug.apk | tee UniRevLab-Security-v0.23.2-report-export-debug.apk.sha256
+          cp "${APK}" UniRevLab-Security-v0.24.0-tamper-assessment-debug.apk
+          sha256sum UniRevLab-Security-v0.24.0-tamper-assessment-debug.apk | tee UniRevLab-Security-v0.24.0-tamper-assessment-debug.apk.sha256
 
-      - name: Commit verified v0.23.2 source patch
+      - name: Commit verified v0.24.0 source patch
         if: github.ref_name == 'fix-analysis-progress-v0221'
         shell: bash
         run: |
@@ -130,15 +133,15 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add app/src app/build.gradle.kts
-            git commit -m "Fix deterministic report export zero-byte race [skip ci]"
+            git commit -m "Add defensive tamper assessment, search, trace hooks and APK diff [skip ci]"
             git push origin HEAD:fix-analysis-progress-v0221
           fi
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: UniRevLab-Security-v0.23.2-report-export-debug
+          name: UniRevLab-Security-v0.24.0-tamper-assessment-debug
           path: |
-            UniRevLab-Security-v0.23.2-report-export-debug.apk
-            UniRevLab-Security-v0.23.2-report-export-debug.apk.sha256
+            UniRevLab-Security-v0.24.0-tamper-assessment-debug.apk
+            UniRevLab-Security-v0.24.0-tamper-assessment-debug.apk.sha256
           if-no-files-found: error
