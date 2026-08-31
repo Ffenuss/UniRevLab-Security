@@ -65,7 +65,9 @@ class LocalArtifactInspector(
 
     private class ProgressReporter(private val callback: ((AnalysisProgress) -> Unit)?) {
         val startedAtEpochMs: Long = System.currentTimeMillis()
+        private val etaEstimator = AnalysisEtaEstimator()
         private var lastPercent: Int = -1
+        private var lastFraction: Double = -1.0
         private var lastStage: AnalysisStage? = null
         private var lastDetail: String? = null
         private var lastCallbackAtMs: Long = 0L
@@ -77,17 +79,21 @@ class LocalArtifactInspector(
             detail: String,
             completedUnits: Int? = null,
             totalUnits: Int? = null,
+            fractionComplete: Double? = null,
         ) {
             checkCancelled()
             val normalized = percent.coerceIn(0, 100)
-            if (normalized < lastPercent) return
+            val normalizedFraction = (fractionComplete ?: normalized / 100.0).coerceIn(0.0, 1.0)
+            if (normalized < lastPercent || (lastFraction >= 0.0 && normalizedFraction + 0.0000001 < lastFraction)) return
             val now = System.currentTimeMillis()
-            val sameCheckpoint = normalized == lastPercent && stage == lastStage && detail == lastDetail
-            if (sameCheckpoint && normalized != 0 && normalized != 100 && now - lastCallbackAtMs < 250L) return
+            val importantCheckpoint = normalized != lastPercent || stage != lastStage || normalized == 0 || normalized == 100
+            if (!importantCheckpoint && now - lastCallbackAtMs < 500L) return
             lastPercent = normalized
+            lastFraction = maxOf(lastFraction, normalizedFraction)
             lastStage = stage
             lastDetail = detail
             lastCallbackAtMs = now
+            val finishAt = etaEstimator.observe(lastFraction, now)
             callback?.invoke(
                 AnalysisProgress(
                     stage = stage,
@@ -96,6 +102,9 @@ class LocalArtifactInspector(
                     completedUnits = completedUnits,
                     totalUnits = totalUnits,
                     startedAtEpochMs = startedAtEpochMs,
+                    updatedAtEpochMs = now,
+                    fractionComplete = lastFraction,
+                    estimatedFinishAtEpochMs = finishAt,
                 )
             )
         }
@@ -111,8 +120,11 @@ class LocalArtifactInspector(
             totalUnits: Int? = null,
         ) {
             val fraction = if (total <= 0L) 1.0 else (completed.toDouble() / total.toDouble()).coerceIn(0.0, 1.0)
-            val percent = fromPercent + ((toPercent - fromPercent) * fraction).toInt()
-            emit(stage, percent, detail, completedUnits, totalUnits)
+            val precisePercent = fromPercent.toDouble() + (toPercent - fromPercent).toDouble() * fraction
+            emit(
+                stage, precisePercent.toInt(), detail, completedUnits, totalUnits,
+                fractionComplete = precisePercent / 100.0,
+            )
         }
 
         fun checkCancelled() = Companion.checkCancelled()
@@ -816,6 +828,13 @@ class LocalArtifactInspector(
     private data class CopiedEntry(val bytes: Long, val sha256: String)
     private data class PreparedDexEntry(val reportedEntry: String, val file: File, val sha256: String, val ordinal: Int)
     private data class DexTaskResult(val prepared: PreparedDexEntry, val bundle: DexScanBundle?, val failed: Boolean)
+    private data class DexCallKey(val entry: String, val caller: Int, val callee: Int, val offset: Int)
+    private data class DexStringKey(val entry: String, val caller: Int, val stringIndex: Int, val offset: Int)
+    private data class DexTypeKey(val entry: String, val caller: Int, val typeIndex: Int, val kind: String, val offset: Int)
+    private data class DexFieldKey(val entry: String, val caller: Int, val fieldIndex: Int, val kind: String, val offset: Int)
+    private data class DexBlockKey(val entry: String, val method: Int, val start: Int)
+    private data class DexConstantKey(val entry: String, val method: Int, val register: Int, val offset: Int)
+    private data class DexInvokeKey(val entry: String, val caller: Int, val callee: Int, val offset: Int)
     private data class PreparedNativeEntry(
         val reportedEntry: String,
         val rawEntryName: String,
@@ -933,13 +952,23 @@ class LocalArtifactInspector(
         val methods = BoundedDistinctCollector<DexMethodReference, Triple<String, Int, String>>(MAX_REPORTED_DEX_METHODS) { Triple(it.dexEntry, it.methodIndex, it.declaringClass) }
         val nativeMethods = BoundedDistinctCollector<DexNativeMethodDeclaration, Triple<String, Int, String>>(MAX_REPORTED_NATIVE_METHODS) { Triple(it.dexEntry, it.methodIndex, it.declaringClass) }
         val codeMethods = BoundedDistinctCollector<DexMethodCodeReference, Triple<String, Int, Long>>(MAX_REPORTED_CODE_METHODS) { Triple(it.dexEntry, it.methodIndex, it.codeOffset) }
-        val callXrefs = BoundedDistinctCollector<DexMethodCallXref, List<Any>>(MAX_REPORTED_CALL_XREFS) { listOf(it.dexEntry, it.callerMethodIndex, it.calleeMethodIndex, it.instructionOffsetCodeUnits) }
-        val stringXrefs = BoundedDistinctCollector<DexStringXref, List<Any>>(MAX_REPORTED_STRING_XREFS) { listOf(it.dexEntry, it.callerMethodIndex, it.stringIndex, it.instructionOffsetCodeUnits) }
-        val typeXrefs = BoundedDistinctCollector<DexTypeXref, List<Any>>(MAX_REPORTED_TYPE_XREFS) { listOf(it.dexEntry, it.callerMethodIndex, it.typeIndex, it.kind, it.instructionOffsetCodeUnits) }
-        val fieldXrefs = BoundedDistinctCollector<DexFieldXref, List<Any>>(MAX_REPORTED_FIELD_XREFS) { listOf(it.dexEntry, it.callerMethodIndex, it.fieldIndex, it.kind, it.instructionOffsetCodeUnits) }
-        val basicBlocks = BoundedDistinctCollector<DexBasicBlock, List<Any>>(MAX_REPORTED_BASIC_BLOCKS) { listOf(it.dexEntry, it.methodIndex, it.startCodeUnit) }
-        val constants = BoundedDistinctCollector<DexConstantReference, List<Any>>(MAX_REPORTED_CONSTANTS) { listOf(it.dexEntry, it.methodIndex, it.register, it.instructionOffsetCodeUnits) }
-        val invokeObservations = BoundedDistinctCollector<DexInvokeObservation, List<Any>>(MAX_REPORTED_INVOKE_OBSERVATIONS) { listOf(it.dexEntry, it.callerMethodIndex, it.calleeMethodIndex, it.instructionOffsetCodeUnits) }
+        val callXrefs = BoundedDistinctCollector<DexMethodCallXref, DexCallKey>(MAX_REPORTED_CALL_XREFS) { DexCallKey(it.dexEntry, it.callerMethodIndex, it.calleeMethodIndex, it.instructionOffsetCodeUnits) }
+        val stringXrefs = BoundedDistinctCollector<DexStringXref, DexStringKey>(MAX_REPORTED_STRING_XREFS) { DexStringKey(it.dexEntry, it.callerMethodIndex, it.stringIndex, it.instructionOffsetCodeUnits) }
+        val typeXrefs = BoundedDistinctCollector<DexTypeXref, DexTypeKey>(MAX_REPORTED_TYPE_XREFS) { DexTypeKey(it.dexEntry, it.callerMethodIndex, it.typeIndex, it.kind, it.instructionOffsetCodeUnits) }
+        val fieldXrefs = BoundedDistinctCollector<DexFieldXref, DexFieldKey>(MAX_REPORTED_FIELD_XREFS) { DexFieldKey(it.dexEntry, it.callerMethodIndex, it.fieldIndex, it.kind, it.instructionOffsetCodeUnits) }
+        val basicBlocks = BoundedDistinctCollector<DexBasicBlock, DexBlockKey>(MAX_REPORTED_BASIC_BLOCKS) { DexBlockKey(it.dexEntry, it.methodIndex, it.startCodeUnit) }
+        val constants = BoundedDistinctCollector<DexConstantReference, DexConstantKey>(MAX_REPORTED_CONSTANTS) { DexConstantKey(it.dexEntry, it.methodIndex, it.register, it.instructionOffsetCodeUnits) }
+        val invokeObservations = BoundedDistinctCollector<DexInvokeObservation, DexInvokeKey>(MAX_REPORTED_INVOKE_OBSERVATIONS) { DexInvokeKey(it.dexEntry, it.callerMethodIndex, it.calleeMethodIndex, it.instructionOffsetCodeUnits) }
+
+        val dexProgressFractions = DoubleArray(overallTotal.coerceAtLeast(1)) { index -> if (index < overallBase) 1.0 else 0.0 }
+        val dexProgressLock = Any()
+        fun updateDexProgress(ordinal: Int, localFraction: Double): Pair<Double, Int> = synchronized(dexProgressLock) {
+            val slot = (ordinal - 1).coerceIn(0, dexProgressFractions.lastIndex)
+            dexProgressFractions[slot] = maxOf(dexProgressFractions[slot], localFraction.coerceIn(0.0, 1.0))
+            val overallFraction = dexProgressFractions.sum() / dexProgressFractions.size.toDouble()
+            val completed = dexProgressFractions.count { it >= 0.999999 }
+            overallFraction to completed
+        }
 
         try {
             ZipFile(apk).use { zip ->
@@ -1003,15 +1032,17 @@ class LocalArtifactInspector(
                             executor.submit(java.util.concurrent.Callable {
                                 try {
                                     val bundle = obtainDexScan(item.reportedEntry, item.file, item.sha256, session) { localPercent, detail, completed, total ->
-                                        val completedBefore = (item.ordinal - 1).coerceAtLeast(0)
-                                        val globalFraction = (completedBefore.toDouble() + localPercent.coerceIn(0, 100) / 100.0) / overallTotal.coerceAtLeast(1).toDouble()
-                                        val globalPercent = 25 + (globalFraction.coerceIn(0.0, 1.0) * 33.0).toInt()
+                                        val (globalFraction, completedDex) = updateDexProgress(
+                                            item.ordinal, localPercent.coerceIn(0, 100) / 100.0,
+                                        )
+                                        val precisePercent = 25.0 + globalFraction.coerceIn(0.0, 1.0) * 33.0
                                         progress?.emit(
                                             AnalysisStage.DEX,
-                                            globalPercent,
+                                            precisePercent.toInt(),
                                             "${item.reportedEntry}: $detail",
-                                            completedBefore.coerceAtMost(overallTotal),
+                                            completedDex,
                                             overallTotal,
+                                            fractionComplete = precisePercent / 100.0,
                                         )
                                     }
                                     DexTaskResult(item, bundle, failed = false)
@@ -1076,12 +1107,15 @@ class LocalArtifactInspector(
                                     invokeObservations.addAll(code.invokeObservations)
                                     if (code.truncated || code.decodeErrors > 0) truncated = true
                                 }
+                                val (globalFraction, completedDex) = updateDexProgress(task.prepared.ordinal, 1.0)
+                                val precisePercent = 25.0 + globalFraction.coerceIn(0.0, 1.0) * 33.0
                                 progress?.emit(
                                     AnalysisStage.DEX,
-                                    25 + (((task.prepared.ordinal.toDouble() / overallTotal.coerceAtLeast(1).toDouble()).coerceIn(0.0, 1.0)) * 33.0).toInt(),
+                                    precisePercent.toInt(),
                                     "DEX готов: ${task.prepared.reportedEntry}",
-                                    task.prepared.ordinal.coerceAtMost(overallTotal),
+                                    completedDex,
                                     overallTotal,
+                                    fractionComplete = precisePercent / 100.0,
                                 )
                             }
                         } finally {
@@ -1643,7 +1677,7 @@ class LocalArtifactInspector(
     )
 
     companion object {
-        const val ENGINE_VERSION = "0.22.0-dev-performance-ux"
+        const val ENGINE_VERSION = "0.22.2-dev-dex-stability-eta"
 
         private fun checkCancelled() {
             if (Thread.currentThread().isInterrupted) throw InterruptedIOException("Analysis cancelled")

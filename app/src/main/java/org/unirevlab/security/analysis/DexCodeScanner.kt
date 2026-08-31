@@ -237,14 +237,17 @@ object DexCodeScanner {
             val progressTotal = reusableLocations?.size ?: h.classDefsSize
             onProgress?.invoke(100, "Bytecode xrefs/CFG готовы", progressTotal, progressTotal)
             return FileResult(
-                codeMethods = codeMethods.distinctBy { Triple(it.dexEntry, it.methodIndex, it.codeOffset) },
-                callXrefs = calls.distinctBy { listOf(it.dexEntry, it.callerMethodIndex, it.calleeMethodIndex, it.instructionOffsetCodeUnits) },
-                stringXrefs = strings.distinctBy { listOf(it.dexEntry, it.callerMethodIndex, it.stringIndex, it.instructionOffsetCodeUnits) },
-                typeXrefs = types.distinctBy { listOf(it.dexEntry, it.callerMethodIndex, it.typeIndex, it.kind, it.instructionOffsetCodeUnits) },
-                fieldXrefs = fields.distinctBy { listOf(it.dexEntry, it.callerMethodIndex, it.fieldIndex, it.kind, it.instructionOffsetCodeUnits) },
-                basicBlocks = blocks.distinctBy { listOf(it.dexEntry, it.methodIndex, it.startCodeUnit, it.endCodeUnitExclusive) },
-                constants = constants.distinctBy { listOf(it.dexEntry, it.methodIndex, it.register, it.instructionOffsetCodeUnits) },
-                invokeObservations = observations.distinctBy { listOf(it.dexEntry, it.callerMethodIndex, it.calleeMethodIndex, it.instructionOffsetCodeUnits) },
+                // Decoder visits each valid method/instruction position once. Avoid terminal
+                // distinctBy copies here: on very large DEX files they temporarily doubled the
+                // xref/CFG graph and its key sets, which could kill the Android process.
+                codeMethods = codeMethods,
+                callXrefs = calls,
+                stringXrefs = strings,
+                typeXrefs = types,
+                fieldXrefs = fields,
+                basicBlocks = blocks,
+                constants = constants,
+                invokeObservations = observations,
                 decodedInstructionUnits = totalUnits,
                 decodeErrors = decodeErrors,
                 truncated = truncated,

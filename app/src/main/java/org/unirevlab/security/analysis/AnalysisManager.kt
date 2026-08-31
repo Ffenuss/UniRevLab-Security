@@ -38,6 +38,8 @@ object AnalysisManager {
     @Volatile private var inspector: LocalArtifactInspector? = null
     @Volatile private var store: AnalysisRunStore? = null
     @Volatile private var activeJob: Job? = null
+    private var lastPersistAtMs: Long = 0L
+    private var lastPersistStage: AnalysisStage? = null
 
     fun initialize(context: Context) {
         if (appContext != null) return
@@ -54,7 +56,8 @@ object AnalysisManager {
                     append("Предыдущий анализ был прерван системой, принудительной остановкой или перезапуском устройства")
                     stale.stage?.let { append(" на этапе «$it»") }
                     stale.percent?.let { append(" ($it%)") }
-                    append(". Запустите анализ снова. Уже сохранённые content-cache результаты будут переиспользованы автоматически.")
+                    stale.detail?.takeIf { it.isNotBlank() }?.let { append(". Последняя операция: $it") }
+                    append(". Запустите анализ снова; доступные кэшированные результаты будут переиспользованы автоматически.")
                 }
                 mutableState.value = AnalysisRunState.Interrupted(
                     targetLabel = stale.targetLabel,
@@ -104,7 +107,7 @@ object AnalysisManager {
                 else -> return
             }
             mutableState.value = cancelling
-            store?.writeRunning(cancelling.targetLabel, cancelling.progress, cancelling = true)
+            persistRunning(cancelling.targetLabel, cancelling.progress, cancelling = true, force = true)
         }
         // runInterruptible interrupts the actual inspector thread. The inspector in turn cancels
         // its executor Futures, so work does not continue invisibly after the UI job is cancelled.
@@ -139,7 +142,7 @@ object AnalysisManager {
         synchronized(lock) {
             check(activeJob?.isActive != true) { "Другой анализ уже выполняется" }
             mutableState.value = AnalysisRunState.Running(runId, targetLabel, assessmentScope, initialProgress)
-            store?.writeRunning(targetLabel, initialProgress)
+            persistRunning(targetLabel, initialProgress, force = true)
         }
 
         val job = managerScope.launch(start = CoroutineStart.LAZY) {
@@ -196,7 +199,7 @@ object AnalysisManager {
                     if (progress.percent < current.progress.percent) return
                     val normalized = progress.copy(percent = progress.percent.coerceIn(0, 100))
                     mutableState.value = current.copy(progress = normalized)
-                    store?.writeRunning(targetLabel, normalized)
+                    persistRunning(targetLabel, normalized)
                 }
                 is AnalysisRunState.Cancelling -> if (current.runId == runId) {
                     if (progress.percent < current.progress.percent) return
@@ -205,11 +208,25 @@ object AnalysisManager {
                         detail = "Отмена выполняется… ${progress.detail}",
                     )
                     mutableState.value = current.copy(progress = cancellationProgress)
-                    store?.writeRunning(targetLabel, cancellationProgress, cancelling = true)
+                    persistRunning(targetLabel, cancellationProgress, cancelling = true)
                 }
                 else -> Unit
             }
         }
+    }
+
+    private fun persistRunning(
+        targetLabel: String,
+        progress: AnalysisProgress,
+        cancelling: Boolean = false,
+        force: Boolean = false,
+    ) {
+        val now = System.currentTimeMillis()
+        val stageChanged = progress.stage != lastPersistStage
+        if (!force && !stageChanged && now - lastPersistAtMs < 2_000L) return
+        store?.writeRunning(targetLabel, progress, cancelling)
+        lastPersistAtMs = now
+        lastPersistStage = progress.stage
     }
 
     private fun currentRunId(): Long? = when (val current = mutableState.value) {

@@ -28,9 +28,12 @@ data class AnalysisProgress(
     val totalUnits: Int? = null,
     val startedAtEpochMs: Long,
     val updatedAtEpochMs: Long = System.currentTimeMillis(),
+    val fractionComplete: Double = percent / 100.0,
+    val estimatedFinishAtEpochMs: Long? = null,
 ) {
     init {
-        require(percent in 0..100) { "percent must be in 0..100" }
+        require(percent in 0..100)
+        require(fractionComplete.isFinite() && fractionComplete in 0.0..1.0)
     }
 }
 

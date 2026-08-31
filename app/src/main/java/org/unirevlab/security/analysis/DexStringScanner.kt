@@ -218,10 +218,12 @@ object DexStringScanner {
                 methodsIndexed = toIndexMethods,
                 classes = classes,
                 methods = methods,
-                nativeMethods = nativeMethods.distinctBy { Triple(it.dexEntry, it.methodIndex, it.declaringClass) },
-                httpUrls = httpUrls.distinctBy { Triple(it.dexEntry, it.stringIndex, it.value) },
-                httpsUrls = httpsUrls.distinctBy { Triple(it.dexEntry, it.stringIndex, it.value) },
-                secretCandidates = secrets.distinctBy { Triple(it.kind, it.dexEntry, it.stringIndex) },
+                // These collections are produced from a single monotonic DEX traversal; avoid
+                // end-of-scan copies so large files do not create a second transient object graph.
+                nativeMethods = nativeMethods,
+                httpUrls = httpUrls,
+                httpsUrls = httpsUrls,
+                secretCandidates = secrets,
                 structuralIndex = if (toIndexMethods == h.methodIdsSize && toIndexClasses == h.classDefsSize) {
                     StructuralIndex(methodsByIndex.asList(), codeLocations.toList())
                 } else null,

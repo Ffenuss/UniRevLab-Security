@@ -10,6 +10,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
@@ -17,7 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import org.unirevlab.security.MainActivity
 
@@ -32,10 +33,25 @@ class AnalysisForegroundService : Service() {
         AnalysisManager.initialize(applicationContext)
         createNotificationChannel()
         stateJob = serviceScope.launch {
-            AnalysisManager.state.collectLatest { state ->
+            var lastNotificationAtMs = 0L
+            var lastNotificationStage: AnalysisStage? = null
+            AnalysisManager.state.collect { state ->
                 when (state) {
                     is AnalysisRunState.Running,
-                    is AnalysisRunState.Cancelling -> notificationManager().notify(NOTIFICATION_ID, buildNotification(state))
+                    is AnalysisRunState.Cancelling -> {
+                        val progress = when (state) {
+                            is AnalysisRunState.Running -> state.progress
+                            is AnalysisRunState.Cancelling -> state.progress
+                            else -> null
+                        }
+                        val now = SystemClock.elapsedRealtime()
+                        val stageChanged = progress?.stage != lastNotificationStage
+                        if (stageChanged || state is AnalysisRunState.Cancelling || now - lastNotificationAtMs >= 1_000L) {
+                            notificationManager().notify(NOTIFICATION_ID, buildNotification(state))
+                            lastNotificationAtMs = now
+                            lastNotificationStage = progress?.stage
+                        }
+                    }
                     is AnalysisRunState.Completed,
                     is AnalysisRunState.Cancelled,
                     is AnalysisRunState.Failed,

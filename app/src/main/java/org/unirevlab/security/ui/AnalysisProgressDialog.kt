@@ -73,14 +73,17 @@ private fun ActiveAnalysisDialog(
         }
     }
     val elapsedMs = (now - progress.startedAtEpochMs).coerceAtLeast(0L)
-    val remainingMs = estimateRemainingMs(elapsedMs, progress.percent)
     val unchangedMs = (now - progress.updatedAtEpochMs).coerceAtLeast(0L)
+    val remainingMs = progress.estimatedFinishAtEpochMs
+        ?.minus(now)
+        ?.takeIf { it > 0L && unchangedMs < 180_000L }
+    val percentLabel = formatProgressPercent(progress.fractionComplete)
 
     AlertDialog(
         onDismissRequest = { /* Analysis state must remain visible while work is active. */ },
         title = {
             Text(
-                if (cancelling) "Останавливаем анализ" else "Анализ выполняется — ${progress.percent}%",
+                if (cancelling) "Останавливаем анализ" else "Анализ выполняется — $percentLabel",
                 fontWeight = FontWeight.SemiBold,
             )
         },
@@ -89,10 +92,10 @@ private fun ActiveAnalysisDialog(
                 Text(target, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(progress.stage.title, fontWeight = FontWeight.Medium)
-                    Text("${progress.percent}%", fontWeight = FontWeight.Bold)
+                    Text(percentLabel, fontWeight = FontWeight.Bold)
                 }
                 LinearProgressIndicator(
-                    progress = { progress.percent / 100f },
+                    progress = { progress.fractionComplete.toFloat() },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Text(progress.detail)
@@ -103,7 +106,11 @@ private fun ActiveAnalysisDialog(
                 Text(
                     buildString {
                         append("Прошло: ${formatDuration(elapsedMs)}")
-                        remainingMs?.let { append(" · Осталось примерно: ${formatDuration(it)}") }
+                        if (remainingMs != null) {
+                            append(" · Осталось примерно: ${formatDuration(remainingMs)}")
+                        } else if (!cancelling) {
+                            append(" · Осталось: оценка уточняется")
+                        }
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -152,11 +159,9 @@ private fun TerminalAnalysisDialog(
     )
 }
 
-private fun estimateRemainingMs(elapsedMs: Long, percent: Int): Long? {
-    if (percent !in 3..99 || elapsedMs < 2_000L) return null
-    return ((elapsedMs.toDouble() * (100 - percent).toDouble()) / percent.toDouble())
-        .toLong()
-        .coerceAtLeast(0L)
+private fun formatProgressPercent(fraction: Double): String {
+    val value = (fraction.coerceIn(0.0, 1.0) * 1000.0).toInt() / 10.0
+    return if (value % 1.0 == 0.0) "${value.toInt()}%" else "${value}%"
 }
 
 private fun formatDuration(durationMs: Long): String {
