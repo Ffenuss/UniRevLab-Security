@@ -11,18 +11,20 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runInterruptible
 import org.unirevlab.security.model.AssessmentScope
 import org.unirevlab.security.model.InstalledAppDescriptor
 import org.unirevlab.security.model.StaticAnalysisReport
 
 /**
- * Process-scoped analysis owner. The UI observes it instead of owning the heavy job itself, so
- * Activity/Compose recreation no longer silently detaches the visible state from a running scan.
+ * Process-scoped owner for the heavy local analysis job.
+ *
+ * The Activity only observes [state]. This keeps the job and its visible progress attached to the
+ * process when Compose/Activity is recreated while the foreground service keeps the process alive.
  */
 object AnalysisManager {
     private val lock = Any()
@@ -32,14 +34,10 @@ object AnalysisManager {
 
     val state: StateFlow<AnalysisRunState> = mutableState.asStateFlow()
 
-    @Volatile
-    private var appContext: Context? = null
-    @Volatile
-    private var inspector: LocalArtifactInspector? = null
-    @Volatile
-    private var store: AnalysisRunStore? = null
-    @Volatile
-    private var activeJob: Job? = null
+    @Volatile private var appContext: Context? = null
+    @Volatile private var inspector: LocalArtifactInspector? = null
+    @Volatile private var store: AnalysisRunStore? = null
+    @Volatile private var activeJob: Job? = null
 
     fun initialize(context: Context) {
         if (appContext != null) return
@@ -53,10 +51,10 @@ object AnalysisManager {
             val stale = store?.load()
             if (stale?.status == AnalysisRunStore.STATUS_RUNNING || stale?.status == AnalysisRunStore.STATUS_CANCELLING) {
                 val message = buildString {
-                    append("Предыдущий анализ был прерван системой или перезапуском приложения")
+                    append("Предыдущий анализ был прерван системой, принудительной остановкой или перезапуском устройства")
                     stale.stage?.let { append(" на этапе «$it»") }
                     stale.percent?.let { append(" ($it%)") }
-                    append(". Запустите анализ снова. Если для этого артефакта уже успел сохраниться завершённый SHA-кэш, он будет переиспользован.")
+                    append(". Запустите анализ снова. Уже сохранённые content-cache результаты будут переиспользованы автоматически.")
                 }
                 mutableState.value = AnalysisRunState.Interrupted(
                     targetLabel = stale.targetLabel,
@@ -72,7 +70,7 @@ object AnalysisManager {
     fun startFile(uri: Uri, assessmentScope: AssessmentScope) {
         val context = requireContext()
         val targetLabel = uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() } ?: "APK / архив"
-        start(targetLabel) { progress ->
+        start(targetLabel, assessmentScope) { progress ->
             requireNotNull(inspector).inspect(uri, assessmentScope, progress)
         }
         AnalysisForegroundService.start(context)
@@ -81,7 +79,7 @@ object AnalysisManager {
     fun startInstalled(app: InstalledAppDescriptor, assessmentScope: AssessmentScope) {
         val context = requireContext()
         val targetLabel = "${app.label} (${app.packageName})"
-        start(targetLabel) { progress ->
+        start(targetLabel, assessmentScope) { progress ->
             requireNotNull(inspector).inspectInstalledApp(app, assessmentScope, progress)
         }
         AnalysisForegroundService.start(context)
@@ -97,8 +95,9 @@ object AnalysisManager {
                 is AnalysisRunState.Running -> AnalysisRunState.Cancelling(
                     runId = current.runId,
                     targetLabel = current.targetLabel,
+                    assessmentScope = current.assessmentScope,
                     progress = current.progress.copy(
-                        detail = "Запрос на отмену принят. Останавливаем активные DEX/native задачи…",
+                        detail = "Запрос на отмену принят. Прерываем активные DEX/native задачи и очищаем временные файлы…",
                         updatedAtEpochMs = System.currentTimeMillis(),
                     ),
                 )
@@ -107,6 +106,8 @@ object AnalysisManager {
             mutableState.value = cancelling
             store?.writeRunning(cancelling.targetLabel, cancelling.progress, cancelling = true)
         }
+        // runInterruptible interrupts the actual inspector thread. The inspector in turn cancels
+        // its executor Futures, so work does not continue invisibly after the UI job is cancelled.
         job.cancel(CancellationException("Analysis cancelled by user"))
     }
 
@@ -123,6 +124,7 @@ object AnalysisManager {
 
     private fun start(
         targetLabel: String,
+        assessmentScope: AssessmentScope,
         block: (onProgress: (AnalysisProgress) -> Unit) -> StaticAnalysisReport,
     ) {
         val runId = nextRunId.incrementAndGet()
@@ -135,8 +137,8 @@ object AnalysisManager {
         )
 
         synchronized(lock) {
-            activeJob?.cancel(CancellationException("Superseded by a new analysis"))
-            mutableState.value = AnalysisRunState.Running(runId, targetLabel, initialProgress)
+            check(activeJob?.isActive != true) { "Другой анализ уже выполняется" }
+            mutableState.value = AnalysisRunState.Running(runId, targetLabel, assessmentScope, initialProgress)
             store?.writeRunning(targetLabel, initialProgress)
         }
 
@@ -153,21 +155,9 @@ object AnalysisManager {
                     }
                 }
             } catch (_: CancellationException) {
-                synchronized(lock) {
-                    if (currentRunId() == runId) {
-                        mutableState.value = AnalysisRunState.Cancelled(runId, targetLabel)
-                        store?.writeTerminal(AnalysisRunStore.STATUS_CANCELLED, targetLabel, "Анализ отменён пользователем")
-                        activeJob = null
-                    }
-                }
+                markCancelled(runId, targetLabel)
             } catch (_: InterruptedIOException) {
-                synchronized(lock) {
-                    if (currentRunId() == runId) {
-                        mutableState.value = AnalysisRunState.Cancelled(runId, targetLabel)
-                        store?.writeTerminal(AnalysisRunStore.STATUS_CANCELLED, targetLabel, "Анализ отменён пользователем")
-                        activeJob = null
-                    }
-                }
+                markCancelled(runId, targetLabel)
             } catch (failure: Exception) {
                 synchronized(lock) {
                     if (currentRunId() == runId) {
@@ -189,13 +179,23 @@ object AnalysisManager {
         job.start()
     }
 
+    private fun markCancelled(runId: Long, targetLabel: String) {
+        synchronized(lock) {
+            if (currentRunId() == runId) {
+                mutableState.value = AnalysisRunState.Cancelled(runId, targetLabel)
+                store?.writeTerminal(AnalysisRunStore.STATUS_CANCELLED, targetLabel, "Анализ отменён пользователем")
+                activeJob = null
+            }
+        }
+    }
+
     private fun publishProgress(runId: Long, targetLabel: String, progress: AnalysisProgress) {
         synchronized(lock) {
             when (val current = mutableState.value) {
                 is AnalysisRunState.Running -> if (current.runId == runId) {
                     if (progress.percent < current.progress.percent) return
                     val normalized = progress.copy(percent = progress.percent.coerceIn(0, 100))
-                    mutableState.value = AnalysisRunState.Running(runId, targetLabel, normalized)
+                    mutableState.value = current.copy(progress = normalized)
                     store?.writeRunning(targetLabel, normalized)
                 }
                 is AnalysisRunState.Cancelling -> if (current.runId == runId) {
@@ -204,7 +204,7 @@ object AnalysisManager {
                         percent = progress.percent.coerceIn(0, 100),
                         detail = "Отмена выполняется… ${progress.detail}",
                     )
-                    mutableState.value = AnalysisRunState.Cancelling(runId, targetLabel, cancellationProgress)
+                    mutableState.value = current.copy(progress = cancellationProgress)
                     store?.writeRunning(targetLabel, cancellationProgress, cancelling = true)
                 }
                 else -> Unit
