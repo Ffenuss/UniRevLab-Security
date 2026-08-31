@@ -57,7 +57,7 @@ fun TamperAssessmentPanel(
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
             Text("Tamper Assessment — автоматический поиск поверхностей", fontWeight = FontWeight.Bold)
             Text(
-                "Ищет client-side trust/state/config, значения, файлы и redacted secret candidates. Авто-hooks только наблюдают выполнение и не генерируют обход лицензий/IAP.",
+                "Ищет client-side trust/state/config, значения и файлы. Предварительные secret candidates можно перепроверить через Secret Exposure Proof; авто-hooks только наблюдают выполнение.",
                 style = MaterialTheme.typography.bodySmall,
             )
             EasyAuditPanel(
@@ -102,12 +102,18 @@ fun TamperAssessmentPanel(
                     }
                 }
                 if (a.secrets.isNotEmpty()) {
-                    Text("Ключи / секреты (только redacted)", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleSmall)
+                    Text("Предварительные ключи / секреты (redacted candidates)", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleSmall)
                     Text("Private signing key корректно собранного APK извлечь из сертификата нельзя; здесь ищутся ошибочно встроенные application secrets/key material.", style = MaterialTheme.typography.bodySmall)
                     a.secrets.take(16).forEach { secret ->
                         Text("• ${secret.kind} · ${secret.location} · ${secret.redactedPreview} · sha=${secret.sha256.take(12)}…", style = MaterialTheme.typography.bodySmall)
                     }
                 }
+                SecretExposurePanel(
+                    workspace = workspace,
+                    busy = busy,
+                    onStatus = onStatus,
+                    onError = onError,
+                )
                 if (a.hookProposals.isNotEmpty()) {
                     Text("Автоматический генератор trace hooks", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleSmall)
                     a.hookProposals.take(12).forEach { proposal ->
