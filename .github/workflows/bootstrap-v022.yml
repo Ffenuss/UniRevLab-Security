@@ -37,13 +37,16 @@ jobs:
             echo "Expected v0.25.1 or v0.25.2 source on this branch" >&2
             exit 1
           fi
+          if test -f tools/fix_v0252_secret_proof_quality.py; then
+            python tools/fix_v0252_secret_proof_quality.py
+          fi
           test -f app/src/main/java/org/unirevlab/security/analysis/SecretExposureEngine.kt
           test -f app/src/main/java/org/unirevlab/security/ui/SecretExposurePanel.kt
           test -f app/src/test/java/org/unirevlab/security/analysis/SecretExposureEngineTest.kt
           test -f app/src/main/java/org/unirevlab/security/analysis/TamperAssessmentEngine.kt
           test -f app/src/main/java/org/unirevlab/security/ui/TamperAssessmentPanel.kt
-          # The bootstrap helper is removed only from the ephemeral checkout before secret preflight.
-          rm -f tools/apply_v0252_secret_proof.py
+          # Bootstrap helpers are removed only from the ephemeral checkout before secret preflight.
+          rm -f tools/apply_v0252_secret_proof.py tools/fix_v0252_secret_proof_quality.py
           git diff --check
 
       - uses: actions/setup-java@v4
@@ -121,7 +124,7 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add app/src app/build.gradle.kts
-            git commit -m "Add target-bound Secret Exposure Proof UI [skip ci]"
+            git commit -m "Finalize Secret Exposure Proof quality gates [skip ci]"
             git push origin HEAD:fix-analysis-progress-v0221
           fi
 
