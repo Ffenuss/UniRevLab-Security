@@ -30,21 +30,26 @@ if new not in text:
     state.write_text(text.replace(old, new, 1), encoding="utf-8")
     print("patched: AnalysisRunState.kt")
 
-# Once the verified v0.22.2 analyzer sources have been committed back to the branch, later UI/version
-# changes must not be forced to match the historical patch byte-for-byte. Use stable integration
-# markers and skip the bootstrap patch in that state.
+# Once the verified stability/analyzer sources have been committed back to the branch, later
+# engine-version and UI changes must not be forced to match the historical v0.22.2 patch byte-for-byte.
+# Detect the capabilities introduced by v0.22.2 instead of pinning the old ENGINE_VERSION string.
 inspector = root / "app/src/main/java/org/unirevlab/security/analysis/LocalArtifactInspector.kt"
 eta = root / "app/src/main/java/org/unirevlab/security/analysis/AnalysisEtaEstimator.kt"
 manifest = root / "app/src/main/AndroidManifest.xml"
+state_text = state.read_text(encoding="utf-8")
+inspector_text = inspector.read_text(encoding="utf-8") if inspector.is_file() else ""
 fully_integrated = (
     inspector.is_file()
     and eta.is_file()
-    and 'ENGINE_VERSION = "0.22.2-dev-dex-stability-eta"' in inspector.read_text(encoding="utf-8")
+    and manifest.is_file()
     and 'android:largeHeap="true"' in manifest.read_text(encoding="utf-8")
-    and "fractionComplete" in state.read_text(encoding="utf-8")
+    and "fractionComplete" in state_text
+    and "estimatedFinishAtEpochMs" in state_text
+    and "AnalysisEtaEstimator" in inspector_text
+    and "DEX_PARALLELISM" in inspector_text
 )
 
 if fully_integrated:
-    print("v0.22.2 stability patch already integrated; preserving newer UI/source edits")
+    print("v0.22.2 stability capabilities already integrated; preserving newer UI/source edits")
 else:
     runpy.run_path(str(root / ".ci/apply_v0222_stability_fix.py"), run_name="__main__")
