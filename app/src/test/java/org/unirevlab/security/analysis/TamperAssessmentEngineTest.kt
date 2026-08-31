@@ -1,0 +1,83 @@
+package org.unirevlab.security.analysis
+
+import java.io.File
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
+import kotlin.io.path.createTempDirectory
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.unirevlab.security.model.*
+
+class TamperAssessmentEngineTest {
+    @Test
+    fun detectsClientTrustConfigAndRedactsSecretMaterial() {
+        val dir = createTempDirectory("tamper-assessment-").toFile()
+        val apk = File(dir, "original.apk")
+        ZipOutputStream(apk.outputStream()).use { out ->
+            out.putNextEntry(ZipEntry("classes.dex")); out.write(byteArrayOf(1)); out.closeEntry()
+            out.putNextEntry(ZipEntry("assets/feature_config.json")); out.write("{\"feature\":\"premium\",\"api_key\":\"abcdefghijklmnop\"}".toByteArray()); out.closeEntry()
+        }
+        val report = StaticAnalysisReport(
+            engineVersion = "test",
+            assessment = AssessmentScope("id", 1L, "p", "o", "authorized", true),
+            artifact = ArtifactSummary(
+                displayName = "x.apk",
+                sizeBytes = apk.length(),
+                sha256 = "a".repeat(64),
+                archiveEntries = 2,
+                dexFiles = 1,
+                nativeLibraries = 0,
+                hasAndroidManifest = false,
+                suspiciousArchivePaths = 0,
+                truncatedArchiveScan = false,
+            ),
+            manifest = ManifestSummary(
+                packageName = "org.example",
+                versionName = "1",
+                versionCode = 1L,
+                minSdk = 26,
+                targetSdk = 36,
+                debuggable = false,
+                allowBackup = false,
+                fullBackupContentConfigured = false,
+                dataExtractionRulesConfigured = false,
+                usesCleartextTraffic = false,
+                networkSecurityConfigConfigured = false,
+                requestedPermissions = emptyList(),
+                dangerousPermissions = emptyList(),
+                components = emptyList(),
+                signingCertificateSha256 = emptyList(),
+            ),
+            dex = DexSummary(
+                dexFilesDiscovered = 1,
+                dexFilesScanned = 1,
+                stringsDeclared = 1,
+                stringsScanned = 1,
+                methods = listOf(DexMethodReference("classes.dex", 1, "Lorg/example/Access;", "hasPremium", "()Z")),
+                codeMethods = listOf(DexMethodCodeReference("classes.dex", 1, "Lorg/example/Access;", "hasPremium", "()Z", 1L, 2, 0, 0, 0, 1)),
+                httpUrls = emptyList(),
+                httpsUrls = emptyList(),
+                secretCandidates = emptyList(),
+                parseErrors = 0,
+                truncated = false,
+            ),
+            findings = emptyList(),
+        )
+        val workspace = PatchLabEngine.Workspace(
+            root = dir,
+            originalApk = apk,
+            artifactSha256 = "a".repeat(64),
+            apiLevel = 36,
+            minSdk = 26,
+            dexEntries = listOf("classes.dex"),
+            nativeEntries = emptyList(),
+            archiveEntries = listOf("classes.dex", "assets/feature_config.json"),
+        )
+        val assessment = TamperAssessmentEngine.scan(report, workspace)
+        assertTrue(assessment.categories.any { it.category == "ENTITLEMENT_TRUST" })
+        assertTrue(assessment.hookProposals.any { it.methodName == "hasPremium" })
+        assertTrue(assessment.secrets.isNotEmpty())
+        assertTrue(assessment.secrets.none { it.redactedPreview.contains("abcdefghijklmnop") })
+        dir.deleteRecursively()
+    }
+}

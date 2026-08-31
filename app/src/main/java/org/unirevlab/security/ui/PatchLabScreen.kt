@@ -41,6 +41,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.unirevlab.security.analysis.PatchLabEngine
+import org.unirevlab.security.analysis.TamperAssessmentEngine
 import org.unirevlab.security.model.Finding
 import org.unirevlab.security.model.StaticAnalysisReport
 
@@ -203,6 +204,67 @@ fun PatchLabScreen(
         }
     }
 
+    fun openTamperTarget(item: TamperAssessmentEngine.SearchResult) {
+        val ws = workspace ?: return
+        val dex = item.dexEntry ?: return
+        val cls = item.classDescriptor ?: return
+        scope.launch {
+            busy = true
+            error = null
+            status = "Открываем найденную цель: $cls…"
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    val list = PatchLabEngine.disassembleDex(ws, dex)
+                    val text = PatchLabEngine.loadClass(ws, dex, cls)
+                    list to text
+                }
+            }
+            result.getOrNull()?.let { (list, text) ->
+                selectedDex = dex
+                classes = list
+                selectedClass = cls
+                selectedMethodName = item.methodName
+                selectedPrototype = item.prototype
+                smaliText = text
+                originalSmaliText = text
+                status = "Открыта найденная цель: ${item.location}"
+            }
+            error = result.exceptionOrNull()?.message
+            busy = false
+        }
+    }
+
+    fun applyGeneratedTraceHook(proposal: TamperAssessmentEngine.HookProposal) {
+        val ws = workspace ?: return
+        scope.launch {
+            busy = true
+            error = null
+            built = null
+            status = "Генерируем trace hook: ${proposal.classDescriptor}->${proposal.methodName}${proposal.prototype}…"
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    val list = PatchLabEngine.disassembleDex(ws, proposal.dexEntry)
+                    val before = PatchLabEngine.loadClass(ws, proposal.dexEntry, proposal.classDescriptor)
+                    val after = PatchLabEngine.addEntryLogHook(before, proposal.methodName, proposal.prototype, "auto:${proposal.category}")
+                    PatchLabEngine.saveClass(ws, proposal.dexEntry, proposal.classDescriptor, after)
+                    list to after
+                }
+            }
+            result.getOrNull()?.let { (list, after) ->
+                selectedDex = proposal.dexEntry
+                classes = list
+                selectedClass = proposal.classDescriptor
+                selectedMethodName = proposal.methodName
+                selectedPrototype = proposal.prototype
+                smaliText = after
+                originalSmaliText = after
+                status = "Trace hook сгенерирован и сохранён. Он только логирует вход в метод."
+            }
+            error = result.exceptionOrNull()?.message
+            busy = false
+        }
+    }
+
     fun buildApk() {
         val ws = workspace ?: return
         scope.launch {
@@ -266,6 +328,15 @@ fun PatchLabScreen(
                 HorizontalDivider()
                 Text("2. DEX / класс / метод", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Text("SHA-256 исходника: ${ws.artifactSha256}", style = MaterialTheme.typography.bodySmall)
+                TamperAssessmentPanel(
+                    report = report,
+                    workspace = ws,
+                    busy = busy,
+                    onOpenTarget = ::openTamperTarget,
+                    onApplyHook = ::applyGeneratedTraceHook,
+                    onStatus = { status = it },
+                    onError = { error = it },
+                )
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ws.dexEntries.forEach { dex ->
                         if (dex == selectedDex) Button(onClick = { selectedDex = dex; classes = emptyList(); smaliText = "" }) { Text(dex) }
@@ -329,34 +400,19 @@ fun PatchLabScreen(
                     HorizontalDivider()
                     Text("3. Редактор / test hook", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Text("${selectedClass ?: ""}  ${selectedMethodName.orEmpty()}${selectedPrototype.orEmpty()}", style = MaterialTheme.typography.bodySmall)
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(
-                            onClick = {
-                                val name = selectedMethodName
-                                val proto = selectedPrototype
-                                if (name != null && proto != null) {
-                                    runCatching { PatchLabEngine.addEntryLogHook(smaliText, name, proto, initialFinding?.id) }
-                                        .onSuccess { smaliText = it; error = null; status = "Добавлен test Log hook в $name$proto" }
-                                        .onFailure { error = it.message }
-                                }
-                            },
-                            enabled = selectedMethodName != null && selectedPrototype != null && !busy,
-                            modifier = Modifier.weight(1f),
-                        ) { Text("+ Log hook") }
-                        OutlinedButton(
-                            onClick = {
-                                val name = selectedMethodName
-                                val proto = selectedPrototype
-                                if (name != null && proto != null) {
-                                    runCatching { PatchLabEngine.forceBooleanReturn(smaliText, name, proto, false) }
-                                        .onSuccess { smaliText = it; error = null; status = "Добавлен test return=false в $name$proto" }
-                                        .onFailure { error = it.message }
-                                }
-                            },
-                            enabled = selectedPrototype?.endsWith(")Z") == true && !busy,
-                            modifier = Modifier.weight(1f),
-                        ) { Text("return false") }
-                    }
+                    OutlinedButton(
+                        onClick = {
+                            val name = selectedMethodName
+                            val proto = selectedPrototype
+                            if (name != null && proto != null) {
+                                runCatching { PatchLabEngine.addEntryLogHook(smaliText, name, proto, initialFinding?.id) }
+                                    .onSuccess { smaliText = it; error = null; status = "Добавлен trace-only Log hook в $name$proto" }
+                                    .onFailure { error = it.message }
+                            }
+                        },
+                        enabled = selectedMethodName != null && selectedPrototype != null && !busy,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("+ Trace Log hook") }
                     OutlinedTextField(
                         value = smaliText,
                         onValueChange = { smaliText = it },
@@ -373,7 +429,7 @@ fun PatchLabScreen(
                     }
                 }
 
-                if (ws.nativeEntries.isNotEmpty()) {
+                run {
                     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))) {
                         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text("Native / file replacement", fontWeight = FontWeight.SemiBold)
@@ -422,6 +478,7 @@ fun PatchLabScreen(
                             Text("Изменения: ${result.changedEntries.joinToString()}", style = MaterialTheme.typography.bodySmall)
                         }
                     }
+                    PatchBuildAuditPanel(report = report, workspace = ws, result = result)
                     OutlinedButton(
                         onClick = {
                             val name = report.artifact.displayName.substringBeforeLast('.').replace(Regex("[^A-Za-z0-9._-]"), "_").take(72)

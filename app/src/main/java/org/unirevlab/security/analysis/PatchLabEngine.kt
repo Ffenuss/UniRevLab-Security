@@ -63,12 +63,18 @@ object PatchLabEngine {
         val archiveEntries: List<String>,
         val modifiedDexEntries: MutableSet<String> = linkedSetOf(),
         val replacements: MutableMap<String, File> = linkedMapOf(),
+        val smaliBaselines: MutableMap<String, String> = linkedMapOf(),
+        val smaliEdits: MutableMap<String, String> = linkedMapOf(),
+        val textBaselines: MutableMap<String, String> = linkedMapOf(),
+        val textEdits: MutableMap<String, String> = linkedMapOf(),
     )
 
     data class BuildResult(
         val signedApk: File,
         val sha256: String,
         val changedEntries: List<String>,
+        val apkDiff: ApkMutationDiffEngine.ApkDiffReport,
+        val codeDiffs: List<ApkMutationDiffEngine.CodeDiff>,
         val signerLabel: String = "UniRevLab Patch Lab Test",
     )
 
@@ -206,7 +212,10 @@ object PatchLabEngine {
         require(text.contains(".class")) { "В Smali отсутствует .class" }
         val file = classFile(workspace, dexEntry, classDescriptor)
         require(file.parentFile?.isDirectory == true || file.parentFile?.mkdirs() == true) { "Не удалось создать каталог Smali" }
+        val key = "$dexEntry|$classDescriptor"
+        if (key !in workspace.smaliBaselines && file.isFile) workspace.smaliBaselines[key] = file.readText(Charsets.UTF_8)
         file.writeText(text, Charsets.UTF_8)
+        workspace.smaliEdits[key] = text
         workspace.modifiedDexEntries += dexEntry
     }
 
@@ -226,6 +235,7 @@ object PatchLabEngine {
         val indent = locals.groupValues[1]
         val newLocalsLine = "${indent}.locals ${oldLocals + 2}"
         val hookLabel = escapeSmaliString("${findingId ?: "manual"}: $methodName$prototype")
+        require(!block.contains(hookLabel)) { "Этот trace hook уже добавлен в метод" }
         val hook = buildString {
             append('\n')
             append(indent).append("const-string v").append(first).append(", \"UniRevLab\"\n")
@@ -281,6 +291,43 @@ object PatchLabEngine {
         workspace.replacements[entryName] = stored
     }
 
+    fun loadArchiveText(workspace: Workspace, entryName: String): String {
+        require(entryName in workspace.archiveEntries) { "Файл не найден в APK: $entryName" }
+        val bytes = workspace.replacements[entryName]?.readBytes() ?: ZipFile(workspace.originalApk).use { zip ->
+            val entry = requireNotNull(zip.getEntry(entryName)) { "Файл не найден в APK: $entryName" }
+            require(entry.size < 0L || entry.size <= MAX_EDITABLE_TEXT_BYTES) { "Файл слишком большой для текстового редактора" }
+            zip.getInputStream(entry).use { input ->
+                val out = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(32 * 1024)
+                var total = 0L
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    if (read == 0) continue
+                    total += read
+                    require(total <= MAX_EDITABLE_TEXT_BYTES) { "Файл слишком большой для текстового редактора" }
+                    out.write(buffer, 0, read)
+                }
+                out.toByteArray()
+            }
+        }
+        require(bytes.none { it == 0.toByte() }) { "Entry выглядит как бинарный файл, текстовое редактирование отключено" }
+        val text = bytes.toString(Charsets.UTF_8)
+        require('\uFFFD' !in text) { "Entry не является корректным UTF-8 текстом" }
+        return text
+    }
+
+    fun saveArchiveText(workspace: Workspace, entryName: String, text: String) {
+        require(entryName in workspace.archiveEntries) { "Файл не найден в APK: $entryName" }
+        val bytes = text.toByteArray(Charsets.UTF_8)
+        require(bytes.size <= MAX_EDITABLE_TEXT_BYTES) { "Текстовый entry слишком большой" }
+        if (entryName !in workspace.textBaselines) workspace.textBaselines[entryName] = loadArchiveText(workspace, entryName)
+        val stored = File(workspace.root, "replacements/${sha256Text(entryName)}.txt").apply { parentFile?.mkdirs() }
+        stored.writeBytes(bytes)
+        workspace.replacements[entryName] = stored
+        workspace.textEdits[entryName] = text
+    }
+
     fun build(workspace: Workspace): BuildResult {
         require(workspace.modifiedDexEntries.isNotEmpty() || workspace.replacements.isNotEmpty()) {
             "Нет сохранённых изменений для сборки"
@@ -308,10 +355,27 @@ object PatchLabEngine {
         val signed = File(workspace.root, "output/unirevlab-patched-signed.apk").apply { delete() }
         signTestApk(unsigned, signed, workspace.minSdk)
         require(signed.length() > 0L) { "Подписанный APK пуст" }
+        val changedEntries = (workspace.modifiedDexEntries + workspace.replacements.keys).sorted()
+        val apkDiff = ApkMutationDiffEngine.compare(workspace.originalApk, signed, changedEntries)
+        require(apkDiff.unexpectedContentChanges.isEmpty()) {
+            "Пересборка изменила неожиданные entry: ${apkDiff.unexpectedContentChanges.take(8).joinToString()}"
+        }
+        val codeDiffs = buildList {
+            workspace.smaliBaselines.forEach { (key, before) ->
+                val after = workspace.smaliEdits[key] ?: return@forEach
+                if (before != after) add(ApkMutationDiffEngine.diffText("SMALI", key, before, after))
+            }
+            workspace.textBaselines.forEach { (entry, before) ->
+                val after = workspace.textEdits[entry] ?: return@forEach
+                if (before != after) add(ApkMutationDiffEngine.diffText("TEXT_ENTRY", entry, before, after))
+            }
+        }
         return BuildResult(
             signedApk = signed,
             sha256 = sha256(signed),
-            changedEntries = (workspace.modifiedDexEntries + workspace.replacements.keys).sorted(),
+            changedEntries = changedEntries,
+            apkDiff = apkDiff,
+            codeDiffs = codeDiffs,
         )
     }
 
