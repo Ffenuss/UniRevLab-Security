@@ -293,9 +293,11 @@ object TamperAssessmentEngine {
         val methodsByKey = dex?.methods.orEmpty().associateBy { it.dexEntry to it.methodIndex }
         dex?.methods.orEmpty().forEach { method ->
             val label = "${method.declaringClass}->${method.name}${method.prototype}"
-            categoriesFor(label).forEach { (category, score) -> hit(methodHit(category, score, method, label)) }
-            if (isAppOwned(method.declaringClass, packagePrefix) && DECISION_METHOD.containsMatchIn(method.name)) {
-                hit(methodHit("CLIENT_DECISION", 46, method, label))
+            categoriesFor(label).forEach { (category, score) ->
+                hit(methodHit(category, score, method, label))
+            }
+            if (DECISION_METHOD.matches(method.name) && isAppOwned(method.declaringClass, packagePrefix)) {
+                hit(methodHit("CLIENT_DECISION", 36, method, label))
             }
         }
         dex?.stringXrefs.orEmpty().forEach { xref ->
@@ -546,7 +548,7 @@ object TamperAssessmentEngine {
     )
     private val CATEGORY_SCORES = mapOf("ENTITLEMENT_TRUST" to 70, "LOCAL_STATE" to 60, "FEATURE_CONFIG" to 48, "INTEGRITY" to 56, "AUTH_SESSION" to 68)
     private val DECISION_METHOD = Regex("^(is|has|can|allow|check|verify|validate|enable|should|may)[A-Z_].*|^(is|has|can|allow|check|verify|validate|enable|should|may).*$", RegexOption.IGNORE_CASE)
-    private val GENERIC_SECRET = Regex("(?i)(api[_-]?key|client[_-]?secret|secret|access[_-]?token|auth[_-]?token)\\s*[:=]\\s*[\\\"']?([A-Za-z0-9+/_=.-]{12,})")
+    private val GENERIC_SECRET = Regex("(?i)[\\\"']?(api[_-]?key|client[_-]?secret|secret|access[_-]?token|auth[_-]?token)[\\\"']?\\s*[:=]\\s*[\\\"']?([A-Za-z0-9+/_=.-]{12,})")
     private val TEXT_EXTENSIONS = listOf(".json", ".txt", ".xml", ".yaml", ".yml", ".properties", ".ini", ".cfg", ".conf", ".csv", ".toml", ".js", ".html", ".md")
     private const val MAX_HITS = 360
     private const val MAX_SECRETS = 80
