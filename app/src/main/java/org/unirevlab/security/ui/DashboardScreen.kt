@@ -69,6 +69,7 @@ fun DashboardScreen(
     onPickArtifact: () -> Unit,
     onPickInstalledApp: () -> Unit,
     onOpenHelp: () -> Unit,
+    onOpenPatchLab: (Finding?) -> Unit,
     onCancelAnalysis: () -> Unit,
     onImportGhidraResults: () -> Unit,
     onImportAdvisoryFeed: () -> Unit,
@@ -202,10 +203,13 @@ fun DashboardScreen(
                     }
                     ResultSection.SUPPLY_CHAIN -> report.supplyChain?.let { SupplyChainCard(it) }
                         ?: Text("Supply-chain inventory недоступен.")
-                    ResultSection.FINDINGS -> FindingsSection(report.findings)
+                    ResultSection.FINDINGS -> FindingsSection(report.findings, onOpenPatchLab)
                 }
 
                 Text("Дополнительные инструменты", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Button(onClick = { onOpenPatchLab(null) }, enabled = !isInspecting, modifier = Modifier.fillMaxWidth()) {
+                    Text("Patch / Hook Lab — тестовые правки и пересборка")
+                }
                 if (scope.reverseEngineering) {
                     OutlinedButton(onClick = onImportGhidraResults, enabled = !isInspecting, modifier = Modifier.fillMaxWidth()) {
                         Text("Импортировать Ghidra result JSON")
@@ -738,7 +742,7 @@ private fun SupplyChainCard(supply: SupplyChainSummary) {
 }
 
 @Composable
-private fun FindingsSection(findings: List<Finding>) {
+private fun FindingsSection(findings: List<Finding>, onOpenPatchLab: (Finding?) -> Unit) {
     Text("Findings (${findings.size})", style = MaterialTheme.typography.titleLarge)
     if (findings.isEmpty()) {
         Text("Manifest-level правила текущего движка не обнаружили проблем. Это не означает, что приложение полностью безопасно.")
@@ -757,6 +761,9 @@ private fun FindingsSection(findings: List<Finding>) {
                     Text("… ещё ${finding.evidence.size - 4} evidence items", style = MaterialTheme.typography.bodySmall)
                 }
                 Text("Исправление: ${finding.remediation}")
+                Button(onClick = { onOpenPatchLab(finding) }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Тестировать здесь → Patch / Hook Lab")
+                }
                 if (finding.requiresManualReview) {
                     Text("Требуется ручная проверка", color = MaterialTheme.colorScheme.primary)
                 }

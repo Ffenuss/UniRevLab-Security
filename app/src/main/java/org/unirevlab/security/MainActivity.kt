@@ -19,6 +19,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -37,6 +38,7 @@ import org.unirevlab.security.data.InstalledAppRepository
 import org.unirevlab.security.data.CoordinatorSyncClient
 import org.unirevlab.security.model.AssessmentScope
 import org.unirevlab.security.model.AssessmentDiff
+import org.unirevlab.security.model.Finding
 import org.unirevlab.security.model.InstalledAppDescriptor
 import org.unirevlab.security.model.StaticAnalysisReport
 import org.unirevlab.security.ui.AgreementScreen
@@ -45,6 +47,7 @@ import org.unirevlab.security.ui.AssessmentScreen
 import org.unirevlab.security.ui.DashboardScreen
 import org.unirevlab.security.ui.InstalledAppsScreen
 import org.unirevlab.security.ui.HelpScreen
+import org.unirevlab.security.ui.PatchLabScreen
 import org.unirevlab.security.ui.UniRevLabTheme
 
 class MainActivity : ComponentActivity() {
@@ -58,7 +61,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Route { AGREEMENT, SCOPE, DASHBOARD, INSTALLED_APPS, HELP }
+private enum class Route { AGREEMENT, SCOPE, DASHBOARD, INSTALLED_APPS, HELP, PATCH_LAB }
 
 @Composable
 private fun UniRevLabApp() {
@@ -80,6 +83,8 @@ private fun UniRevLabApp() {
     var installedAppsLoading by remember { mutableStateOf(false) }
     var installedAppsError by remember { mutableStateOf<String?>(null) }
     var coordinatorSyncStatus by remember { mutableStateOf<String?>(null) }
+    var patchFinding by remember { mutableStateOf<Finding?>(null) }
+    var lastArtifactUri by remember { mutableStateOf<android.net.Uri?>(null) }
     val coroutineScope = rememberCoroutineScope()
 
     LaunchedEffect(analysisState) {
@@ -137,6 +142,7 @@ private fun UniRevLabApp() {
             } catch (_: SecurityException) {
                 // Some providers grant only temporary access; inspection still works in this callback lifecycle.
             }
+            lastArtifactUri = uri
             requestAnalysisNotificationPermission()
             AnalysisManager.startFile(uri, requireNotNull(scope))
         }
@@ -284,6 +290,10 @@ private fun UniRevLabApp() {
                 if (installedApps.isEmpty()) reloadInstalledApps()
             },
             onOpenHelp = { route = Route.HELP },
+            onOpenPatchLab = { finding ->
+                patchFinding = finding
+                route = Route.PATCH_LAB
+            },
             onCancelAnalysis = { AnalysisManager.cancel() },
             onImportGhidraResults = {
                 ghidraResultPicker.launch(arrayOf("application/json", "application/octet-stream"))
@@ -336,6 +346,26 @@ private fun UniRevLabApp() {
             },
         )
         Route.HELP -> HelpScreen(onBack = { route = Route.DASHBOARD })
+        Route.PATCH_LAB -> {
+            val currentReport = report
+            if (currentReport == null) {
+                route = Route.DASHBOARD
+            } else {
+                PatchLabScreen(
+                    report = currentReport,
+                    initialFinding = patchFinding,
+                    initialSourceUri = lastArtifactUri,
+                    onBack = { route = Route.DASHBOARD },
+                    onAnalyzeBuilt = { file ->
+                        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+                        patchFinding = null
+                        route = Route.DASHBOARD
+                        requestAnalysisNotificationPermission()
+                        AnalysisManager.startFile(uri, requireNotNull(scope))
+                    },
+                )
+            }
+        }
         Route.INSTALLED_APPS -> InstalledAppsScreen(
             apps = installedApps,
             isLoading = installedAppsLoading,
@@ -344,6 +374,7 @@ private fun UniRevLabApp() {
             onReload = { reloadInstalledApps() },
             onSelect = { app ->
                 route = Route.DASHBOARD
+                lastArtifactUri = null
                 requestAnalysisNotificationPermission()
                 AnalysisManager.startInstalled(app, requireNotNull(scope))
             },
