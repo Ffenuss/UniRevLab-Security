@@ -22,6 +22,7 @@ import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import org.unirevlab.security.analysis.AnalysisManager
 import org.unirevlab.security.analysis.AnalysisRunState
 import org.unirevlab.security.analysis.GhidraResultIntegrator
@@ -191,11 +192,26 @@ private fun UniRevLabApp() {
             coroutineScope.launch {
                 val result = runCatching {
                     withContext(Dispatchers.IO) {
-                        context.contentResolver.openOutputStream(uri, "wt").use { output ->
-                            requireNotNull(output) { "Не удалось открыть файл отчёта" }
-                            output.write(ReportJsonExporter.export(current).toByteArray(Charsets.UTF_8))
+                        val temp = File.createTempFile("unirevlab-report-export-", ".json", context.cacheDir)
+                        try {
+                            temp.bufferedWriter(Charsets.UTF_8, 128 * 1024).use { writer ->
+                                ReportJsonExporter.write(current, writer)
+                            }
+                            require(temp.length() > 2L) { "Сериализованный отчёт пуст" }
+                            context.contentResolver.openOutputStream(uri, "wt").use { output ->
+                                requireNotNull(output) { "Не удалось открыть файл отчёта" }
+                                temp.inputStream().buffered(128 * 1024).use { input ->
+                                    input.copyTo(output, 128 * 1024)
+                                }
+                                output.flush()
+                            }
+                        } finally {
+                            temp.delete()
                         }
                     }
+                }
+                result.exceptionOrNull()?.let {
+                    runCatching { context.contentResolver.delete(uri, null, null) }
                 }
                 error = result.exceptionOrNull()?.message
             }

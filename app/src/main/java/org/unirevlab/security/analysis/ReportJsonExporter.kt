@@ -54,7 +54,20 @@ import org.unirevlab.security.model.ResourceTableSummary
 
 /** Deterministic JSON writer: stable field and list ordering make reports diff-friendly and reproducible. */
 object ReportJsonExporter {
-    fun export(report: StaticAnalysisReport): String = buildString {
+    private fun Appendable.append(value: Int): Appendable = append(value.toString())
+    private fun Appendable.append(value: Long): Appendable = append(value.toString())
+    private fun Appendable.append(value: Float): Appendable = append(value.toString())
+    private fun Appendable.append(value: Double): Appendable = append(value.toString())
+    private fun Appendable.append(value: Boolean): Appendable = append(value.toString())
+
+    fun export(report: StaticAnalysisReport): String = buildString { appendReport(report) }
+
+    /** Stream the deterministic report without materializing the whole JSON in memory. */
+    fun write(report: StaticAnalysisReport, out: Appendable) {
+        out.appendReport(report)
+    }
+
+    private fun Appendable.appendReport(report: StaticAnalysisReport) {
         append("{\n")
         field("schemaVersion", report.schemaVersion, 1, comma = true)
         field("engineVersion", report.engineVersion, 1, comma = true)
@@ -119,7 +132,7 @@ object ReportJsonExporter {
         append("]\n}")
     }
 
-    private fun StringBuilder.manifestDexReachability(value: ManifestDexReachabilitySummary?, level: Int, comma: Boolean) {
+    private fun Appendable.manifestDexReachability(value: ManifestDexReachabilitySummary?, level: Int, comma: Boolean) {
         append(indent(level)).append("\"manifestDexReachability\": ")
         if (value == null) {
             append("null")
@@ -155,7 +168,7 @@ object ReportJsonExporter {
         append('\n')
     }
 
-    private fun StringBuilder.appendManifest(m: ManifestSummary, level: Int) {
+    private fun Appendable.appendManifest(m: ManifestSummary, level: Int) {
         append("{\n")
         field("packageName", m.packageName, level + 1, true)
         nullableStringField("versionName", m.versionName, level + 1, true)
@@ -197,7 +210,7 @@ object ReportJsonExporter {
         append(indent(level)).append('}')
     }
 
-    private fun StringBuilder.networkSecurity(value: NetworkSecurityConfigSummary?, level: Int, comma: Boolean) {
+    private fun Appendable.networkSecurity(value: NetworkSecurityConfigSummary?, level: Int, comma: Boolean) {
         append(indent(level)).append("\"networkSecurity\": ")
         if (value == null) {
             append("null")
@@ -243,7 +256,7 @@ object ReportJsonExporter {
         append('\n')
     }
 
-    private fun StringBuilder.resources(value: ResourceTableSummary?, level: Int, comma: Boolean) {
+    private fun Appendable.resources(value: ResourceTableSummary?, level: Int, comma: Boolean) {
         append(indent(level)).append("\"resources\": ")
         if (value == null) {
             append("null")
@@ -341,7 +354,7 @@ object ReportJsonExporter {
         append('\n')
     }
 
-    private fun StringBuilder.signingCertificatesArray(values: List<SigningCertificateSummary>, level: Int, comma: Boolean) {
+    private fun Appendable.signingCertificatesArray(values: List<SigningCertificateSummary>, level: Int, comma: Boolean) {
         append(indent(level)).append("\"signingCertificates\": [")
         val ordered = values.sortedWith(compareBy<SigningCertificateSummary>({ it.lineageIndex ?: Int.MAX_VALUE }, { it.sha256 }))
         if (ordered.isNotEmpty()) append('\n')
@@ -368,7 +381,7 @@ object ReportJsonExporter {
         append('\n')
     }
 
-    private fun StringBuilder.declaredPermissionsArray(values: List<DeclaredPermission>, level: Int, comma: Boolean) {
+    private fun Appendable.declaredPermissionsArray(values: List<DeclaredPermission>, level: Int, comma: Boolean) {
         append(indent(level)).append("\"declaredPermissions\": [")
         val ordered = values.sortedBy { it.name }
         if (ordered.isNotEmpty()) append('\n')
@@ -386,7 +399,7 @@ object ReportJsonExporter {
         append('\n')
     }
 
-    private fun StringBuilder.deepLinksArray(values: List<DeepLinkDeclaration>, level: Int, comma: Boolean) {
+    private fun Appendable.deepLinksArray(values: List<DeepLinkDeclaration>, level: Int, comma: Boolean) {
         append(indent(level)).append("\"deepLinks\": [")
         val ordered = values.sortedWith(compareBy({ it.componentName }, { it.schemes.joinToString() }, { it.hosts.joinToString() }))
         if (ordered.isNotEmpty()) append('\n')
@@ -413,7 +426,7 @@ object ReportJsonExporter {
         append('\n')
     }
 
-    private fun StringBuilder.providersArray(values: List<ProviderDeclaration>, level: Int, comma: Boolean) {
+    private fun Appendable.providersArray(values: List<ProviderDeclaration>, level: Int, comma: Boolean) {
         append(indent(level)).append("\"providers\": [")
         val ordered = values.sortedBy { it.name }
         if (ordered.isNotEmpty()) append('\n')
@@ -450,7 +463,7 @@ object ReportJsonExporter {
         append('\n')
     }
 
-    private fun StringBuilder.appendDex(d: DexSummary, level: Int) {
+    private fun Appendable.appendDex(d: DexSummary, level: Int) {
         append("{\n")
         numberField("dexFilesDiscovered", d.dexFilesDiscovered.toLong(), level + 1, true)
         numberField("dexFilesScanned", d.dexFilesScanned.toLong(), level + 1, true)
@@ -482,7 +495,7 @@ object ReportJsonExporter {
     }
 
 
-    private fun StringBuilder.dexClassesArray(values: List<DexClassReference>, level: Int, comma: Boolean) {
+    private fun Appendable.dexClassesArray(values: List<DexClassReference>, level: Int, comma: Boolean) {
         append(indent(level)).append("\"classes\": [")
         val ordered = values.sortedWith(compareBy({ it.dexEntry }, { it.descriptor }, { it.classIndex }))
         if (ordered.isNotEmpty()) append('\n')
@@ -503,7 +516,7 @@ object ReportJsonExporter {
         append('\n')
     }
 
-    private fun StringBuilder.dexMethodsArray(name: String, values: List<DexMethodReference>, level: Int, comma: Boolean) {
+    private fun Appendable.dexMethodsArray(name: String, values: List<DexMethodReference>, level: Int, comma: Boolean) {
         append(indent(level)).append('"').append(name).append("\": [")
         val ordered = values.sortedWith(compareBy({ it.dexEntry }, { it.declaringClass }, { it.name }, { it.prototype }))
         if (ordered.isNotEmpty()) append('\n')
@@ -524,7 +537,7 @@ object ReportJsonExporter {
         append('\n')
     }
 
-    private fun StringBuilder.dexNativeMethodsArray(values: List<DexNativeMethodDeclaration>, level: Int, comma: Boolean) {
+    private fun Appendable.dexNativeMethodsArray(values: List<DexNativeMethodDeclaration>, level: Int, comma: Boolean) {
         append(indent(level)).append("\"nativeMethods\": [")
         val ordered = values.sortedWith(compareBy({ it.dexEntry }, { it.declaringClass }, { it.name }, { it.prototype }))
         if (ordered.isNotEmpty()) append('\n')
@@ -546,7 +559,7 @@ object ReportJsonExporter {
         append('\n')
     }
 
-    private fun StringBuilder.dexCodeMethodsArray(values: List<DexMethodCodeReference>, level: Int, comma: Boolean) {
+    private fun Appendable.dexCodeMethodsArray(values: List<DexMethodCodeReference>, level: Int, comma: Boolean) {
         append(indent(level)).append("\"codeMethods\": [")
         val ordered = values.sortedWith(compareBy({ it.dexEntry }, { it.declaringClass }, { it.name }, { it.prototype }))
         if (ordered.isNotEmpty()) append('\n')
@@ -571,7 +584,7 @@ object ReportJsonExporter {
         append(']'); if (comma) append(','); append('\n')
     }
 
-    private fun StringBuilder.dexCallXrefsArray(values: List<DexMethodCallXref>, level: Int, comma: Boolean) {
+    private fun Appendable.dexCallXrefsArray(values: List<DexMethodCallXref>, level: Int, comma: Boolean) {
         append(indent(level)).append("\"callXrefs\": [")
         val ordered = values.sortedWith(compareBy({ it.dexEntry }, { it.callerMethodIndex }, { it.instructionOffsetCodeUnits }, { it.calleeMethodIndex }))
         if (ordered.isNotEmpty()) append('\n')
@@ -594,7 +607,7 @@ object ReportJsonExporter {
         append(']'); if (comma) append(','); append('\n')
     }
 
-    private fun StringBuilder.dexStringXrefsArray(values: List<DexStringXref>, level: Int, comma: Boolean) {
+    private fun Appendable.dexStringXrefsArray(values: List<DexStringXref>, level: Int, comma: Boolean) {
         append(indent(level)).append("\"stringXrefs\": [")
         val ordered = values.sortedWith(compareBy({ it.dexEntry }, { it.callerMethodIndex }, { it.instructionOffsetCodeUnits }, { it.stringIndex }))
         if (ordered.isNotEmpty()) append('\n')
@@ -615,7 +628,7 @@ object ReportJsonExporter {
         append(']'); if (comma) append(','); append('\n')
     }
 
-    private fun StringBuilder.dexTypeXrefsArray(values: List<DexTypeXref>, level: Int, comma: Boolean) {
+    private fun Appendable.dexTypeXrefsArray(values: List<DexTypeXref>, level: Int, comma: Boolean) {
         append(indent(level)).append("\"typeXrefs\": [")
         val ordered = values.sortedWith(compareBy({ it.dexEntry }, { it.callerMethodIndex }, { it.instructionOffsetCodeUnits }, { it.typeIndex }))
         if (ordered.isNotEmpty()) append('\n')
@@ -637,7 +650,7 @@ object ReportJsonExporter {
         append(']'); if (comma) append(','); append('\n')
     }
 
-    private fun StringBuilder.dexStringReferencesArray(
+    private fun Appendable.dexStringReferencesArray(
         name: String,
         values: List<DexStringReference>,
         level: Int,
@@ -661,7 +674,7 @@ object ReportJsonExporter {
         append('\n')
     }
 
-    private fun StringBuilder.secretCandidatesArray(values: List<SecretCandidate>, level: Int, comma: Boolean) {
+    private fun Appendable.secretCandidatesArray(values: List<SecretCandidate>, level: Int, comma: Boolean) {
         append(indent(level)).append("\"secretCandidates\": [")
         val ordered = values.sortedWith(compareBy({ it.kind }, { it.dexEntry }, { it.stringIndex }))
         if (ordered.isNotEmpty()) append('\n')
@@ -683,7 +696,7 @@ object ReportJsonExporter {
     }
 
 
-    private fun StringBuilder.dexFieldXrefsArray(values: List<DexFieldXref>, level: Int, comma: Boolean) {
+    private fun Appendable.dexFieldXrefsArray(values: List<DexFieldXref>, level: Int, comma: Boolean) {
         append(indent(level)).append("\"fieldXrefs\": [")
         val ordered = values.sortedWith(compareBy({ it.dexEntry }, { it.callerMethodIndex }, { it.instructionOffsetCodeUnits }, { it.fieldIndex }))
         if (ordered.isNotEmpty()) append('\n')
@@ -707,7 +720,7 @@ object ReportJsonExporter {
         append(']'); if (comma) append(','); append('\n')
     }
 
-    private fun StringBuilder.dexBasicBlocksArray(values: List<DexBasicBlock>, level: Int, comma: Boolean) {
+    private fun Appendable.dexBasicBlocksArray(values: List<DexBasicBlock>, level: Int, comma: Boolean) {
         append(indent(level)).append("\"basicBlocks\": [")
         val ordered = values.sortedWith(compareBy({ it.dexEntry }, { it.methodIndex }, { it.startCodeUnit }))
         if (ordered.isNotEmpty()) append('\n')
@@ -728,7 +741,7 @@ object ReportJsonExporter {
         append(']'); if (comma) append(','); append('\n')
     }
 
-    private fun StringBuilder.dexConstantsArray(values: List<DexConstantReference>, level: Int, comma: Boolean) {
+    private fun Appendable.dexConstantsArray(values: List<DexConstantReference>, level: Int, comma: Boolean) {
         append(indent(level)).append("\"constants\": [")
         val ordered = values.sortedWith(compareBy({ it.dexEntry }, { it.methodIndex }, { it.instructionOffsetCodeUnits }, { it.register }))
         if (ordered.isNotEmpty()) append('\n')
@@ -748,7 +761,7 @@ object ReportJsonExporter {
         append(']'); if (comma) append(','); append('\n')
     }
 
-    private fun StringBuilder.dexInvokeObservationsArray(values: List<DexInvokeObservation>, level: Int, comma: Boolean) {
+    private fun Appendable.dexInvokeObservationsArray(values: List<DexInvokeObservation>, level: Int, comma: Boolean) {
         append(indent(level)).append("\"invokeObservations\": [")
         val ordered = values.sortedWith(compareBy({ it.dexEntry }, { it.callerMethodIndex }, { it.instructionOffsetCodeUnits }, { it.calleeMethodIndex }))
         if (ordered.isNotEmpty()) append('\n')
@@ -788,7 +801,7 @@ object ReportJsonExporter {
         append('\n')
     }
 
-    private fun StringBuilder.runtimeSummary(value: RuntimeSummary?, level: Int, comma: Boolean) {
+    private fun Appendable.runtimeSummary(value: RuntimeSummary?, level: Int, comma: Boolean) {
         append(indent(level)).append("\"runtimes\": ")
         if (value == null) append("null") else {
             append("{\n")
@@ -812,7 +825,7 @@ object ReportJsonExporter {
     }
 
 
-    private fun StringBuilder.runtimeArtifacts(value: RuntimeArtifactSummary?, level: Int, comma: Boolean) {
+    private fun Appendable.runtimeArtifacts(value: RuntimeArtifactSummary?, level: Int, comma: Boolean) {
         append(indent(level)).append("\"runtimeArtifacts\": ")
         if (value == null) append("null") else {
             append("{\n")
@@ -833,7 +846,7 @@ object ReportJsonExporter {
         append('\n')
     }
 
-    private fun StringBuilder.appendFlutter(value: FlutterRuntimeSummary, level: Int) {
+    private fun Appendable.appendFlutter(value: FlutterRuntimeSummary, level: Int) {
         append("{\n")
         booleanField("detected", value.detected, level + 1, true)
         field("confidence", value.confidence, level + 1, true)
@@ -865,7 +878,7 @@ object ReportJsonExporter {
         append(indent(level)).append('}')
     }
 
-    private fun StringBuilder.appendHermes(value: HermesRuntimeSummary, level: Int) {
+    private fun Appendable.appendHermes(value: HermesRuntimeSummary, level: Int) {
         append("{\n")
         booleanField("detected", value.detected, level + 1, true)
         field("confidence", value.confidence, level + 1, true)
@@ -885,7 +898,7 @@ object ReportJsonExporter {
         append(indent(level)).append('}')
     }
 
-    private fun StringBuilder.appendHermesBytecode(value: HermesBytecodeSummary, level: Int) {
+    private fun Appendable.appendHermesBytecode(value: HermesBytecodeSummary, level: Int) {
         append(indent(level)).append("{\n")
         field("entryName", value.entryName, level + 1, true)
         numberField("sizeBytes", value.sizeBytes, level + 1, true)
@@ -940,7 +953,7 @@ object ReportJsonExporter {
         append(indent(level)).append('}')
     }
 
-    private fun StringBuilder.appendUnityMono(value: UnityMonoRuntimeSummary, level: Int) {
+    private fun Appendable.appendUnityMono(value: UnityMonoRuntimeSummary, level: Int) {
         append("{\n")
         booleanField("detected", value.detected, level + 1, true)
         field("confidence", value.confidence, level + 1, true)
@@ -960,7 +973,7 @@ object ReportJsonExporter {
         append(indent(level)).append('}')
     }
 
-    private fun StringBuilder.appendManagedAssembly(value: ManagedAssemblySummary, level: Int) {
+    private fun Appendable.appendManagedAssembly(value: ManagedAssemblySummary, level: Int) {
         append(indent(level)).append("{\n")
         field("entryName", value.entryName, level + 1, true)
         numberField("sizeBytes", value.sizeBytes, level + 1, true)
@@ -1056,7 +1069,7 @@ object ReportJsonExporter {
         append(indent(level)).append('}')
     }
 
-    private fun StringBuilder.appendUnreal(value: UnrealRuntimeSummary, level: Int) {
+    private fun Appendable.appendUnreal(value: UnrealRuntimeSummary, level: Int) {
         append("{\n")
         booleanField("detected", value.detected, level + 1, true)
         field("confidence", value.confidence, level + 1, true)
@@ -1083,7 +1096,7 @@ object ReportJsonExporter {
         append(indent(level)).append('}')
     }
 
-    private fun StringBuilder.runtimeFilesArray(name: String, values: List<RuntimeFileReference>, level: Int, comma: Boolean) {
+    private fun Appendable.runtimeFilesArray(name: String, values: List<RuntimeFileReference>, level: Int, comma: Boolean) {
         append(indent(level)).append('"').append(name).append("\": [")
         val ordered = values.sortedBy { it.entryName }
         if (ordered.isNotEmpty()) append('\n')
@@ -1101,7 +1114,7 @@ object ReportJsonExporter {
         append('\n')
     }
 
-    private fun StringBuilder.supplyChain(value: SupplyChainSummary?, level: Int, comma: Boolean) {
+    private fun Appendable.supplyChain(value: SupplyChainSummary?, level: Int, comma: Boolean) {
         append(indent(level)).append("\"supplyChain\": ")
         if (value == null) append("null") else {
             append("{\n")
@@ -1171,19 +1184,19 @@ object ReportJsonExporter {
         append('\n')
     }
 
-    private fun StringBuilder.numberArrayField(name: String, values: List<Int>, level: Int, comma: Boolean) {
+    private fun Appendable.numberArrayField(name: String, values: List<Int>, level: Int, comma: Boolean) {
         append(indent(level)).append('"').append(name).append("\": [")
         values.forEachIndexed { index, value -> if (index > 0) append(", "); append(value) }
         append(']'); if (comma) append(','); append('\n')
     }
 
-    private fun StringBuilder.longArrayField(name: String, values: List<Long>, level: Int, comma: Boolean) {
+    private fun Appendable.longArrayField(name: String, values: List<Long>, level: Int, comma: Boolean) {
         append(indent(level)).append('"').append(name).append("\": [")
         values.forEachIndexed { index, value -> if (index > 0) append(", "); append(value) }
         append(']'); if (comma) append(','); append('\n')
     }
 
-    private fun StringBuilder.ghidraAnalyses(values: List<GhidraLibraryAnalysis>, level: Int, comma: Boolean) {
+    private fun Appendable.ghidraAnalyses(values: List<GhidraLibraryAnalysis>, level: Int, comma: Boolean) {
         append(indent(level)).append("\"ghidra\": [")
         val ordered = values.sortedBy { it.libraryEntry }
         if (ordered.isNotEmpty()) append('\n')
@@ -1417,7 +1430,7 @@ object ReportJsonExporter {
         append('\n')
     }
 
-    private fun StringBuilder.correlations(value: CrossRuntimeCorrelationSummary?, level: Int, comma: Boolean) {
+    private fun Appendable.correlations(value: CrossRuntimeCorrelationSummary?, level: Int, comma: Boolean) {
         append(indent(level)).append("\"correlations\": ")
         if (value == null) {
             append("null")
@@ -1499,7 +1512,7 @@ object ReportJsonExporter {
         append('\n')
     }
 
-    private fun StringBuilder.appendNative(native: NativeSummary, level: Int) {
+    private fun Appendable.appendNative(native: NativeSummary, level: Int) {
         append("{\n")
         numberField("librariesDiscovered", native.librariesDiscovered.toLong(), level + 1, true)
         numberField("librariesScanned", native.librariesScanned.toLong(), level + 1, true)
@@ -1520,7 +1533,7 @@ object ReportJsonExporter {
     }
 
 
-    private fun StringBuilder.jniBridgesArray(values: List<JniBridgeReference>, level: Int, comma: Boolean) {
+    private fun Appendable.jniBridgesArray(values: List<JniBridgeReference>, level: Int, comma: Boolean) {
         append(indent(level)).append("\"jniBridges\": [")
         val ordered = values.sortedWith(compareBy({ it.dexEntry }, { it.declaringClass }, { it.methodName }, { it.prototype }))
         if (ordered.isNotEmpty()) append('\n')
@@ -1543,7 +1556,7 @@ object ReportJsonExporter {
         append('\n')
     }
 
-    private fun StringBuilder.appendNativeLibrary(library: NativeLibrarySummary, level: Int) {
+    private fun Appendable.appendNativeLibrary(library: NativeLibrarySummary, level: Int) {
         append(indent(level)).append("{\n")
         field("entryName", library.entryName, level + 1, true)
         field("abi", library.abi, level + 1, true)
@@ -1571,7 +1584,7 @@ object ReportJsonExporter {
     }
 
 
-    private fun StringBuilder.nativeSecretCandidatesArray(values: List<NativeSecretCandidate>, level: Int, comma: Boolean) {
+    private fun Appendable.nativeSecretCandidatesArray(values: List<NativeSecretCandidate>, level: Int, comma: Boolean) {
         append(indent(level)).append("\"secretCandidates\": [")
         val ordered = values.sortedWith(compareBy({ it.kind }, { it.libraryEntry }, { it.valueSha256 }))
         if (ordered.isNotEmpty()) append('\n')
@@ -1591,7 +1604,7 @@ object ReportJsonExporter {
         append('\n')
     }
 
-    private fun StringBuilder.nativeSymbolsArray(
+    private fun Appendable.nativeSymbolsArray(
         name: String,
         values: List<NativeSymbolReference>,
         level: Int,
@@ -1619,7 +1632,7 @@ object ReportJsonExporter {
         append('\n')
     }
 
-    private fun StringBuilder.appendIl2Cpp(value: Il2CppSummary, level: Int) {
+    private fun Appendable.appendIl2Cpp(value: Il2CppSummary, level: Int) {
         append("{\n")
         booleanField("detected", value.detected, level + 1, true)
         field("confidence", value.confidence, level + 1, true)
@@ -1634,7 +1647,7 @@ object ReportJsonExporter {
         append(indent(level)).append('}')
     }
 
-    private fun StringBuilder.il2cppRegistrationCandidatesArray(values: List<Il2CppRegistrationCandidate>, level: Int, comma: Boolean) {
+    private fun Appendable.il2cppRegistrationCandidatesArray(values: List<Il2CppRegistrationCandidate>, level: Int, comma: Boolean) {
         append(indent(level)).append("\"registrationCandidates\": [")
         val ordered = values.sortedWith(compareBy({ it.kind }, { it.libraryEntry }, { it.symbolName }))
         if (ordered.isNotEmpty()) append('\n')
@@ -1656,7 +1669,7 @@ object ReportJsonExporter {
         append('\n')
     }
 
-    private fun StringBuilder.appendIl2CppMetadata(value: Il2CppMetadataSummary, level: Int) {
+    private fun Appendable.appendIl2CppMetadata(value: Il2CppMetadataSummary, level: Int) {
         append("{\n")
         field("entryName", value.entryName, level + 1, true)
         numberField("sizeBytes", value.sizeBytes, level + 1, true)
@@ -1676,7 +1689,7 @@ object ReportJsonExporter {
         append(indent(level)).append("}\n")
     }
 
-    private fun StringBuilder.il2cppTableRangesArray(values: List<Il2CppTableRange>, level: Int, comma: Boolean) {
+    private fun Appendable.il2cppTableRangesArray(values: List<Il2CppTableRange>, level: Int, comma: Boolean) {
         append(indent(level)).append("\"tableRanges\": [")
         val ordered = values.sortedBy { it.name }
         if (ordered.isNotEmpty()) append('\n')
@@ -1693,7 +1706,7 @@ object ReportJsonExporter {
         append(']'); if (comma) append(','); append('\n')
     }
 
-    private fun StringBuilder.il2cppTypesArray(values: List<Il2CppTypeDefinitionSummary>, level: Int, comma: Boolean) {
+    private fun Appendable.il2cppTypesArray(values: List<Il2CppTypeDefinitionSummary>, level: Int, comma: Boolean) {
         append(indent(level)).append("\"typeDefinitions\": [")
         val ordered = values.sortedBy { it.index }
         if (ordered.isNotEmpty()) append('\n')
@@ -1716,7 +1729,7 @@ object ReportJsonExporter {
         append(']'); if (comma) append(','); append('\n')
     }
 
-    private fun StringBuilder.il2cppMethodsArray(values: List<Il2CppMethodDefinitionSummary>, level: Int, comma: Boolean) {
+    private fun Appendable.il2cppMethodsArray(values: List<Il2CppMethodDefinitionSummary>, level: Int, comma: Boolean) {
         append(indent(level)).append("\"methodDefinitions\": [")
         val ordered = values.sortedBy { it.index }
         if (ordered.isNotEmpty()) append('\n')
@@ -1737,7 +1750,7 @@ object ReportJsonExporter {
         append(']'); if (comma) append(','); append('\n')
     }
 
-    private fun StringBuilder.appendFinding(f: Finding, level: Int) {
+    private fun Appendable.appendFinding(f: Finding, level: Int) {
         append(indent(level)).append("{\n")
         field("id", f.id, level + 1, true)
         field("title", f.title, level + 1, true)
@@ -1752,7 +1765,7 @@ object ReportJsonExporter {
         append(indent(level)).append('}')
     }
 
-    private fun StringBuilder.evidenceArray(values: List<Evidence>, level: Int, comma: Boolean) {
+    private fun Appendable.evidenceArray(values: List<Evidence>, level: Int, comma: Boolean) {
         append(indent(level)).append("\"evidence\": [")
         if (values.isNotEmpty()) append('\n')
         values.forEachIndexed { i, e ->
@@ -1770,7 +1783,7 @@ object ReportJsonExporter {
         append('\n')
     }
 
-    private fun StringBuilder.referencesArray(values: List<SecurityReference>, level: Int, comma: Boolean) {
+    private fun Appendable.referencesArray(values: List<SecurityReference>, level: Int, comma: Boolean) {
         append(indent(level)).append("\"references\": [")
         if (values.isNotEmpty()) append('\n')
         values.forEachIndexed { i, r ->
@@ -1787,7 +1800,7 @@ object ReportJsonExporter {
         append('\n')
     }
 
-    private fun StringBuilder.stringArrayField(name: String, values: List<String>, level: Int, comma: Boolean) {
+    private fun Appendable.stringArrayField(name: String, values: List<String>, level: Int, comma: Boolean) {
         append(indent(level)).append('"').append(name).append("\": [")
         values.forEachIndexed { index, value ->
             if (index > 0) append(", ")
@@ -1798,32 +1811,32 @@ object ReportJsonExporter {
         append('\n')
     }
 
-    private fun StringBuilder.field(name: String, value: String, level: Int, comma: Boolean) {
+    private fun Appendable.field(name: String, value: String, level: Int, comma: Boolean) {
         append(indent(level)).append('"').append(name).append("\": \"").append(escape(value)).append('"')
         if (comma) append(',')
         append('\n')
     }
 
-    private fun StringBuilder.nullableStringField(name: String, value: String?, level: Int, comma: Boolean) {
+    private fun Appendable.nullableStringField(name: String, value: String?, level: Int, comma: Boolean) {
         append(indent(level)).append('"').append(name).append("\": ")
         if (value == null) append("null") else append('"').append(escape(value)).append('"')
         if (comma) append(',')
         append('\n')
     }
 
-    private fun StringBuilder.numberField(name: String, value: Long?, level: Int, comma: Boolean) {
+    private fun Appendable.numberField(name: String, value: Long?, level: Int, comma: Boolean) {
         append(indent(level)).append('"').append(name).append("\": ").append(value?.toString() ?: "null")
         if (comma) append(',')
         append('\n')
     }
 
-    private fun StringBuilder.booleanField(name: String, value: Boolean, level: Int, comma: Boolean) {
+    private fun Appendable.booleanField(name: String, value: Boolean, level: Int, comma: Boolean) {
         append(indent(level)).append('"').append(name).append("\": ").append(value)
         if (comma) append(',')
         append('\n')
     }
 
-    private fun StringBuilder.nullableBooleanField(name: String, value: Boolean?, level: Int, comma: Boolean) {
+    private fun Appendable.nullableBooleanField(name: String, value: Boolean?, level: Int, comma: Boolean) {
         append(indent(level)).append('"').append(name).append("\": ").append(value?.toString() ?: "null")
         if (comma) append(',')
         append('\n')

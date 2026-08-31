@@ -47,7 +47,10 @@ class ReportJsonExporterTest {
 
         val first = ReportJsonExporter.export(report)
         val second = ReportJsonExporter.export(report)
+        val streamed = java.io.StringWriter()
+        ReportJsonExporter.write(report, streamed)
         assertEquals(first, second)
+        assertEquals(first, streamed.toString())
         assertTrue(first.contains("\"sha256\": \"${"a".repeat(64)}\""))
         assertTrue(first.indexOf("a.permission") < first.indexOf("z.permission"))
     }
