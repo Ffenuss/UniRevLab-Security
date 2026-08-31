@@ -66,6 +66,7 @@ fun DashboardScreen(
     isInspecting: Boolean,
     analysisState: AnalysisRunState = AnalysisRunState.Idle,
     error: String?,
+    exportStatus: String? = null,
     onPickArtifact: () -> Unit,
     onPickInstalledApp: () -> Unit,
     onOpenHelp: () -> Unit,
@@ -151,10 +152,10 @@ fun DashboardScreen(
                                 Text(if (cancelling) "Остановка запрошена…" else "Отменить анализ")
                             }
                         } else {
-                            Text("Операция выполняется", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                            Text(exportStatus ?: "Операция выполняется", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                             LinearProgressIndicator(Modifier.fillMaxWidth())
                             Text(
-                                "Подождите завершения текущей операции.",
+                                if (exportStatus != null) "Не закрывайте приложение до завершения этой операции." else "Подождите завершения текущей операции.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -226,13 +227,16 @@ fun DashboardScreen(
                 )
 
                 Text("Экспорт", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                OutlinedButton(onClick = onSaveReport, modifier = Modifier.fillMaxWidth()) {
+                exportStatus?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                OutlinedButton(onClick = onSaveReport, enabled = !isInspecting, modifier = Modifier.fillMaxWidth()) {
                     Text("JSON — полный детерминированный отчёт")
                 }
-                OutlinedButton(onClick = onSaveCycloneDx, modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = onSaveCycloneDx, enabled = !isInspecting, modifier = Modifier.fillMaxWidth()) {
                     Text("CycloneDX 1.6 — SBOM")
                 }
-                OutlinedButton(onClick = onSaveSpdx, modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = onSaveSpdx, enabled = !isInspecting, modifier = Modifier.fillMaxWidth()) {
                     Text("SPDX 3.0.1 — JSON-LD")
                 }
 

@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.ParcelFileDescriptor
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -24,6 +25,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileOutputStream
 import org.unirevlab.security.analysis.AnalysisManager
 import org.unirevlab.security.analysis.AnalysisRunState
 import org.unirevlab.security.analysis.GhidraResultIntegrator
@@ -32,6 +34,8 @@ import org.unirevlab.security.analysis.VulnerabilityAdvisoryCorrelator
 import org.unirevlab.security.analysis.GhidraResultJsonParser
 import org.unirevlab.security.analysis.AssessmentDiffEngine
 import org.unirevlab.security.analysis.ReportJsonExporter
+import org.unirevlab.security.analysis.ReportExportSpool
+import org.unirevlab.security.analysis.PreparedReportFile
 import org.unirevlab.security.analysis.SbomExporter
 import org.unirevlab.security.data.AgreementStore
 import org.unirevlab.security.data.InstalledAppRepository
@@ -85,6 +89,8 @@ private fun UniRevLabApp() {
     var coordinatorSyncStatus by remember { mutableStateOf<String?>(null) }
     var patchFinding by remember { mutableStateOf<Finding?>(null) }
     var lastArtifactUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    var preparedReportExport by remember { mutableStateOf<PreparedReportFile?>(null) }
+    var reportExportStatus by remember { mutableStateOf<String?>(null) }
     val coroutineScope = rememberCoroutineScope()
 
     LaunchedEffect(analysisState) {
@@ -105,6 +111,9 @@ private fun UniRevLabApp() {
                     AssessmentDiffEngine.diff(previous, next)
                 } else null
                 scope = next.assessment
+                preparedReportExport?.file?.let { runCatching { it.delete() } }
+                preparedReportExport = null
+                reportExportStatus = null
                 report = next
                 error = null
                 route = Route.DASHBOARD
@@ -193,33 +202,36 @@ private fun UniRevLabApp() {
     }
 
     val reportSaver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
-        val current = report
-        if (uri != null && current != null) {
+        val prepared = preparedReportExport
+        if (uri == null) {
+            prepared?.file?.let { runCatching { it.delete() } }
+            preparedReportExport = null
+            reportExportStatus = "Сохранение JSON отменено."
+        } else if (prepared == null || !prepared.file.isFile || prepared.file.length() != prepared.sizeBytes) {
+            runCatching { context.contentResolver.delete(uri, null, null) }
+            preparedReportExport = null
+            reportExportStatus = "Подготовленный JSON потерян; сформируйте отчёт ещё раз."
+            error = "Подготовленный JSON-файл недоступен"
+        } else {
             coroutineScope.launch {
+                isInspecting = true
+                error = null
+                reportExportStatus = "Запись полного JSON (${formatBytes(prepared.sizeBytes)})…"
                 val result = runCatching {
                     withContext(Dispatchers.IO) {
-                        val temp = File.createTempFile("unirevlab-report-export-", ".json", context.cacheDir)
-                        try {
-                            temp.bufferedWriter(Charsets.UTF_8, 128 * 1024).use { writer ->
-                                ReportJsonExporter.write(current, writer)
-                            }
-                            require(temp.length() > 2L) { "Сериализованный отчёт пуст" }
-                            context.contentResolver.openOutputStream(uri, "wt").use { output ->
-                                requireNotNull(output) { "Не удалось открыть файл отчёта" }
-                                temp.inputStream().buffered(128 * 1024).use { input ->
-                                    input.copyTo(output, 128 * 1024)
-                                }
-                                output.flush()
-                            }
-                        } finally {
-                            temp.delete()
-                        }
+                        persistPreparedReport(context, uri, prepared)
                     }
                 }
-                result.exceptionOrNull()?.let {
+                if (result.isSuccess) {
+                    prepared.file.delete()
+                    preparedReportExport = null
+                    reportExportStatus = "JSON сохранён: ${formatBytes(prepared.sizeBytes)}, SHA-256 ${prepared.sha256.take(16)}…"
+                } else {
                     runCatching { context.contentResolver.delete(uri, null, null) }
+                    reportExportStatus = "Не удалось записать JSON. Подготовленный файл сохранён для повторной попытки."
+                    error = "Экспорт JSON: ${result.exceptionOrNull()?.message ?: result.exceptionOrNull()?.javaClass?.simpleName ?: "неизвестная ошибка"}"
                 }
-                error = result.exceptionOrNull()?.message
+                isInspecting = false
             }
         }
     }
@@ -322,9 +334,42 @@ private fun UniRevLabApp() {
                     }
                 }
             },
+            exportStatus = reportExportStatus,
             onSaveReport = {
-                val safeName = report?.artifact?.displayName?.substringBeforeLast('.')?.replace(Regex("[^A-Za-z0-9._-]"), "_")?.take(80) ?: "assessment"
-                reportSaver.launch("$safeName-unirevlab-report.json")
+                val current = report
+                if (current != null && !isInspecting) {
+                    val safeName = current.artifact.displayName.substringBeforeLast('.').replace(Regex("[^A-Za-z0-9._-]"), "_").take(80).ifBlank { "assessment" }
+                    val existing = preparedReportExport?.takeIf {
+                        it.artifactSha256 == current.artifact.sha256 && it.file.isFile && it.file.length() == it.sizeBytes
+                    }
+                    if (existing != null) {
+                        reportExportStatus = "JSON уже подготовлен (${formatBytes(existing.sizeBytes)}). Выберите место сохранения."
+                        reportSaver.launch("$safeName-unirevlab-report.json")
+                    } else {
+                        coroutineScope.launch {
+                            isInspecting = true
+                            error = null
+                            reportExportStatus = "Формирование полного детерминированного JSON во внутреннем хранилище…"
+                            preparedReportExport?.file?.let { runCatching { it.delete() } }
+                            preparedReportExport = null
+                            val result = runCatching {
+                                withContext(Dispatchers.IO) {
+                                    ReportExportSpool.prepare(current, File(context.cacheDir, "report-export"))
+                                }
+                            }
+                            isInspecting = false
+                            result.getOrNull()?.let { prepared ->
+                                preparedReportExport = prepared
+                                reportExportStatus = "JSON подготовлен: ${formatBytes(prepared.sizeBytes)}. Теперь выберите место сохранения."
+                                reportSaver.launch("$safeName-unirevlab-report.json")
+                            }
+                            result.exceptionOrNull()?.let { failure ->
+                                reportExportStatus = "JSON не создан — внешний 0-байтный файл не создавался."
+                                error = "Формирование JSON: ${failure.message ?: failure.javaClass.simpleName}"
+                            }
+                        }
+                    }
+                }
             },
             onSaveCycloneDx = {
                 val safeName = report?.artifact?.displayName?.substringBeforeLast('.')?.replace(Regex("[^A-Za-z0-9._-]"), "_")?.take(80) ?: "assessment"
@@ -341,6 +386,9 @@ private fun UniRevLabApp() {
                     previousReport = null
                     comparison = null
                     coordinatorSyncStatus = null
+                    preparedReportExport?.file?.let { runCatching { it.delete() } }
+                    preparedReportExport = null
+                    reportExportStatus = null
                     route = Route.SCOPE
                 }
             },
@@ -392,4 +440,50 @@ private fun sameApplication(a: StaticAnalysisReport, b: StaticAnalysisReport): B
     val pa = a.manifest?.packageName ?: a.artifact.sourcePackageName
     val pb = b.manifest?.packageName ?: b.artifact.sourcePackageName
     return pa != null && pa == pb
+}
+
+
+private fun persistPreparedReport(context: android.content.Context, uri: android.net.Uri, prepared: PreparedReportFile): Long {
+    val resolver = context.contentResolver
+    val copied = runCatching {
+        val descriptor = requireNotNull(resolver.openFileDescriptor(uri, "rwt")) { "Не удалось открыть файл назначения" }
+        ParcelFileDescriptor.AutoCloseOutputStream(descriptor).use { output ->
+            val count = prepared.file.inputStream().buffered(128 * 1024).use { input ->
+                input.copyTo(output, 128 * 1024)
+            }
+            output.flush()
+            descriptor.fileDescriptor.sync()
+            count
+        }
+    }.getOrElse { primaryFailure ->
+        runCatching {
+            resolver.openOutputStream(uri, "wt").use { output ->
+                requireNotNull(output) { "Не удалось открыть файл назначения" }
+                val count = prepared.file.inputStream().buffered(128 * 1024).use { input ->
+                    input.copyTo(output, 128 * 1024)
+                }
+                output.flush()
+                count
+            }
+        }.getOrElse { fallbackFailure ->
+            fallbackFailure.addSuppressed(primaryFailure)
+            throw fallbackFailure
+        }
+    }
+    require(copied == prepared.sizeBytes) { "Записано $copied из ${prepared.sizeBytes} байт" }
+    val providerLength = runCatching {
+        resolver.openAssetFileDescriptor(uri, "r")?.use { descriptor -> descriptor.length }
+    }.getOrNull()
+    if (providerLength != null && providerLength >= 0L) {
+        require(providerLength == prepared.sizeBytes) {
+            "Провайдер сохранил $providerLength из ${prepared.sizeBytes} байт"
+        }
+    }
+    return copied
+}
+
+private fun formatBytes(bytes: Long): String = when {
+    bytes >= 1024L * 1024L -> "%.1f MiB".format(java.util.Locale.US, bytes / (1024.0 * 1024.0))
+    bytes >= 1024L -> "%.1f KiB".format(java.util.Locale.US, bytes / 1024.0)
+    else -> "$bytes B"
 }

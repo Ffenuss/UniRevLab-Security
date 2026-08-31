@@ -1804,7 +1804,9 @@ object ReportJsonExporter {
         append(indent(level)).append('"').append(name).append("\": [")
         values.forEachIndexed { index, value ->
             if (index > 0) append(", ")
-            append('"').append(escape(value)).append('"')
+            append('"')
+            appendEscaped(value)
+            append('"')
         }
         append(']')
         if (comma) append(',')
@@ -1812,14 +1814,22 @@ object ReportJsonExporter {
     }
 
     private fun Appendable.field(name: String, value: String, level: Int, comma: Boolean) {
-        append(indent(level)).append('"').append(name).append("\": \"").append(escape(value)).append('"')
+        append(indent(level)).append('"').append(name).append("\": \"")
+        appendEscaped(value)
+        append('"')
         if (comma) append(',')
         append('\n')
     }
 
     private fun Appendable.nullableStringField(name: String, value: String?, level: Int, comma: Boolean) {
         append(indent(level)).append('"').append(name).append("\": ")
-        if (value == null) append("null") else append('"').append(escape(value)).append('"')
+        if (value == null) {
+            append("null")
+        } else {
+            append('"')
+            appendEscaped(value)
+            append('"')
+        }
         if (comma) append(',')
         append('\n')
     }
@@ -1844,7 +1854,7 @@ object ReportJsonExporter {
 
     private fun indent(level: Int) = "  ".repeat(level)
 
-    private fun escape(input: String): String = buildString(input.length + 8) {
+    private fun Appendable.appendEscaped(input: String) {
         input.forEach { ch ->
             when (ch) {
                 '\\' -> append("\\\\")
@@ -1854,8 +1864,18 @@ object ReportJsonExporter {
                 '\n' -> append("\\n")
                 '\r' -> append("\\r")
                 '\t' -> append("\\t")
-                else -> if (ch.code < 0x20) append("\\u%04x".format(ch.code)) else append(ch)
+                else -> if (ch.code < 0x20) {
+                    append("\\u")
+                    append(HEX[(ch.code ushr 12) and 0xf])
+                    append(HEX[(ch.code ushr 8) and 0xf])
+                    append(HEX[(ch.code ushr 4) and 0xf])
+                    append(HEX[ch.code and 0xf])
+                } else {
+                    append(ch)
+                }
             }
         }
     }
+
+    private const val HEX = "0123456789abcdef"
 }
