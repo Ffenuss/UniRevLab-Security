@@ -1,8 +1,8 @@
-name: Build UniRevLab v0.25.1 Target Quality APK
+name: Build UniRevLab v0.25.2 Secret Exposure Proof APK
 
 on:
   push:
-    branches: [ main, fix-analysis-progress-v0221 ]
+    branches: [ fix-analysis-progress-v0221 ]
     paths:
       - 'app/**'
       - 'native-core/**'
@@ -25,28 +25,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Apply v0.25.1 target quality fix
+      - name: Apply v0.25.2 Secret Exposure Proof
         shell: bash
         run: |
           set -euo pipefail
-          if grep -q 'versionName = "0.25.0-dev-easy-audit"' app/build.gradle.kts; then
-            python tools/apply_v0251_target_quality_fix.py
-          elif grep -q 'versionName = "0.25.1-dev-target-quality"' app/build.gradle.kts; then
-            echo "v0.25.1 target-quality source is integrated"
+          if grep -q 'versionName = "0.25.1-dev-target-quality"' app/build.gradle.kts; then
+            python tools/apply_v0252_secret_proof.py
+          elif grep -q 'versionName = "0.25.2-dev-secret-proof"' app/build.gradle.kts; then
+            echo "v0.25.2 Secret Exposure Proof source is integrated"
           else
-            echo "Expected v0.25.0 or v0.25.1 source on this branch" >&2
+            echo "Expected v0.25.1 or v0.25.2 source on this branch" >&2
             exit 1
           fi
-          python tools/fix_v0251_test_dollar.py
-          test -f app/src/main/java/org/unirevlab/security/analysis/EasyAuditEngine.kt
-          test -f app/src/main/java/org/unirevlab/security/analysis/FlagSweepEngine.kt
+          test -f app/src/main/java/org/unirevlab/security/analysis/SecretExposureEngine.kt
+          test -f app/src/main/java/org/unirevlab/security/ui/SecretExposurePanel.kt
+          test -f app/src/test/java/org/unirevlab/security/analysis/SecretExposureEngineTest.kt
           test -f app/src/main/java/org/unirevlab/security/analysis/TamperAssessmentEngine.kt
-          test -f app/src/main/java/org/unirevlab/security/ui/EasyAuditPanel.kt
-          test -f app/src/test/java/org/unirevlab/security/analysis/FlagSweepEngineTest.kt
-          # This bootstrap helper contains detector anchor strings by design. Remove it only
-          # from the ephemeral CI checkout after application so repository-wide secret
-          # preflight remains strict instead of adding an exclusion.
-          rm -f tools/apply_v0251_target_quality_fix.py
+          test -f app/src/main/java/org/unirevlab/security/ui/TamperAssessmentPanel.kt
+          # The bootstrap helper is removed only from the ephemeral checkout before secret preflight.
+          rm -f tools/apply_v0252_secret_proof.py
           git diff --check
 
       - uses: actions/setup-java@v4
@@ -112,10 +109,10 @@ jobs:
           APK="$(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | head -n 1)"
           test -n "${APK}"
           unzip -t "${APK}" >/dev/null
-          cp "${APK}" UniRevLab-Security-v0.25.1-target-quality-debug.apk
-          sha256sum UniRevLab-Security-v0.25.1-target-quality-debug.apk | tee UniRevLab-Security-v0.25.1-target-quality-debug.apk.sha256
+          cp "${APK}" UniRevLab-Security-v0.25.2-secret-proof-debug.apk
+          sha256sum UniRevLab-Security-v0.25.2-secret-proof-debug.apk | tee UniRevLab-Security-v0.25.2-secret-proof-debug.apk.sha256
 
-      - name: Commit verified v0.25.1 source patch
+      - name: Commit verified v0.25.2 source patch
         if: github.ref_name == 'fix-analysis-progress-v0221'
         shell: bash
         run: |
@@ -124,15 +121,15 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add app/src app/build.gradle.kts
-            git commit -m "Reduce framework/SDK tamper noise and resolve editable callers [skip ci]"
+            git commit -m "Add target-bound Secret Exposure Proof UI [skip ci]"
             git push origin HEAD:fix-analysis-progress-v0221
           fi
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: UniRevLab-Security-v0.25.1-target-quality-debug
+          name: UniRevLab-Security-v0.25.2-secret-proof-debug
           path: |
-            UniRevLab-Security-v0.25.1-target-quality-debug.apk
-            UniRevLab-Security-v0.25.1-target-quality-debug.apk.sha256
+            UniRevLab-Security-v0.25.2-secret-proof-debug.apk
+            UniRevLab-Security-v0.25.2-secret-proof-debug.apk.sha256
           if-no-files-found: error
