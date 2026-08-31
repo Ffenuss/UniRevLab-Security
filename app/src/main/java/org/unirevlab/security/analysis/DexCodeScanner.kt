@@ -10,6 +10,7 @@ import org.unirevlab.security.model.DexMethodCodeReference
 import org.unirevlab.security.model.DexStringXref
 import org.unirevlab.security.model.DexTypeXref
 import java.io.File
+import java.io.InterruptedIOException
 import java.io.RandomAccessFile
 import java.net.URI
 
@@ -102,8 +103,11 @@ object DexCodeScanner {
         file: File,
         limits: Limits = Limits(),
         structuralIndex: DexStringScanner.StructuralIndex? = null,
+        onProgress: ((percent: Int, detail: String, completed: Int, total: Int) -> Unit)? = null,
     ): FileResult {
         require(file.length() <= limits.maxDexBytes) { "DEX exceeds ${limits.maxDexBytes} byte limit" }
+        checkCancelled()
+        onProgress?.invoke(0, "Подготовка bytecode index", 0, 1)
         RandomAccessFile(file, "r").use { raf ->
             val h = readHeader(raf)
             val codeMethods = mutableListOf<DexMethodCodeReference>()
@@ -129,6 +133,7 @@ object DexCodeScanner {
             fun fieldRef(index: Int): FieldRef = fieldCache.getOrPut(index) { readField(raf, h, index, limits) }
 
             fun decodeMethod(methodIndex: Int, codeOff: Long) {
+                checkCancelled()
                 if (codeMethods.size >= limits.maxMethodsWithCode || totalUnits >= limits.maxTotalInstructionUnits) {
                     truncated = true
                     return
@@ -162,7 +167,12 @@ object DexCodeScanner {
 
             val reusableLocations = structuralIndex?.codeLocationsInClassOrder?.takeIf { sharedMethods != null }
             if (reusableLocations != null) {
-                for (location in reusableLocations) {
+                val totalLocations = reusableLocations.size.coerceAtLeast(1)
+                for ((locationIndex, location) in reusableLocations.withIndex()) {
+                    if ((locationIndex and 0x1f) == 0) {
+                        checkCancelled()
+                        onProgress?.invoke(scaleProgress(locationIndex, totalLocations), "Bytecode methods / xrefs", locationIndex, totalLocations)
+                    }
                     if (codeMethods.size >= limits.maxMethodsWithCode || totalUnits >= limits.maxTotalInstructionUnits) {
                         truncated = true
                         break
@@ -171,6 +181,10 @@ object DexCodeScanner {
                 }
             } else {
                 for (classDefIndex in 0 until h.classDefsSize) {
+                    if ((classDefIndex and 0x3f) == 0) {
+                        checkCancelled()
+                        onProgress?.invoke(scaleProgress(classDefIndex, h.classDefsSize.coerceAtLeast(1)), "Bytecode class_data / xrefs", classDefIndex, h.classDefsSize)
+                    }
                     if (codeMethods.size >= limits.maxMethodsWithCode || totalUnits >= limits.maxTotalInstructionUnits) {
                         truncated = true
                         break
@@ -186,14 +200,16 @@ object DexCodeScanner {
                     val virtualMethods = readUleb128(raf, h.fileSize)
                     val memberCount = staticFields + instanceFields + directMethods + virtualMethods
                     if (memberCount > limits.maxEncodedMembersPerClass) throw DexCodeFormatException("class_data member count exceeds limit")
-                    repeat((staticFields + instanceFields).toInt()) {
+                    repeat((staticFields + instanceFields).toInt()) { memberIndex ->
+                        if ((memberIndex and 0xff) == 0) checkCancelled()
                         readUleb128(raf, h.fileSize)
                         readUleb128(raf, h.fileSize)
                     }
 
                     fun decodeMethodList(count: Int) {
                         var methodIndex = 0L
-                        repeat(count) {
+                        repeat(count) { memberIndex ->
+                            if ((memberIndex and 0xff) == 0) checkCancelled()
                             methodIndex += readUleb128(raf, h.fileSize)
                             readUleb128(raf, h.fileSize) // access_flags
                             val codeOff = readUleb128(raf, h.fileSize)
@@ -217,6 +233,9 @@ object DexCodeScanner {
                 }
             }
 
+            checkCancelled()
+            val progressTotal = reusableLocations?.size ?: h.classDefsSize
+            onProgress?.invoke(100, "Bytecode xrefs/CFG готовы", progressTotal, progressTotal)
             return FileResult(
                 codeMethods = codeMethods.distinctBy { Triple(it.dexEntry, it.methodIndex, it.codeOffset) },
                 callXrefs = calls.distinctBy { listOf(it.dexEntry, it.callerMethodIndex, it.calleeMethodIndex, it.instructionOffsetCodeUnits) },
@@ -754,6 +773,15 @@ object DexCodeScanner {
 
     private fun readI32FromUnits(raf: RandomAccessFile, insnsOff: Long, pc: Int, insnsSize: Int): Int =
         readU32FromUnits(raf, insnsOff, pc, insnsSize)
+
+    private fun checkCancelled() {
+        if (Thread.currentThread().isInterrupted) throw InterruptedIOException("DEX bytecode analysis cancelled")
+    }
+
+    private fun scaleProgress(completed: Int, total: Int): Int {
+        if (total <= 0) return 100
+        return ((completed.toDouble() / total.toDouble()).coerceIn(0.0, 1.0) * 100.0).toInt()
+    }
 
     private fun readHeader(raf: RandomAccessFile): Header {
         if (raf.length() < 0x70) throw DexCodeFormatException("DEX header truncated")

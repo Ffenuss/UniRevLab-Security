@@ -34,6 +34,26 @@ class ElfNativeScannerTest {
         assertFalse(scan.bindNow)
     }
 
+    @Test
+    fun reportsProgressAndHonorsThreadInterruption() {
+        val file = fixture("libjni_hardened.so")
+        val progress = mutableListOf<Int>()
+        ElfNativeScanner.scan("lib/x86_64/libjni_hardened.so", file) { percent, _, _, _ -> progress += percent }
+        assertTrue(progress.isNotEmpty())
+        assertEquals(100, progress.last())
+        assertTrue(progress.zipWithNext().all { (a, b) -> b >= a })
+
+        Thread.currentThread().interrupt()
+        try {
+            ElfNativeScanner.scan("lib/x86_64/libjni_hardened.so", file)
+            throw AssertionError("Expected InterruptedIOException")
+        } catch (_: java.io.InterruptedIOException) {
+            // expected
+        } finally {
+            Thread.interrupted()
+        }
+    }
+
     @Test(expected = ElfNativeScanner.ElfFormatException::class)
     fun rejectsNonElfInput() {
         val file = File.createTempFile("not-elf", ".so")

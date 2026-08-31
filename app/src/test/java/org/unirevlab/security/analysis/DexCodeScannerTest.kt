@@ -134,4 +134,29 @@ class DexCodeScannerTest {
         return File.createTempFile("dex-cfg-field", ".dex").apply{writeBytes(bytes)}
     }
 
+    @Test
+    fun reportsProgressAndHonorsThreadInterruption() {
+        val file = fixtureDex()
+        try {
+            val progress = mutableListOf<Int>()
+            DexCodeScanner.scan("classes.dex", file, onProgress = { percent, _, _, _ -> progress += percent })
+            assertTrue(progress.isNotEmpty())
+            assertEquals(100, progress.last())
+            assertTrue(progress.zipWithNext().all { (a, b) -> b >= a })
+
+            Thread.currentThread().interrupt()
+            try {
+                DexCodeScanner.scan("classes.dex", file)
+                throw AssertionError("Expected InterruptedIOException")
+            } catch (_: java.io.InterruptedIOException) {
+                // expected
+            } finally {
+                Thread.interrupted()
+            }
+        } finally {
+            file.delete()
+            Thread.interrupted()
+        }
+    }
+
 }

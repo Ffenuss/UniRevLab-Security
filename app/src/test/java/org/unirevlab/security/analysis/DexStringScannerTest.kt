@@ -61,6 +61,32 @@ class DexStringScannerTest {
         }
     }
 
+    @Test
+    fun honorsThreadInterruptionAndReportsProgress() {
+        val file = tempDex(listOf("ordinary", "https://example.invalid"))
+        try {
+            val progress = mutableListOf<Int>()
+            val scan = DexStringScanner.scan("classes.dex", file) { percent, _, _, _ -> progress += percent }
+            assertTrue(progress.isNotEmpty())
+            assertEquals(100, progress.last())
+            assertTrue(progress.zipWithNext().all { (a, b) -> b >= a })
+            assertEquals(2, scan.stringsDeclared)
+
+            Thread.currentThread().interrupt()
+            try {
+                DexStringScanner.scan("classes.dex", file)
+                throw AssertionError("Expected InterruptedIOException")
+            } catch (_: java.io.InterruptedIOException) {
+                // expected
+            } finally {
+                Thread.interrupted()
+            }
+        } finally {
+            file.delete()
+            Thread.interrupted()
+        }
+    }
+
     @Test(expected = DexStringScanner.DexFormatException::class)
     fun rejectsInvalidMagic() {
         val file = File.createTempFile("bad-dex", ".dex")

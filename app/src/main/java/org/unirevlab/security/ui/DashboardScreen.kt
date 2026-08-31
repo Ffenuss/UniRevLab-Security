@@ -41,6 +41,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.unirevlab.security.R
 import org.unirevlab.security.analysis.ReBrowserIndex
+import org.unirevlab.security.analysis.AnalysisRunState
 import org.unirevlab.security.model.ArtifactSummary
 import org.unirevlab.security.model.AssessmentScope
 import org.unirevlab.security.model.AssessmentDiff
@@ -63,6 +64,7 @@ fun DashboardScreen(
     report: StaticAnalysisReport?,
     comparison: AssessmentDiff?,
     isInspecting: Boolean,
+    analysisState: AnalysisRunState = AnalysisRunState.Idle,
     error: String?,
     onPickArtifact: () -> Unit,
     onPickInstalledApp: () -> Unit,
@@ -113,21 +115,48 @@ fun DashboardScreen(
             }
 
             if (isInspecting) {
+                val active = when (analysisState) {
+                    is AnalysisRunState.Running -> analysisState.progress to false
+                    is AnalysisRunState.Cancelling -> analysisState.progress to true
+                    else -> null
+                }
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(18.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)),
                 ) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("Анализ выполняется", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        LinearProgressIndicator(Modifier.fillMaxWidth())
-                        Text(
-                            "DEX/native задачи выполняются ограниченно параллельно; повторно доступные факты переиспользуются по SHA-256.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        OutlinedButton(onClick = onCancelAnalysis, modifier = Modifier.fillMaxWidth()) {
-                            Text("Отменить анализ")
+                        if (active != null) {
+                            val (progress, cancelling) = active
+                            Text(
+                                if (cancelling) "Останавливаем анализ…" else "${progress.stage.title} — ${progress.percent}%",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            LinearProgressIndicator(progress = { progress.percent / 100f }, modifier = Modifier.fillMaxWidth())
+                            Text(progress.detail, style = MaterialTheme.typography.bodySmall)
+                            progress.totalUnits?.takeIf { it > 0 }?.let { total ->
+                                Text(
+                                    "Текущий счётчик: ${progress.completedUnits?.coerceIn(0, total) ?: 0} / $total",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = onCancelAnalysis,
+                                enabled = !cancelling,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(if (cancelling) "Остановка запрошена…" else "Отменить анализ")
+                            }
+                        } else {
+                            Text("Операция выполняется", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                            LinearProgressIndicator(Modifier.fillMaxWidth())
+                            Text(
+                                "Подождите завершения текущей операции.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     }
                 }
@@ -217,7 +246,7 @@ fun DashboardScreen(
             }
 
             HorizontalDivider()
-            OutlinedButton(onClick = onNewAssessment, modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick = onNewAssessment, enabled = !isInspecting, modifier = Modifier.fillMaxWidth()) {
                 Text("Новый Assessment")
             }
         }

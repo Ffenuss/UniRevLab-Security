@@ -6,6 +6,7 @@ import org.unirevlab.security.model.DexNativeMethodDeclaration
 import org.unirevlab.security.model.DexStringReference
 import org.unirevlab.security.model.SecretCandidate
 import java.io.File
+import java.io.InterruptedIOException
 import java.io.RandomAccessFile
 
 /**
@@ -79,8 +80,15 @@ object DexStringScanner {
         val classDefsOff: Long,
     )
 
-    fun scan(dexEntry: String, file: File, limits: Limits = Limits()): FileResult {
+    fun scan(
+        dexEntry: String,
+        file: File,
+        limits: Limits = Limits(),
+        onProgress: ((percent: Int, detail: String, completed: Int, total: Int) -> Unit)? = null,
+    ): FileResult {
         require(file.length() <= limits.maxDexBytes) { "DEX exceeds ${limits.maxDexBytes} byte limit" }
+        checkCancelled()
+        onProgress?.invoke(0, "Читаем DEX header", 0, 1)
         RandomAccessFile(file, "r").use { raf ->
             val h = readHeader(raf)
             var truncated = false
@@ -93,6 +101,10 @@ object DexStringScanner {
             var stringsScanned = 0
 
             for (index in 0 until toScanStrings) {
+                if ((index and 0xff) == 0) {
+                    checkCancelled()
+                    onProgress?.invoke(scaleProgress(0, 35, index, toScanStrings), "Строки DEX", index, toScanStrings)
+                }
                 val decoded = readStringByIndex(raf, h, index, limits.maxStringBytes)
                 if (decoded.truncated) truncated = true
                 stringsScanned++
@@ -118,13 +130,21 @@ object DexStringScanner {
                 }
             }
 
+            checkCancelled()
+            onProgress?.invoke(35, "Строки DEX готовы", toScanStrings, toScanStrings)
+
             val toIndexTypes = minOf(h.typeIdsSize, limits.maxTypes)
             if (h.typeIdsSize > toIndexTypes) truncated = true
             var typesIndexed = 0
             repeat(toIndexTypes) { typeIndex ->
+                if ((typeIndex and 0xff) == 0) {
+                    checkCancelled()
+                    onProgress?.invoke(scaleProgress(35, 45, typeIndex, toIndexTypes), "Типы DEX", typeIndex, toIndexTypes)
+                }
                 typeDescriptor(raf, h, typeIndex, limits.maxStringBytes)
                 typesIndexed++
             }
+            onProgress?.invoke(45, "Типы DEX готовы", toIndexTypes, toIndexTypes)
 
             val methods = mutableListOf<DexMethodReference>()
             val methodLookup = HashMap<Int, DexMethodReference>()
@@ -133,17 +153,26 @@ object DexStringScanner {
             val codeLocations = ArrayList<CodeLocation>()
             if (h.methodIdsSize > toIndexMethods) truncated = true
             repeat(toIndexMethods) { methodIndex ->
+                if ((methodIndex and 0xff) == 0) {
+                    checkCancelled()
+                    onProgress?.invoke(scaleProgress(45, 65, methodIndex, toIndexMethods), "Методы DEX", methodIndex, toIndexMethods)
+                }
                 val method = readMethod(raf, h, dexEntry, methodIndex, limits)
                 methodLookup[methodIndex] = method
                 methodsByIndex[methodIndex] = method
                 if (methods.size < limits.maxReportedMethods) methods += method else truncated = true
             }
 
+            onProgress?.invoke(65, "Методы DEX готовы", toIndexMethods, toIndexMethods)
             val classes = mutableListOf<DexClassReference>()
             val nativeMethods = mutableListOf<DexNativeMethodDeclaration>()
             val toIndexClasses = minOf(h.classDefsSize, limits.maxClasses)
             if (h.classDefsSize > toIndexClasses) truncated = true
             repeat(toIndexClasses) { classDefIndex ->
+                if ((classDefIndex and 0x7f) == 0) {
+                    checkCancelled()
+                    onProgress?.invoke(scaleProgress(65, 100, classDefIndex, toIndexClasses), "Классы и class_data", classDefIndex, toIndexClasses)
+                }
                 val base = h.classDefsOff + classDefIndex.toLong() * 32L
                 val classIdx = readU32(raf, base).toIntChecked("class_idx")
                 val accessFlags = readU32(raf, base + 4)
@@ -176,6 +205,8 @@ object DexStringScanner {
                 }
             }
 
+            checkCancelled()
+            onProgress?.invoke(100, "DEX structure inventory готов", toIndexClasses, toIndexClasses)
             return FileResult(
                 stringsDeclared = h.stringIdsSize,
                 stringsScanned = stringsScanned,
@@ -251,6 +282,7 @@ object DexStringScanner {
         var truncated = false
         var terminated = false
         while (raf.filePointer < fileSize) {
+            if ((count and 0x0fff) == 0) checkCancelled()
             val b = raf.read()
             if (b < 0) throw DexFormatException("truncated string_data_item")
             if (b == 0) {
@@ -373,7 +405,8 @@ object DexStringScanner {
         val totalMembers = staticFields + instanceFields + directMethods + virtualMethods
         if (totalMembers > limits.maxEncodedMembersPerClass) throw DexFormatException("class_data member count exceeds limit")
 
-        repeat((staticFields + instanceFields).toInt()) {
+        repeat((staticFields + instanceFields).toInt()) { memberIndex ->
+            if ((memberIndex and 0xff) == 0) checkCancelled()
             readUleb128(raf, h.fileSize) // field_idx_diff
             readUleb128(raf, h.fileSize) // access_flags
         }
@@ -381,7 +414,8 @@ object DexStringScanner {
         val result = mutableListOf<DexNativeMethodDeclaration>()
         fun readMethodList(count: Int) {
             var methodIndex = 0L
-            repeat(count) {
+            repeat(count) { memberIndex ->
+                if ((memberIndex and 0xff) == 0) checkCancelled()
                 methodIndex += readUleb128(raf, h.fileSize)
                 val accessFlags = readUleb128(raf, h.fileSize)
                 val codeOff = readUleb128(raf, h.fileSize)
@@ -451,6 +485,16 @@ object DexStringScanner {
     private fun Long.toIntChecked(label: String): Int {
         if (this > Int.MAX_VALUE) throw DexFormatException("$label too large")
         return toInt()
+    }
+
+    private fun checkCancelled() {
+        if (Thread.currentThread().isInterrupted) throw InterruptedIOException("DEX analysis cancelled")
+    }
+
+    private fun scaleProgress(from: Int, to: Int, completed: Int, total: Int): Int {
+        if (total <= 0) return to
+        val fraction = (completed.toDouble() / total.toDouble()).coerceIn(0.0, 1.0)
+        return from + ((to - from) * fraction).toInt()
     }
 
     private fun sanitizeUrl(value: String): String {

@@ -1,6 +1,7 @@
 package org.unirevlab.security.analysis
 
 import java.io.File
+import java.io.InterruptedIOException
 import java.util.TreeSet
 import java.util.zip.ZipException
 import java.util.zip.ZipFile
@@ -77,6 +78,9 @@ data class ApkArchiveIndex(
 
                 val iterator = zip.entries()
                 while (iterator.hasMoreElements()) {
+                    if ((totalEntries and 0x03ff) == 0 && Thread.currentThread().isInterrupted) {
+                        throw InterruptedIOException("Archive indexing cancelled")
+                    }
                     val entry = iterator.nextElement()
                     totalEntries++
                     val name = entry.name
@@ -145,6 +149,8 @@ data class ApkArchiveIndex(
                     duplicateMavenPomNames = duplicateMaven,
                 )
             }
+        } catch (e: InterruptedIOException) {
+            throw e
         } catch (_: ZipException) {
             null
         } catch (_: java.io.IOException) {

@@ -43,6 +43,7 @@ import org.unirevlab.security.model.SigningCertificateSummary
 import org.unirevlab.security.nativecore.NativeAnalysis
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InterruptedIOException
 import java.security.DigestOutputStream
 import java.security.MessageDigest
 import java.security.cert.CertificateFactory
@@ -52,6 +53,8 @@ import java.security.interfaces.ECPublicKey
 import java.security.interfaces.RSAPublicKey
 import java.util.zip.ZipException
 import java.util.zip.ZipFile
+import java.util.concurrent.CancellationException as FutureCancellationException
+import java.util.concurrent.ExecutionException
 
 class LocalArtifactInspector(
     private val context: Context,
@@ -60,7 +63,68 @@ class LocalArtifactInspector(
     private val cacheDir = context.cacheDir
     private val resultCache = AnalysisResultCache(File(cacheDir, "normalized-analysis-cache"), ENGINE_VERSION)
 
-    fun inspect(uri: Uri, scope: AssessmentScope): StaticAnalysisReport {
+    private class ProgressReporter(private val callback: ((AnalysisProgress) -> Unit)?) {
+        val startedAtEpochMs: Long = System.currentTimeMillis()
+        private var lastPercent: Int = -1
+        private var lastStage: AnalysisStage? = null
+        private var lastDetail: String? = null
+        private var lastCallbackAtMs: Long = 0L
+
+        @Synchronized
+        fun emit(
+            stage: AnalysisStage,
+            percent: Int,
+            detail: String,
+            completedUnits: Int? = null,
+            totalUnits: Int? = null,
+        ) {
+            checkCancelled()
+            val normalized = percent.coerceIn(0, 100)
+            if (normalized < lastPercent) return
+            val now = System.currentTimeMillis()
+            val sameCheckpoint = normalized == lastPercent && stage == lastStage && detail == lastDetail
+            if (sameCheckpoint && normalized != 0 && normalized != 100 && now - lastCallbackAtMs < 250L) return
+            lastPercent = normalized
+            lastStage = stage
+            lastDetail = detail
+            lastCallbackAtMs = now
+            callback?.invoke(
+                AnalysisProgress(
+                    stage = stage,
+                    percent = normalized,
+                    detail = detail,
+                    completedUnits = completedUnits,
+                    totalUnits = totalUnits,
+                    startedAtEpochMs = startedAtEpochMs,
+                )
+            )
+        }
+
+        fun scaled(
+            stage: AnalysisStage,
+            fromPercent: Int,
+            toPercent: Int,
+            completed: Long,
+            total: Long,
+            detail: String,
+            completedUnits: Int? = null,
+            totalUnits: Int? = null,
+        ) {
+            val fraction = if (total <= 0L) 1.0 else (completed.toDouble() / total.toDouble()).coerceIn(0.0, 1.0)
+            val percent = fromPercent + ((toPercent - fromPercent) * fraction).toInt()
+            emit(stage, percent, detail, completedUnits, totalUnits)
+        }
+
+        fun checkCancelled() = Companion.checkCancelled()
+    }
+
+    fun inspect(
+        uri: Uri,
+        scope: AssessmentScope,
+        onProgress: ((AnalysisProgress) -> Unit)? = null,
+    ): StaticAnalysisReport {
+        val progress = ProgressReporter(onProgress)
+        progress.emit(AnalysisStage.PREPARING, 0, "Читаем метаданные выбранного артефакта…")
         val metadata = queryMetadata(uri)
         metadata.second?.let { size ->
             require(size <= MAX_ARTIFACT_BYTES) {
@@ -70,22 +134,36 @@ class LocalArtifactInspector(
 
         val temp = File.createTempFile("unirevlab-artifact-", ".apk", cacheDir)
         return try {
-            val digest = copyToBoundedTempAndHash(uri, temp)
+            val expectedSize = metadata.second
+            progress.emit(AnalysisStage.HASHING, 1, "Копируем файл и вычисляем SHA-256…", 0, expectedSize?.coerceAtMost(Int.MAX_VALUE.toLong())?.toInt())
+            val digest = copyToBoundedTempAndHash(uri, temp, expectedSize) { copied, total ->
+                progress.scaled(
+                    AnalysisStage.HASHING, 1, 8, copied, total ?: copied.coerceAtLeast(1L),
+                    "SHA-256: прочитано ${formatBytes(copied)}${total?.let { " из ${formatBytes(it)}" } ?: ""}",
+                )
+            }
             val displayName = metadata.first ?: "artifact"
             val sizeBytes = metadata.second ?: temp.length()
+            progress.emit(AnalysisStage.CACHE, 9, "Проверяем готовый результат по SHA-256…")
             resultCache.load(digest)?.let { cached ->
+                progress.emit(AnalysisStage.COMPLETE, 100, "Готово: использован проверенный SHA-256 кэш")
                 return rebindCachedReport(
                     cached, scope, displayName, sizeBytes, digest,
                     sourceKind = "FILE", sourcePackageName = null, sourceInstallerPackageName = null, splitApkCount = 0,
                 )
             }
-            inspectPreparedFile(
+            val report = inspectPreparedFile(
                 apk = temp,
                 scope = scope,
                 displayName = displayName,
                 sizeBytes = sizeBytes,
                 sha256 = digest,
-            ).also(resultCache::store)
+                progress = progress,
+            )
+            progress.emit(AnalysisStage.SAVING, 99, "Сохраняем нормализованный результат в локальный SHA-256 кэш…")
+            resultCache.store(report)
+            progress.emit(AnalysisStage.COMPLETE, 100, "Анализ завершён")
+            report
         } finally {
             temp.delete()
         }
@@ -95,7 +173,13 @@ class LocalArtifactInspector(
      * Analyze an application already installed on this Android device without launching it.
      * Base and split APKs are all included in DEX/native/runtime/SBOM analysis.
      */
-    fun inspectInstalledApp(app: InstalledAppDescriptor, scope: AssessmentScope): StaticAnalysisReport {
+    fun inspectInstalledApp(
+        app: InstalledAppDescriptor,
+        scope: AssessmentScope,
+        onProgress: ((AnalysisProgress) -> Unit)? = null,
+    ): StaticAnalysisReport {
+        val progress = ProgressReporter(onProgress)
+        progress.emit(AnalysisStage.PREPARING, 0, "Готовим base.apk и split APK установленного приложения…")
         val files = (listOf(app.baseApkPath) + app.splitApkPaths).map(::File)
         require(files.isNotEmpty() && files.first().isFile) { "Base APK установленного приложения недоступен" }
         require(files.all { it.isFile && it.canRead() }) { "Один или несколько APK установленного приложения недоступны для чтения" }
@@ -104,34 +188,50 @@ class LocalArtifactInspector(
             "Набор APK приложения превышает локальный лимит ${MAX_INSTALLED_APK_SET_BYTES / (1024 * 1024)} MiB"
         }
 
-        val aggregateHash = aggregateInstalledHash(app.packageName, files)
+        progress.emit(AnalysisStage.HASHING, 1, "Вычисляем общий SHA-256 base + ${app.splitApkPaths.size} split APK…", 0, files.size)
+        val aggregateHash = aggregateInstalledHash(app.packageName, files, progress)
+        progress.emit(AnalysisStage.CACHE, 9, "Проверяем готовый результат по SHA-256…")
         resultCache.load(aggregateHash)?.let { cached ->
+            progress.emit(AnalysisStage.COMPLETE, 100, "Готово: использован проверенный SHA-256 кэш")
             return rebindCachedReport(
                 cached, scope, "${app.label} (${app.packageName})", totalSize, aggregateHash,
                 sourceKind = "INSTALLED_APP", sourcePackageName = app.packageName,
                 sourceInstallerPackageName = app.installerPackageName, splitApkCount = app.splitApkPaths.size,
             )
         }
+
         val session = AnalysisSession()
-        val archiveIndexes = files.map(ApkArchiveIndex::build)
+        val archiveIndexes = ArrayList<ApkArchiveIndex?>(files.size)
+        progress.emit(AnalysisStage.ARCHIVE, 10, "Индексируем ZIP central directory…", 0, files.size)
+        files.forEachIndexed { index, file ->
+            progress.checkCancelled()
+            archiveIndexes += ApkArchiveIndex.build(file)
+            progress.scaled(
+                AnalysisStage.ARCHIVE, 10, 14, (index + 1).toLong(), files.size.toLong(),
+                "APK index: ${file.name}", index + 1, files.size,
+            )
+        }
         val stats = files.mapIndexed { index, file -> archiveIndexes[index]?.let(::archiveStatsFromIndex) ?: inspectArchiveCentralDirectory(file) }
         val archive = aggregateArchiveStats(stats)
         val base = files.first()
         val baseStats = stats.firstOrNull()
+
+        progress.emit(AnalysisStage.MANIFEST, 15, "Читаем AndroidManifest.xml и resource table…")
         val axmlOverlay = if (baseStats?.hasAndroidManifest == true) {
             readBoundedManifest(base)?.let { bytes ->
                 AxmlManifestOverlayParser.parse(NativeAnalysis.tryParseAxmlJson(bytes))
                     ?: KotlinAxmlManifestParser.parse(bytes)
             }
         } else null
+        progress.checkCancelled()
         val resourceBySource = files.mapIndexedNotNull { index, file ->
+            progress.checkCancelled()
             val source = installedEntryPrefix(index, file)
             ResourceTableResolver.scanApk(file, source)?.let { Triple(source, file, it) }
         }
         val resources = ResourceTableResolver.merge(resourceBySource.map { it.third })
-        val resolvedNetworkSecurity = ResourceTableResolver.resolveReference(
-            resources, axmlOverlay?.networkSecurityConfigReference
-        )
+        progress.emit(AnalysisStage.MANIFEST, 20, "Разрешаем resource references и Network Security Config…")
+        val resolvedNetworkSecurity = ResourceTableResolver.resolveReference(resources, axmlOverlay?.networkSecurityConfigReference)
         val resolvedNetworkSecurityEntry = resolvedNetworkSecurity?.fileEntry
         val networkSecurityApk = resolvedNetworkSecurity?.sourceArchive?.let { source ->
             resourceBySource.firstOrNull { it.first == source }?.second
@@ -139,37 +239,86 @@ class LocalArtifactInspector(
         val networkSecurity = if (axmlOverlay?.networkSecurityConfigConfigured == true) {
             NetworkSecurityConfigScanner.scan(networkSecurityApk, axmlOverlay.networkSecurityConfigReference, resolvedNetworkSecurityEntry)
         } else null
+        progress.checkCancelled()
         val manifest = if (baseStats?.hasAndroidManifest == true) inspectManifest(base, axmlOverlay, networkSecurity) else null
         require(manifest == null || manifest.packageName == app.packageName) {
             "Package name base APK не совпадает с выбранным установленным приложением"
         }
+        progress.emit(AnalysisStage.MANIFEST, 24, "Manifest/resources готовы")
 
-        val dex = mergeDexSummaries(files.mapIndexedNotNull { index, file ->
+        val dexTotal = stats.sumOf { (it?.dexFiles ?: 0).coerceAtMost(MAX_DEX_FILES) }.coerceAtLeast(0)
+        var dexBase = 0
+        val dexParts = ArrayList<DexSummary>()
+        progress.emit(AnalysisStage.DEX, 25, if (dexTotal > 0) "Начинаем DEX inventory и bytecode xrefs…" else "DEX не обнаружен", 0, dexTotal.takeIf { it > 0 })
+        files.forEachIndexed { index, file ->
             val count = stats.getOrNull(index)?.dexFiles ?: 0
-            count.takeIf { it > 0 }?.let {
-                inspectDexStrings(file, it, installedEntryPrefix(index, file), session, archiveIndexes.getOrNull(index))
+            if (count > 0) {
+                progress.checkCancelled()
+                dexParts += inspectDexStrings(
+                    file, count, installedEntryPrefix(index, file), session, archiveIndexes.getOrNull(index),
+                    progress = progress, overallBase = dexBase, overallTotal = dexTotal.coerceAtLeast(1),
+                )
+                dexBase += minOf(count, MAX_DEX_FILES)
             }
-        })
+        }
+        val dex = mergeDexSummaries(dexParts)
+        progress.emit(AnalysisStage.DEX, 58, "DEX анализ завершён", dexBase.coerceAtMost(dexTotal), dexTotal.takeIf { it > 0 })
+
+        progress.emit(AnalysisStage.REACHABILITY, 59, "Строим Manifest → DEX reachability…")
         val manifestDexReachability = ManifestDexReachabilityAnalyzer.analyze(manifest, dex)
-        val nativeRaw = mergeNativeSummaries(files.mapIndexedNotNull { index, file ->
+        progress.checkCancelled()
+        progress.emit(AnalysisStage.REACHABILITY, 61, "Reachability готова")
+
+        val nativeTotal = stats.sumOf { (it?.nativeLibraries ?: 0).coerceAtMost(MAX_NATIVE_LIBRARIES) }.coerceAtLeast(0)
+        var nativeBase = 0
+        val nativeParts = ArrayList<NativeSummary>()
+        progress.emit(AnalysisStage.NATIVE, 62, if (nativeTotal > 0) "Начинаем ELF/native inventory…" else "Native ELF библиотеки не обнаружены", 0, nativeTotal.takeIf { it > 0 })
+        files.forEachIndexed { index, file ->
             val count = stats.getOrNull(index)?.nativeLibraries ?: 0
-            count.takeIf { it > 0 }?.let {
-                inspectNativeLibraries(file, it, installedEntryPrefix(index, file), session, archiveIndexes.getOrNull(index))
+            if (count > 0) {
+                progress.checkCancelled()
+                nativeParts += inspectNativeLibraries(
+                    file, count, installedEntryPrefix(index, file), session, archiveIndexes.getOrNull(index),
+                    progress = progress, overallBase = nativeBase, overallTotal = nativeTotal.coerceAtLeast(1),
+                )
+                nativeBase += minOf(count, MAX_NATIVE_LIBRARIES)
             }
-        })
+        }
+        val nativeRaw = mergeNativeSummaries(nativeParts)
         val native = nativeRaw?.let { JniBridgeCorrelator.correlate(dex, it) }
-        val il2cpp = chooseIl2Cpp(files.mapIndexedNotNull { index, file -> inspectIl2Cpp(file, native, archiveIndexes.getOrNull(index)) })
+        progress.emit(AnalysisStage.NATIVE, 76, "Native/JNI анализ завершён", nativeBase.coerceAtMost(nativeTotal), nativeTotal.takeIf { it > 0 })
+
+        progress.emit(AnalysisStage.IL2CPP, 77, "Проверяем IL2CPP metadata и registration evidence…", 0, files.size)
+        val il2cppParts = files.mapIndexedNotNull { index, file ->
+            progress.checkCancelled()
+            inspectIl2Cpp(file, native, archiveIndexes.getOrNull(index)).also {
+                progress.scaled(AnalysisStage.IL2CPP, 77, 81, (index + 1).toLong(), files.size.toLong(), "IL2CPP: ${file.name}", index + 1, files.size)
+            }
+        }
+        val il2cpp = chooseIl2Cpp(il2cppParts)
+
+        progress.emit(AnalysisStage.RUNTIME, 82, "Определяем runtime-профили…")
         val runtimeEvidence = RuntimeProfileScanner.prepareSharedEvidence(dex, native)
         val runtimes = mergeRuntimeSummaries(files.mapIndexedNotNull { index, file ->
+            progress.checkCancelled()
             RuntimeProfileScanner.scanApk(file, dex, native, il2cpp, sharedEvidence = runtimeEvidence, archiveIndex = archiveIndexes.getOrNull(index))
         })
+        progress.emit(AnalysisStage.RUNTIME, 86, "Инвентаризируем Flutter/Hermes/Mono/Unreal artifacts…")
         val runtimeArtifacts = mergeRuntimeArtifacts(files.mapIndexedNotNull { index, file ->
+            progress.checkCancelled()
             RuntimeArtifactScanner.scanApk(file, native, archiveIndex = archiveIndexes.getOrNull(index))
         })
+        progress.emit(AnalysisStage.RUNTIME, 89, "Runtime анализ завершён")
+
+        progress.emit(AnalysisStage.SUPPLY_CHAIN, 90, "Строим dependency inventory и SBOM evidence…", 0, files.size)
         val supplyChain = mergeSupplyChain(files.mapIndexed { index, file ->
-            SupplyChainScanner.scan(file, dex, native, il2cpp, runtimeArtifacts, archiveIndex = archiveIndexes.getOrNull(index))
+            progress.checkCancelled()
+            SupplyChainScanner.scan(file, dex, native, il2cpp, runtimeArtifacts, archiveIndex = archiveIndexes.getOrNull(index)).also {
+                progress.scaled(AnalysisStage.SUPPLY_CHAIN, 90, 94, (index + 1).toLong(), files.size.toLong(), "Supply-chain: ${file.name}", index + 1, files.size)
+            }
         })
 
+        progress.emit(AnalysisStage.FINDINGS, 95, "Применяем статические security rules…")
         val artifact = ArtifactSummary(
             displayName = "${app.label} (${app.packageName})",
             sizeBytes = totalSize,
@@ -191,6 +340,7 @@ class LocalArtifactInspector(
             if (native != null) addAll(NativeRuleEngine.evaluate(native))
             if (il2cpp != null) addAll(Il2CppRuleEngine.evaluate(il2cpp))
         }.sortedWith(compareBy({ findingSeverityOrder(it.severity) }, { it.id }))
+        progress.emit(AnalysisStage.FINDINGS, 98, "Findings готовы: ${findings.size}")
         val report = StaticAnalysisReport(
             engineVersion = ENGINE_VERSION,
             assessment = scope,
@@ -206,7 +356,9 @@ class LocalArtifactInspector(
             supplyChain = supplyChain,
             findings = findings,
         )
+        progress.emit(AnalysisStage.SAVING, 99, "Сохраняем результат в локальный SHA-256 кэш…")
         resultCache.store(report)
+        progress.emit(AnalysisStage.COMPLETE, 100, "Анализ завершён")
         return report
     }
 
@@ -487,10 +639,18 @@ class LocalArtifactInspector(
         sourcePackageName: String? = null,
         sourceInstallerPackageName: String? = null,
         splitApkCount: Int = 0,
+        progress: ProgressReporter = ProgressReporter(null),
     ): StaticAnalysisReport {
         val session = AnalysisSession()
+        progress.emit(AnalysisStage.ARCHIVE, 10, "Индексируем ZIP central directory…")
         val archiveIndex = ApkArchiveIndex.build(apk)
+        progress.checkCancelled()
         val archive = archiveOverride ?: archiveIndex?.let(::archiveStatsFromIndex) ?: inspectArchiveCentralDirectory(apk)
+        progress.emit(
+            AnalysisStage.ARCHIVE,
+            14,
+            "ZIP index готов: ${archive?.entries ?: 0} entries, ${archive?.dexFiles ?: 0} DEX, ${archive?.nativeLibraries ?: 0} native",
+        )
         val artifact = ArtifactSummary(
             displayName = displayName,
             sizeBytes = sizeBytes,
@@ -506,6 +666,8 @@ class LocalArtifactInspector(
             sourceInstallerPackageName = sourceInstallerPackageName,
             splitApkCount = splitApkCount,
         )
+
+        progress.emit(AnalysisStage.MANIFEST, 15, "Читаем AndroidManifest.xml и resource table…")
         val baseArchive = archive
         val axmlOverlay = if (baseArchive?.hasAndroidManifest == true) {
             val manifestBytes = readBoundedManifest(apk)
@@ -514,29 +676,64 @@ class LocalArtifactInspector(
                     ?: KotlinAxmlManifestParser.parse(bytes)
             }
         } else null
+        progress.checkCancelled()
         val resources = ResourceTableResolver.scanApk(apk, "artifact.apk")
-        val resolvedNetworkSecurityEntry = ResourceTableResolver.resolveReference(
-            resources, axmlOverlay?.networkSecurityConfigReference
-        )?.fileEntry
+        progress.emit(AnalysisStage.MANIFEST, 20, "Разрешаем resource references и Network Security Config…")
+        val resolvedNetworkSecurityEntry = ResourceTableResolver.resolveReference(resources, axmlOverlay?.networkSecurityConfigReference)?.fileEntry
         val networkSecurity = if (axmlOverlay?.networkSecurityConfigConfigured == true) {
             NetworkSecurityConfigScanner.scan(apk, axmlOverlay.networkSecurityConfigReference, resolvedNetworkSecurityEntry)
         } else null
+        progress.checkCancelled()
         val manifest = if (baseArchive?.hasAndroidManifest == true) inspectManifest(apk, axmlOverlay, networkSecurity) else null
-        val dex = baseArchive?.dexFiles?.takeIf { it > 0 }?.let { inspectDexStrings(apk, it, session = session, archiveIndex = archiveIndex) }
+        progress.emit(AnalysisStage.MANIFEST, 24, "Manifest/resources готовы")
+
+        val dexCount = baseArchive?.dexFiles?.coerceAtMost(MAX_DEX_FILES) ?: 0
+        progress.emit(AnalysisStage.DEX, 25, if (dexCount > 0) "Начинаем DEX inventory и bytecode xrefs…" else "DEX не обнаружен", 0, dexCount.takeIf { it > 0 })
+        val dex = baseArchive?.dexFiles?.takeIf { it > 0 }?.let {
+            inspectDexStrings(apk, it, session = session, archiveIndex = archiveIndex, progress = progress, overallBase = 0, overallTotal = dexCount.coerceAtLeast(1))
+        }
+        progress.emit(AnalysisStage.DEX, 58, "DEX анализ завершён", dex?.dexFilesScanned ?: 0, dexCount.takeIf { it > 0 })
+
+        progress.emit(AnalysisStage.REACHABILITY, 59, "Строим Manifest → DEX reachability…")
         val manifestDexReachability = ManifestDexReachabilityAnalyzer.analyze(manifest, dex)
-        val nativeRaw = baseArchive?.nativeLibraries?.takeIf { it > 0 }?.let { inspectNativeLibraries(apk, it, session = session, archiveIndex = archiveIndex) }
+        progress.checkCancelled()
+        progress.emit(AnalysisStage.REACHABILITY, 61, "Reachability готова")
+
+        val nativeCount = baseArchive?.nativeLibraries?.coerceAtMost(MAX_NATIVE_LIBRARIES) ?: 0
+        progress.emit(AnalysisStage.NATIVE, 62, if (nativeCount > 0) "Начинаем ELF/native inventory…" else "Native ELF библиотеки не обнаружены", 0, nativeCount.takeIf { it > 0 })
+        val nativeRaw = baseArchive?.nativeLibraries?.takeIf { it > 0 }?.let {
+            inspectNativeLibraries(apk, it, session = session, archiveIndex = archiveIndex, progress = progress, overallBase = 0, overallTotal = nativeCount.coerceAtLeast(1))
+        }
         val native = nativeRaw?.let { JniBridgeCorrelator.correlate(dex, it) }
+        progress.emit(AnalysisStage.NATIVE, 76, "Native/JNI анализ завершён", native?.librariesScanned ?: 0, nativeCount.takeIf { it > 0 })
+
+        progress.emit(AnalysisStage.IL2CPP, 77, "Проверяем IL2CPP metadata и registration evidence…")
         val il2cpp = inspectIl2Cpp(apk, native, archiveIndex)
+        progress.checkCancelled()
+        progress.emit(AnalysisStage.IL2CPP, 81, "IL2CPP этап завершён")
+
+        progress.emit(AnalysisStage.RUNTIME, 82, "Определяем runtime-профили…")
         val runtimeEvidence = RuntimeProfileScanner.prepareSharedEvidence(dex, native)
         val runtimes = RuntimeProfileScanner.scanApk(apk, dex, native, il2cpp, sharedEvidence = runtimeEvidence, archiveIndex = archiveIndex)
+        progress.checkCancelled()
+        progress.emit(AnalysisStage.RUNTIME, 86, "Инвентаризируем Flutter/Hermes/Mono/Unreal artifacts…")
         val runtimeArtifacts = RuntimeArtifactScanner.scanApk(apk, native, archiveIndex = archiveIndex)
+        progress.checkCancelled()
+        progress.emit(AnalysisStage.RUNTIME, 89, "Runtime анализ завершён")
+
+        progress.emit(AnalysisStage.SUPPLY_CHAIN, 90, "Строим dependency inventory и SBOM evidence…")
         val supplyChain = SupplyChainScanner.scan(apk, dex, native, il2cpp, runtimeArtifacts, archiveIndex = archiveIndex)
+        progress.checkCancelled()
+        progress.emit(AnalysisStage.SUPPLY_CHAIN, 94, "Supply-chain/SBOM этап завершён")
+
+        progress.emit(AnalysisStage.FINDINGS, 95, "Применяем статические security rules…")
         val findings = buildList {
             if (manifest != null) addAll(ManifestRuleEngine.evaluate(manifest))
             if (dex != null) addAll(DexRuleEngine.evaluate(dex))
             if (native != null) addAll(NativeRuleEngine.evaluate(native))
             if (il2cpp != null) addAll(Il2CppRuleEngine.evaluate(il2cpp))
         }.sortedWith(compareBy({ findingSeverityOrder(it.severity) }, { it.id }))
+        progress.emit(AnalysisStage.FINDINGS, 98, "Findings готовы: ${findings.size}")
         return StaticAnalysisReport(
             engineVersion = ENGINE_VERSION,
             assessment = scope,
@@ -576,18 +773,28 @@ class LocalArtifactInspector(
         )
     }
 
-    private fun aggregateInstalledHash(packageName: String, files: List<File>): String {
+    private fun aggregateInstalledHash(packageName: String, files: List<File>, progress: ProgressReporter? = null): String {
         val digest = MessageDigest.getInstance("SHA-256")
         digest.update(packageName.toByteArray(Charsets.UTF_8))
+        val totalBytes = files.sumOf { it.length().coerceAtLeast(0L) }.coerceAtLeast(1L)
+        var completedBytes = 0L
         files.forEachIndexed { index, file ->
+            checkCancelled()
             digest.update(index.toString().toByteArray(Charsets.UTF_8))
             digest.update(file.name.toByteArray(Charsets.UTF_8))
-            file.inputStream().buffered().use { input ->
+            file.inputStream().buffered(IO_BUFFER_BYTES).use { input ->
                 val buffer = ByteArray(IO_BUFFER_BYTES)
                 while (true) {
+                    checkCancelled()
                     val read = input.read(buffer)
                     if (read <= 0) break
                     digest.update(buffer, 0, read)
+                    completedBytes += read
+                    progress?.scaled(
+                        AnalysisStage.HASHING, 1, 8, completedBytes, totalBytes,
+                        "SHA-256: ${file.name} · ${formatBytes(completedBytes)} из ${formatBytes(totalBytes)}",
+                        index + 1, files.size,
+                    )
                 }
             }
         }
@@ -607,7 +814,7 @@ class LocalArtifactInspector(
     }
 
     private data class CopiedEntry(val bytes: Long, val sha256: String)
-    private data class PreparedDexEntry(val reportedEntry: String, val file: File, val sha256: String)
+    private data class PreparedDexEntry(val reportedEntry: String, val file: File, val sha256: String, val ordinal: Int)
     private data class DexTaskResult(val prepared: PreparedDexEntry, val bundle: DexScanBundle?, val failed: Boolean)
     private data class PreparedNativeEntry(
         val reportedEntry: String,
@@ -615,6 +822,7 @@ class LocalArtifactInspector(
         val bytes: Long,
         val file: File,
         val sha256: String,
+        val ordinal: Int,
     )
     private data class NativeTaskResult(
         val prepared: PreparedNativeEntry,
@@ -649,12 +857,43 @@ class LocalArtifactInspector(
         secretCandidates = value.secretCandidates.map { it.copy(libraryEntry = entryName) },
     )
 
-    private fun obtainDexScan(reportedEntry: String, file: File, sha256: String, session: AnalysisSession): DexScanBundle {
+    private fun obtainDexScan(
+        reportedEntry: String,
+        file: File,
+        sha256: String,
+        session: AnalysisSession,
+        onProgress: ((percent: Int, detail: String, completed: Int?, total: Int?) -> Unit)? = null,
+    ): DexScanBundle {
+        checkCancelled()
+        val existing = session.dexBySha256[sha256]
+        if (existing != null) {
+            onProgress?.invoke(100, "DEX content уже разобран в этой сессии; переиспользуем факты по SHA-256", null, null)
+            return if (existing.sourceEntry == reportedEntry) existing else DexScanBundle(
+                sourceEntry = reportedEntry,
+                inventory = rebaseDexInventory(existing.inventory, reportedEntry),
+                code = existing.code?.let { rebaseDexCode(it, reportedEntry) },
+            )
+        }
+
         val canonical = session.dexBySha256.computeIfAbsent(sha256) {
-            val inventory = DexStringScanner.scan(reportedEntry, file)
-            val code = runCatching {
-                DexCodeScanner.scan(reportedEntry, file, structuralIndex = inventory.structuralIndex)
-            }.getOrNull()
+            checkCancelled()
+            val inventory = DexStringScanner.scan(reportedEntry, file) { pct, detail, completed, total ->
+                onProgress?.invoke((pct * 45) / 100, detail, completed, total)
+            }
+            checkCancelled()
+            val code = try {
+                DexCodeScanner.scan(
+                    reportedEntry,
+                    file,
+                    structuralIndex = inventory.structuralIndex,
+                ) { pct, detail, completed, total ->
+                    onProgress?.invoke(45 + (pct * 55) / 100, detail, completed, total)
+                }
+            } catch (e: InterruptedIOException) {
+                throw e
+            } catch (_: Exception) {
+                null
+            }
             DexScanBundle(reportedEntry, inventory, code)
         }
         if (canonical.sourceEntry == reportedEntry) return canonical
@@ -671,6 +910,9 @@ class LocalArtifactInspector(
         entryPrefix: String? = null,
         session: AnalysisSession = AnalysisSession(),
         archiveIndex: ApkArchiveIndex? = null,
+        progress: ProgressReporter? = null,
+        overallBase: Int = 0,
+        overallTotal: Int = discovered.coerceAtLeast(1),
     ): DexSummary {
         var filesScanned = 0
         var stringsDeclared = 0L
@@ -743,7 +985,10 @@ class LocalArtifactInspector(
                                 val copied = copyZipEntryBoundedAndHash(zip, entry, tempDex, perEntryLimit)
                                 totalDexBytes += copied.bytes
                                 val reportedEntry = entryPrefix?.let { "$it!/${entry.name}" } ?: entry.name
-                                prepared += PreparedDexEntry(reportedEntry, tempDex, copied.sha256)
+                                prepared += PreparedDexEntry(reportedEntry, tempDex, copied.sha256, overallBase + cursor)
+                            } catch (e: InterruptedIOException) {
+                                tempDex.delete()
+                                throw e
                             } catch (_: IllegalArgumentException) {
                                 truncated = true
                                 tempDex.delete()
@@ -757,20 +1002,44 @@ class LocalArtifactInspector(
                         val futures = prepared.map { item ->
                             executor.submit(java.util.concurrent.Callable {
                                 try {
-                                    DexTaskResult(item, obtainDexScan(item.reportedEntry, item.file, item.sha256, session), failed = false)
+                                    val bundle = obtainDexScan(item.reportedEntry, item.file, item.sha256, session) { localPercent, detail, completed, total ->
+                                        val completedBefore = (item.ordinal - 1).coerceAtLeast(0)
+                                        val globalFraction = (completedBefore.toDouble() + localPercent.coerceIn(0, 100) / 100.0) / overallTotal.coerceAtLeast(1).toDouble()
+                                        val globalPercent = 25 + (globalFraction.coerceIn(0.0, 1.0) * 33.0).toInt()
+                                        progress?.emit(
+                                            AnalysisStage.DEX,
+                                            globalPercent,
+                                            "${item.reportedEntry}: $detail",
+                                            completedBefore.coerceAtMost(overallTotal),
+                                            overallTotal,
+                                        )
+                                    }
+                                    DexTaskResult(item, bundle, failed = false)
+                                } catch (e: InterruptedIOException) {
+                                    throw e
                                 } catch (_: Exception) {
                                     DexTaskResult(item, bundle = null, failed = true)
                                 }
                             })
                         }
-                        for (future in futures) {
-                            val task = try {
-                                future.get()
-                            } catch (e: InterruptedException) {
-                                Thread.currentThread().interrupt()
-                                throw java.io.InterruptedIOException("DEX analysis cancelled")
-                            }
-                            try {
+                        try {
+                            for (future in futures) {
+                                val task = try {
+                                    future.get()
+                                } catch (e: InterruptedException) {
+                                    futures.forEach { it.cancel(true) }
+                                    Thread.currentThread().interrupt()
+                                    throw InterruptedIOException("DEX analysis cancelled")
+                                } catch (e: FutureCancellationException) {
+                                    throw InterruptedIOException("DEX analysis cancelled")
+                                } catch (e: ExecutionException) {
+                                    val cause = e.cause
+                                    if (cause is InterruptedIOException || cause is InterruptedException) {
+                                        futures.forEach { it.cancel(true) }
+                                        throw InterruptedIOException("DEX analysis cancelled")
+                                    }
+                                    throw e
+                                }
                                 val bundle = task.bundle
                                 if (task.failed || bundle == null) {
                                     parseErrors++
@@ -807,13 +1076,23 @@ class LocalArtifactInspector(
                                     invokeObservations.addAll(code.invokeObservations)
                                     if (code.truncated || code.decodeErrors > 0) truncated = true
                                 }
-                            } finally {
-                                task.prepared.file.delete()
+                                progress?.emit(
+                                    AnalysisStage.DEX,
+                                    25 + (((task.prepared.ordinal.toDouble() / overallTotal.coerceAtLeast(1).toDouble()).coerceIn(0.0, 1.0)) * 33.0).toInt(),
+                                    "DEX готов: ${task.prepared.reportedEntry}",
+                                    task.prepared.ordinal.coerceAtMost(overallTotal),
+                                    overallTotal,
+                                )
                             }
+                        } finally {
+                            if (Thread.currentThread().isInterrupted) futures.forEach { it.cancel(true) }
+                            prepared.forEach { it.file.delete() }
                         }
                     }
                 }
             }
+        } catch (e: InterruptedIOException) {
+            throw e
         } catch (_: ZipException) {
             parseErrors++
         } catch (_: java.io.IOException) {
@@ -867,6 +1146,9 @@ class LocalArtifactInspector(
         entryPrefix: String? = null,
         session: AnalysisSession = AnalysisSession(),
         archiveIndex: ApkArchiveIndex? = null,
+        progress: ProgressReporter? = null,
+        overallBase: Int = 0,
+        overallTotal: Int = discovered.coerceAtLeast(1),
     ): NativeSummary {
         var filesScanned = 0
         var parseErrors = 0
@@ -941,8 +1223,11 @@ class LocalArtifactInspector(
                                 libraries += rebaseNativeLibrary(cached, reportedEntry)
                                 tempElf.delete()
                             } else {
-                                prepared += PreparedNativeEntry(reportedEntry, entry.name, copied.bytes, tempElf, copied.sha256)
+                                prepared += PreparedNativeEntry(reportedEntry, entry.name, copied.bytes, tempElf, copied.sha256, overallBase + cursor)
                             }
+                        } catch (e: InterruptedIOException) {
+                            tempElf.delete()
+                            throw e
                         } catch (_: IllegalArgumentException) {
                             truncated = true
                             tempElf.delete()
@@ -955,23 +1240,56 @@ class LocalArtifactInspector(
                     val futures = prepared.map { item ->
                         CPU_EXECUTOR.submit(java.util.concurrent.Callable {
                             try {
-                                val canonical = session.nativeBySha256.computeIfAbsent(item.sha256) {
-                                    ElfNativeScanner.scan(item.reportedEntry, item.file)
+                                checkCancelled()
+                                val cached = session.nativeBySha256[item.sha256]
+                                val canonical = if (cached != null) {
+                                    progress?.emit(
+                                        AnalysisStage.NATIVE,
+                                        62 + (((item.ordinal.toDouble() / overallTotal.coerceAtLeast(1).toDouble()).coerceIn(0.0, 1.0)) * 14.0).toInt(),
+                                        "${item.reportedEntry}: native content уже разобран; переиспользуем SHA-256 факты",
+                                        (item.ordinal - 1).coerceAtLeast(0).coerceAtMost(overallTotal),
+                                        overallTotal,
+                                    )
+                                    cached
+                                } else {
+                                    session.nativeBySha256.computeIfAbsent(item.sha256) {
+                                        ElfNativeScanner.scan(item.reportedEntry, item.file) { localPercent, detail, completed, total ->
+                                            val completedBefore = (item.ordinal - 1).coerceAtLeast(0)
+                                            val globalFraction = (completedBefore.toDouble() + localPercent.coerceIn(0, 100) / 100.0) / overallTotal.coerceAtLeast(1).toDouble()
+                                            val globalPercent = 62 + (globalFraction.coerceIn(0.0, 1.0) * 14.0).toInt()
+                                            progress?.emit(
+                                                AnalysisStage.NATIVE, globalPercent, "${item.reportedEntry}: $detail",
+                                                completedBefore.coerceAtMost(overallTotal), overallTotal,
+                                            )
+                                        }
+                                    }
                                 }
                                 NativeTaskResult(item, rebaseNativeLibrary(canonical, item.reportedEntry))
+                            } catch (e: InterruptedIOException) {
+                                throw e
                             } catch (e: Exception) {
                                 NativeTaskResult(item, null, e.message ?: e::class.java.simpleName)
                             }
                         })
                     }
-                    for (future in futures) {
-                        val task = try {
-                            future.get()
-                        } catch (e: InterruptedException) {
-                            Thread.currentThread().interrupt()
-                            throw java.io.InterruptedIOException("Native analysis cancelled")
-                        }
-                        try {
+                    try {
+                        for (future in futures) {
+                            val task = try {
+                                future.get()
+                            } catch (e: InterruptedException) {
+                                futures.forEach { it.cancel(true) }
+                                Thread.currentThread().interrupt()
+                                throw InterruptedIOException("Native analysis cancelled")
+                            } catch (e: FutureCancellationException) {
+                                throw InterruptedIOException("Native analysis cancelled")
+                            } catch (e: ExecutionException) {
+                                val cause = e.cause
+                                if (cause is InterruptedIOException || cause is InterruptedException) {
+                                    futures.forEach { it.cancel(true) }
+                                    throw InterruptedIOException("Native analysis cancelled")
+                                }
+                                throw e
+                            }
                             val scan = task.library
                             if (scan != null) {
                                 filesScanned++
@@ -981,12 +1299,22 @@ class LocalArtifactInspector(
                                 parseErrors++
                                 libraries += failureLibrary(task.prepared, task.errorMessage ?: "native parse failed")
                             }
-                        } finally {
-                            task.prepared.file.delete()
+                            progress?.emit(
+                                AnalysisStage.NATIVE,
+                                62 + (((task.prepared.ordinal.toDouble() / overallTotal.coerceAtLeast(1).toDouble()).coerceIn(0.0, 1.0)) * 14.0).toInt(),
+                                "Native готов: ${task.prepared.reportedEntry}",
+                                task.prepared.ordinal.coerceAtMost(overallTotal),
+                                overallTotal,
+                            )
                         }
+                    } finally {
+                        if (Thread.currentThread().isInterrupted) futures.forEach { it.cancel(true) }
+                        prepared.forEach { it.file.delete() }
                     }
                 }
             }
+        } catch (e: InterruptedIOException) {
+            throw e
         } catch (_: ZipException) {
             parseErrors++
         } catch (_: java.io.IOException) {
@@ -1030,7 +1358,12 @@ class LocalArtifactInspector(
         org.unirevlab.security.model.Severity.INFORMATIONAL -> 4
     }
 
-    private fun copyToBoundedTempAndHash(uri: Uri, destination: File): String {
+    private fun copyToBoundedTempAndHash(
+        uri: Uri,
+        destination: File,
+        expectedBytes: Long? = null,
+        onBytes: ((copied: Long, total: Long?) -> Unit)? = null,
+    ): String {
         val digest = MessageDigest.getInstance("SHA-256")
         contentResolver.openInputStream(uri).use { input ->
             requireNotNull(input) { "Не удалось открыть выбранный файл" }
@@ -1039,6 +1372,7 @@ class LocalArtifactInspector(
                     val buffer = ByteArray(IO_BUFFER_BYTES)
                     var total = 0L
                     while (true) {
+                        checkCancelled()
                         val read = input.read(buffer)
                         if (read <= 0) break
                         total += read
@@ -1046,6 +1380,7 @@ class LocalArtifactInspector(
                             "Артефакт превышает локальный лимит ${MAX_ARTIFACT_BYTES / (1024 * 1024)} MiB"
                         }
                         output.write(buffer, 0, read)
+                        onBytes?.invoke(total, expectedBytes)
                     }
                 }
             }
@@ -1089,6 +1424,7 @@ class LocalArtifactInspector(
                 val iterator = zip.entries()
 
                 while (iterator.hasMoreElements()) {
+                    checkCancelled()
                     val entry = iterator.nextElement()
                     entries++
                     if (ArchiveClassifier.isDex(entry.name)) dexFiles++
@@ -1117,6 +1453,7 @@ class LocalArtifactInspector(
                     val buffer = ByteArray(IO_BUFFER_BYTES)
                     var total = 0
                     while (true) {
+                        checkCancelled()
                         val read = input.read(buffer)
                         if (read <= 0) break
                         total += read
@@ -1289,6 +1626,13 @@ class LocalArtifactInspector(
 
     private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
 
+    private fun formatBytes(bytes: Long): String = when {
+        bytes >= 1024L * 1024L * 1024L -> "%.1f GiB".format(bytes.toDouble() / (1024.0 * 1024.0 * 1024.0))
+        bytes >= 1024L * 1024L -> "%.1f MiB".format(bytes.toDouble() / (1024.0 * 1024.0))
+        bytes >= 1024L -> "%.1f KiB".format(bytes.toDouble() / 1024.0)
+        else -> "$bytes B"
+    }
+
     private data class ArchiveStats(
         val entries: Int,
         val dexFiles: Int,
@@ -1300,6 +1644,10 @@ class LocalArtifactInspector(
 
     companion object {
         const val ENGINE_VERSION = "0.22.0-dev-performance-ux"
+
+        private fun checkCancelled() {
+            if (Thread.currentThread().isInterrupted) throw InterruptedIOException("Analysis cancelled")
+        }
         private const val MAX_DEX_FILES = 32
         private const val MAX_SINGLE_DEX_BYTES = 96L * 1024L * 1024L
         private const val MAX_TOTAL_DEX_BYTES = 384L * 1024L * 1024L

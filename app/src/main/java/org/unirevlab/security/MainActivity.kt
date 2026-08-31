@@ -1,25 +1,29 @@
 package org.unirevlab.security
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
-import kotlinx.coroutines.CancellationException
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
-import org.unirevlab.security.analysis.LocalArtifactInspector
+import org.unirevlab.security.analysis.AnalysisManager
+import org.unirevlab.security.analysis.AnalysisRunState
 import org.unirevlab.security.analysis.GhidraResultIntegrator
 import org.unirevlab.security.analysis.ExternalAdvisoryFeedImporter
 import org.unirevlab.security.analysis.VulnerabilityAdvisoryCorrelator
@@ -35,6 +39,7 @@ import org.unirevlab.security.model.AssessmentDiff
 import org.unirevlab.security.model.InstalledAppDescriptor
 import org.unirevlab.security.model.StaticAnalysisReport
 import org.unirevlab.security.ui.AgreementScreen
+import org.unirevlab.security.ui.AnalysisProgressDialog
 import org.unirevlab.security.ui.AssessmentScreen
 import org.unirevlab.security.ui.DashboardScreen
 import org.unirevlab.security.ui.InstalledAppsScreen
@@ -59,7 +64,9 @@ private fun UniRevLabApp() {
     val context = LocalContext.current
     val agreementStore = remember { AgreementStore(context.applicationContext) }
     val installedRepository = remember { InstalledAppRepository(context.applicationContext) }
-    val inspector = remember { LocalArtifactInspector(context.applicationContext) }
+    remember(context.applicationContext) { AnalysisManager.apply { initialize(context.applicationContext) } }
+    val analysisState by AnalysisManager.state.collectAsState()
+    val analysisActive = analysisState is AnalysisRunState.Running || analysisState is AnalysisRunState.Cancelling
     var route by remember { mutableStateOf(if (agreementStore.isAccepted()) Route.SCOPE else Route.AGREEMENT) }
     var scope by remember { mutableStateOf<AssessmentScope?>(null) }
     var report by remember { mutableStateOf<StaticAnalysisReport?>(null) }
@@ -72,30 +79,32 @@ private fun UniRevLabApp() {
     var installedAppsLoading by remember { mutableStateOf(false) }
     var installedAppsError by remember { mutableStateOf<String?>(null) }
     var coordinatorSyncStatus by remember { mutableStateOf<String?>(null) }
-    var inspectionJob by remember { mutableStateOf<Job?>(null) }
     val coroutineScope = rememberCoroutineScope()
 
-    fun runInspection(block: () -> StaticAnalysisReport) {
-        inspectionJob?.cancel()
-        inspectionJob = coroutineScope.launch {
-            isInspecting = true
-            error = null
-            try {
-                val next = runInterruptible(Dispatchers.IO) { block() }
+    LaunchedEffect(analysisState) {
+        when (val state = analysisState) {
+            is AnalysisRunState.Running -> {
+                scope = state.assessmentScope
+                route = Route.DASHBOARD
+            }
+            is AnalysisRunState.Cancelling -> {
+                scope = state.assessmentScope
+                route = Route.DASHBOARD
+            }
+            is AnalysisRunState.Completed -> {
+                val next = state.report
                 val previous = report
                 previousReport = previous
                 comparison = if (previous != null && sameApplication(previous, next)) {
                     AssessmentDiffEngine.diff(previous, next)
                 } else null
+                scope = next.assessment
                 report = next
-            } catch (_: CancellationException) {
-                error = "Анализ отменён"
-            } catch (failure: Exception) {
-                error = failure.message ?: failure::class.java.simpleName
-            } finally {
-                isInspecting = false
-                inspectionJob = null
+                error = null
+                route = Route.DASHBOARD
+                AnalysisManager.clearTerminalState()
             }
+            else -> Unit
         }
     }
 
@@ -110,6 +119,16 @@ private fun UniRevLabApp() {
         }
     }
 
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    fun requestAnalysisNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             try {
@@ -117,7 +136,8 @@ private fun UniRevLabApp() {
             } catch (_: SecurityException) {
                 // Some providers grant only temporary access; inspection still works in this callback lifecycle.
             }
-            runInspection { inspector.inspect(uri, requireNotNull(scope)) }
+            requestAnalysisNotificationPermission()
+            AnalysisManager.startFile(uri, requireNotNull(scope))
         }
     }
 
@@ -233,7 +253,8 @@ private fun UniRevLabApp() {
             scope = requireNotNull(scope),
             report = report,
             comparison = comparison,
-            isInspecting = isInspecting,
+            isInspecting = isInspecting || analysisActive,
+            analysisState = analysisState,
             error = error,
             onPickArtifact = {
                 picker.launch(arrayOf(
@@ -247,7 +268,7 @@ private fun UniRevLabApp() {
                 if (installedApps.isEmpty()) reloadInstalledApps()
             },
             onOpenHelp = { route = Route.HELP },
-            onCancelAnalysis = { inspectionJob?.cancel() },
+            onCancelAnalysis = { AnalysisManager.cancel() },
             onImportGhidraResults = {
                 ghidraResultPicker.launch(arrayOf("application/json", "application/octet-stream"))
             },
@@ -288,12 +309,14 @@ private fun UniRevLabApp() {
                 spdxSaver.launch("$safeName-bom.spdx.jsonld")
             },
             onNewAssessment = {
-                scope = null
-                report = null
-                previousReport = null
-                comparison = null
-                coordinatorSyncStatus = null
-                route = Route.SCOPE
+                if (!analysisActive) {
+                    scope = null
+                    report = null
+                    previousReport = null
+                    comparison = null
+                    coordinatorSyncStatus = null
+                    route = Route.SCOPE
+                }
             },
         )
         Route.HELP -> HelpScreen(onBack = { route = Route.DASHBOARD })
@@ -305,10 +328,17 @@ private fun UniRevLabApp() {
             onReload = { reloadInstalledApps() },
             onSelect = { app ->
                 route = Route.DASHBOARD
-                runInspection { inspector.inspectInstalledApp(app, requireNotNull(scope)) }
+                requestAnalysisNotificationPermission()
+                AnalysisManager.startInstalled(app, requireNotNull(scope))
             },
         )
     }
+
+    AnalysisProgressDialog(
+        state = analysisState,
+        onCancel = { AnalysisManager.cancel() },
+        onCloseTerminal = { AnalysisManager.clearTerminalState() },
+    )
 }
 
 private fun sameApplication(a: StaticAnalysisReport, b: StaticAnalysisReport): Boolean {
