@@ -1677,7 +1677,7 @@ class LocalArtifactInspector(
     )
 
     companion object {
-        const val ENGINE_VERSION = "0.22.2-dev-dex-stability-eta"
+        const val ENGINE_VERSION = "0.22.4-dev-fast-dex"
 
         private fun checkCancelled() {
             if (Thread.currentThread().isInterrupted) throw InterruptedIOException("Analysis cancelled")
@@ -1712,7 +1712,10 @@ class LocalArtifactInspector(
         private const val NATIVE_PARALLELISM = 2
         private val CPU_EXECUTOR: java.util.concurrent.ExecutorService =
             java.util.concurrent.Executors.newFixedThreadPool(DEX_PARALLELISM) { runnable ->
-                Thread(runnable, "unirevlab-analysis").apply { isDaemon = true }
+                Thread({
+                    runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_MORE_FAVORABLE) }
+                    runnable.run()
+                }, "unirevlab-analysis").apply { isDaemon = true }
             }
     }
 }

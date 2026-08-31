@@ -5,11 +5,16 @@ import java.security.MessageDigest
 /** Shared high-signal secret pattern classifier. Raw candidate material must not be persisted. */
 object SensitiveStringClassifier {
     fun detectKind(value: String): String? {
-        val compact = value.trim()
-        if (PRIVATE_KEY_MARKERS.any { compact.contains(it) }) return "PRIVATE_KEY_MATERIAL"
-        if (JWT_REGEX.containsMatchIn(compact)) return "JWT_LIKE_TOKEN"
-        if (GOOGLE_API_KEY_REGEX.containsMatchIn(compact)) return "GOOGLE_API_KEY_LIKE"
-        if (AWS_ACCESS_KEY_REGEX.containsMatchIn(compact)) return "AWS_ACCESS_KEY_ID_LIKE"
+        // Most DEX strings are class names, resources or ordinary literals. Avoid allocating
+        // trim() results and invoking regex engines unless a cheap marker can possibly match.
+        if (value.indexOf("PRIVATE KEY", ignoreCase = false) >= 0 && PRIVATE_KEY_MARKERS.any { value.contains(it) }) {
+            return "PRIVATE_KEY_MATERIAL"
+        }
+        if (value.indexOf("eyJ", ignoreCase = false) >= 0 && JWT_REGEX.containsMatchIn(value)) return "JWT_LIKE_TOKEN"
+        if (value.indexOf("AIza", ignoreCase = false) >= 0 && GOOGLE_API_KEY_REGEX.containsMatchIn(value)) return "GOOGLE_API_KEY_LIKE"
+        if ((value.indexOf("AKIA", ignoreCase = false) >= 0 || value.indexOf("ASIA", ignoreCase = false) >= 0) &&
+            AWS_ACCESS_KEY_REGEX.containsMatchIn(value)
+        ) return "AWS_ACCESS_KEY_ID_LIKE"
         return null
     }
 

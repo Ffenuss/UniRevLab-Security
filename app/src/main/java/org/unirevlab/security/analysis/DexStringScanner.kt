@@ -108,13 +108,15 @@ object DexStringScanner {
                 val decoded = readStringByIndex(raf, h, index, limits.maxStringBytes)
                 if (decoded.truncated) truncated = true
                 stringsScanned++
-                URL_REGEX.findAll(decoded.value).forEach { match ->
-                    val sanitized = sanitizeUrl(match.value)
-                    val ref = DexStringReference(dexEntry, index, sanitized)
-                    if (sanitized.startsWith("http://", ignoreCase = true)) {
-                        if (httpUrls.size < limits.maxUrls && ref !in httpUrls) httpUrls += ref else truncated = true
-                    } else if (sanitized.startsWith("https://", ignoreCase = true)) {
-                        if (httpsUrls.size < limits.maxUrls && ref !in httpsUrls) httpsUrls += ref else truncated = true
+                if (decoded.value.indexOf("http", ignoreCase = true) >= 0) {
+                    URL_REGEX.findAll(decoded.value).forEach { match ->
+                        val sanitized = sanitizeUrl(match.value)
+                        val ref = DexStringReference(dexEntry, index, sanitized)
+                        if (sanitized.startsWith("http://", ignoreCase = true)) {
+                            if (httpUrls.size < limits.maxUrls && ref !in httpUrls) httpUrls += ref else truncated = true
+                        } else if (sanitized.startsWith("https://", ignoreCase = true)) {
+                            if (httpsUrls.size < limits.maxUrls && ref !in httpsUrls) httpsUrls += ref else truncated = true
+                        }
                     }
                 }
                 SensitiveStringClassifier.detectKind(decoded.value)?.let { kind ->
@@ -271,37 +273,51 @@ object DexStringScanner {
 
     private fun readStringByIndex(raf: RandomAccessFile, h: Header, index: Int, maxStringBytes: Int): DecodedString {
         if (index !in 0 until h.stringIdsSize) throw DexFormatException("string_idx outside string_ids")
-        val itemOffset = readU32(raf, h.stringIdsOff + index.toLong() * 4L)
+        val itemOffset = PositionalReadCache.u32Le(raf, h.stringIdsOff + index.toLong() * 4L, h.fileSize)
         if (itemOffset >= h.fileSize) throw DexFormatException("string_data_off outside DEX")
         return readStringData(raf, itemOffset, h.fileSize, maxStringBytes)
     }
 
     private fun readStringData(raf: RandomAccessFile, offset: Long, fileSize: Long, maxStringBytes: Int): DecodedString {
-        raf.seek(offset)
-        val expectedUtf16Units = readUleb128(raf, fileSize)
-        val bytes = ByteArray(maxStringBytes)
+        val (expectedUtf16Units, dataStart) = try {
+            PositionalReadCache.uleb128At(raf, offset, fileSize)
+        } catch (e: Exception) {
+            throw DexFormatException(e.message ?: "invalid string length")
+        }
+        val expectedBytesHint = (expectedUtf16Units.coerceAtMost(maxStringBytes.toLong()) * 2L)
+            .coerceAtLeast(64L)
+            .coerceAtMost(4_096L)
+            .toInt()
+        var bytes = ByteArray(minOf(maxStringBytes, expectedBytesHint))
         var count = 0
+        var cursor = dataStart
         var truncated = false
         var terminated = false
-        while (raf.filePointer < fileSize) {
+        while (cursor < fileSize) {
             if ((count and 0x0fff) == 0) checkCancelled()
-            val b = raf.read()
-            if (b < 0) throw DexFormatException("truncated string_data_item")
+            val b = try {
+                PositionalReadCache.u8(raf, cursor++, fileSize)
+            } catch (_: Exception) {
+                throw DexFormatException("truncated string_data_item")
+            }
             if (b == 0) {
                 terminated = true
                 break
             }
             if (count >= maxStringBytes) {
                 truncated = true
-                while (raf.filePointer < fileSize) {
-                    val next = raf.read()
-                    if (next < 0) break
+                while (cursor < fileSize) {
+                    val next = try { PositionalReadCache.u8(raf, cursor++, fileSize) } catch (_: Exception) { break }
                     if (next == 0) {
                         terminated = true
                         break
                     }
                 }
                 break
+            }
+            if (count == bytes.size) {
+                val nextSize = minOf(maxStringBytes, maxOf(bytes.size + 1, bytes.size * 2))
+                bytes = bytes.copyOf(nextSize)
             }
             bytes[count++] = b.toByte()
         }
@@ -353,7 +369,7 @@ object DexStringScanner {
 
     private fun typeDescriptor(raf: RandomAccessFile, h: Header, typeIndex: Int, maxStringBytes: Int): String {
         if (typeIndex !in 0 until h.typeIdsSize) throw DexFormatException("type_idx outside type_ids")
-        val stringIndex = readU32(raf, h.typeIdsOff + typeIndex.toLong() * 4L).toIntChecked("descriptor_idx")
+        val stringIndex = PositionalReadCache.u32Le(raf, h.typeIdsOff + typeIndex.toLong() * 4L, h.fileSize).toIntChecked("descriptor_idx")
         return readStringByIndex(raf, h, stringIndex, maxStringBytes).value
     }
 
@@ -461,18 +477,12 @@ object DexStringScanner {
 
     private fun readU16(raf: RandomAccessFile, offset: Long): Int {
         ensureRange(offset, 2, raf.length(), "u16")
-        raf.seek(offset)
-        return raf.readUnsignedByte() or (raf.readUnsignedByte() shl 8)
+        return PositionalReadCache.u16Le(raf, offset, raf.length())
     }
 
     private fun readU32(raf: RandomAccessFile, offset: Long): Long {
         ensureRange(offset, 4, raf.length(), "u32")
-        raf.seek(offset)
-        val b0 = raf.readUnsignedByte().toLong()
-        val b1 = raf.readUnsignedByte().toLong()
-        val b2 = raf.readUnsignedByte().toLong()
-        val b3 = raf.readUnsignedByte().toLong()
-        return b0 or (b1 shl 8) or (b2 shl 16) or (b3 shl 24)
+        return PositionalReadCache.u32Le(raf, offset, raf.length())
     }
 
     private fun ensureRange(offset: Long, size: Long, bound: Long, label: String) {

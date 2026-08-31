@@ -297,9 +297,19 @@ object DexCodeScanner {
             instructionUnits = insnsSize,
         )
 
-        val decodedInstructions = mutableListOf<Instruction>()
+        val keepFlowEvidence =
+            blocks.size < limits.maxBasicBlocks || constants.size < limits.maxConstants || observations.size < limits.maxInvokeObservations
+        val decodedInstructions = if (keepFlowEvidence) ArrayList<Instruction>() else null
         var pc = 0
         var truncated = false
+        if (!keepFlowEvidence &&
+            calls.size >= limits.maxCallXrefs && strings.size >= limits.maxStringXrefs &&
+            types.size >= limits.maxTypeXrefs && fields.size >= limits.maxFieldXrefs
+        ) {
+            // Every bounded bytecode evidence collection is already saturated. Continuing to decode
+            // this method cannot change the report, so account for its code size and stop here.
+            return Triple(meta, insnsSizeLong, true)
+        }
         while (pc < insnsSize) {
             val unit0 = readU16(raf, insnsOff + pc.toLong() * 2L)
             val opcode = unit0 and 0xff
@@ -366,33 +376,43 @@ object DexCodeScanner {
                 }
             }
 
-            decodedInstructions += decodeControlFlowInstruction(raf, insnsOff, pc, insnsSize, unit0, width)
+            decodedInstructions?.add(decodeControlFlowInstruction(raf, insnsOff, pc, insnsSize, unit0, width))
             pc += width
         }
 
-        val methodBlocks = buildBasicBlocks(dexEntry, caller, decodedInstructions, insnsSize)
-        if (blocks.size < limits.maxBasicBlocks) {
-            val remaining = limits.maxBasicBlocks - blocks.size
-            blocks += methodBlocks.take(remaining)
-            if (methodBlocks.size > remaining) truncated = true
-        } else if (methodBlocks.isNotEmpty()) truncated = true
+        if (decodedInstructions != null) {
+            val methodBlocks = buildBasicBlocks(dexEntry, caller, decodedInstructions, insnsSize)
+            if (blocks.size < limits.maxBasicBlocks) {
+                val remaining = limits.maxBasicBlocks - blocks.size
+                val accepted = minOf(remaining, methodBlocks.size)
+                for (index in 0 until accepted) blocks += methodBlocks[index]
+                if (methodBlocks.size > accepted) truncated = true
+            } else if (methodBlocks.isNotEmpty()) truncated = true
 
-        val observed = observeConstants(
-            raf, h, dexEntry, caller, insnsOff, insnsSize, decodedInstructions, methodBlocks, limits, methodRef,
-        )
-        val methodConstants = observed.first
-        val methodObservations = observed.second
-        if (constants.size < limits.maxConstants) {
-            val remaining = limits.maxConstants - constants.size
-            constants += methodConstants.take(remaining)
-            if (methodConstants.size > remaining) truncated = true
-        } else if (methodConstants.isNotEmpty()) truncated = true
-        if (observations.size < limits.maxInvokeObservations) {
-            val remaining = limits.maxInvokeObservations - observations.size
-            observations += methodObservations.take(remaining)
-            if (methodObservations.size > remaining) truncated = true
-        } else if (methodObservations.isNotEmpty()) truncated = true
-
+            val needConstants = constants.size < limits.maxConstants
+            val needObservations = observations.size < limits.maxInvokeObservations
+            if (needConstants || needObservations) {
+                val observed = observeConstants(
+                    raf, h, dexEntry, caller, insnsOff, insnsSize, decodedInstructions, methodBlocks, limits, methodRef,
+                    collectConstants = needConstants,
+                    collectObservations = needObservations,
+                )
+                val methodConstants = observed.first
+                val methodObservations = observed.second
+                if (needConstants) {
+                    val remaining = limits.maxConstants - constants.size
+                    val accepted = minOf(remaining, methodConstants.size)
+                    for (index in 0 until accepted) constants += methodConstants[index]
+                    if (methodConstants.size > accepted) truncated = true
+                }
+                if (needObservations) {
+                    val remaining = limits.maxInvokeObservations - observations.size
+                    val accepted = minOf(remaining, methodObservations.size)
+                    for (index in 0 until accepted) observations += methodObservations[index]
+                    if (methodObservations.size > accepted) truncated = true
+                }
+            }
+        }
         return Triple(meta, insnsSizeLong, truncated)
     }
 
@@ -479,33 +499,46 @@ object DexCodeScanner {
         insnsSize: Int,
     ): List<DexBasicBlock> {
         if (instructions.isEmpty()) return emptyList()
-        val leaders = sortedSetOf(0)
-        instructions.forEach { insn ->
-            insn.branchTargets.forEach(leaders::add)
+        val leaders = java.util.TreeSet<Int>()
+        leaders += 0
+        for (insn in instructions) {
+            for (target in insn.branchTargets) leaders += target
             val next = insn.pc + insn.width
             if ((insn.branchTargets.isNotEmpty() || !insn.fallsThrough) && next < insnsSize) leaders += next
         }
-        val starts = leaders.filter { it in 0 until insnsSize }.sorted()
-        val byPc = instructions.associateBy { it.pc }
-        return starts.mapIndexedNotNull { index, start ->
+        val starts = leaders.filter { it in 0 until insnsSize }
+        if (starts.isEmpty()) return emptyList()
+        val instructionByPc = HashMap<Int, Instruction>(instructions.size * 4 / 3 + 1)
+        for (insn in instructions) instructionByPc[insn.pc] = insn
+        val output = ArrayList<DexBasicBlock>(starts.size)
+        var instructionCursor = 0
+        for (index in starts.indices) {
+            val start = starts[index]
             val end = starts.getOrNull(index + 1) ?: insnsSize
-            if (end <= start) return@mapIndexedNotNull null
-            val last = instructions.lastOrNull { it.pc in start until end } ?: return@mapIndexedNotNull null
+            if (end <= start || instructionByPc[start] == null) continue
+            while (instructionCursor < instructions.size && instructions[instructionCursor].pc < start) instructionCursor++
+            var cursor = instructionCursor
+            var last: Instruction? = null
+            while (cursor < instructions.size && instructions[cursor].pc < end) {
+                last = instructions[cursor]
+                cursor++
+            }
+            instructionCursor = cursor
+            val tail = last ?: continue
             val successors = linkedSetOf<Int>()
-            last.branchTargets.filterTo(successors) { it in starts }
-            val fallthrough = last.pc + last.width
-            if (last.fallsThrough && fallthrough < insnsSize) {
-                val successorStart = starts.firstOrNull { it >= fallthrough }
-                if (successorStart != null) successors += successorStart
+            for (target in tail.branchTargets) if (leaders.contains(target)) successors += target
+            val fallthrough = tail.pc + tail.width
+            if (tail.fallsThrough && fallthrough < insnsSize) {
+                val position = starts.binarySearch(fallthrough)
+                val insertion = if (position >= 0) position else -position - 1
+                starts.getOrNull(insertion)?.let(successors::add)
             }
             val terminal = when {
-                last.terminalKind != "FALLTHROUGH" -> last.terminalKind
+                tail.terminalKind != "FALLTHROUGH" -> tail.terminalKind
                 successors.isEmpty() -> "END"
                 else -> "FALLTHROUGH"
             }
-            // Ensure every block start resolves to a decoded instruction. Payload leaders are never added.
-            if (byPc[start] == null) return@mapIndexedNotNull null
-            DexBasicBlock(
+            output += DexBasicBlock(
                 dexEntry = dexEntry,
                 methodIndex = caller.methodIndex,
                 blockIndex = index,
@@ -515,6 +548,7 @@ object DexCodeScanner {
                 terminalKind = terminal,
             )
         }
+        return output
     }
 
     /**
@@ -532,6 +566,8 @@ object DexCodeScanner {
         blocks: List<DexBasicBlock>,
         limits: Limits,
         methodRef: (Int) -> MethodRef,
+        collectConstants: Boolean = true,
+        collectObservations: Boolean = true,
     ): Pair<List<DexConstantReference>, List<DexInvokeObservation>> {
         val blockStarts = blocks.mapTo(hashSetOf()) { it.startCodeUnit }
         val state = mutableMapOf<Int, RegValue>()
@@ -539,7 +575,7 @@ object DexCodeScanner {
         val out = mutableListOf<DexInvokeObservation>()
         fun record(register: Int, kind: String, value: String, pc: Int) {
             state[register] = RegValue(kind, value)
-            constants += DexConstantReference(dexEntry, caller.methodIndex, register, kind, value, pc)
+            if (collectConstants) constants += DexConstantReference(dexEntry, caller.methodIndex, register, kind, value, pc)
         }
 
         for (insn in instructions) {
@@ -629,7 +665,7 @@ object DexCodeScanner {
                         val args = registers.take(limits.maxObservedArguments).mapIndexedNotNull { argumentIndex, register ->
                             state[register]?.let { value -> DexInvokeArgument(argumentIndex, register, value.kind, value.value) }
                         }
-                        if (args.isNotEmpty()) {
+                        if (collectObservations && args.isNotEmpty()) {
                             out += DexInvokeObservation(
                                 dexEntry = dexEntry,
                                 callerMethodIndex = caller.methodIndex,
@@ -868,22 +904,36 @@ object DexCodeScanner {
 
     private fun readString(raf: RandomAccessFile, h: Header, index: Int, maxBytes: Int): String {
         if (index !in 0 until h.stringIdsSize) throw DexCodeFormatException("string index outside table")
-        val offset = readU32(raf, h.stringIdsOff + index.toLong() * 4L)
+        val offset = PositionalReadCache.u32Le(raf, h.stringIdsOff + index.toLong() * 4L, h.fileSize)
         if (offset >= h.fileSize) throw DexCodeFormatException("string_data_off outside DEX")
-        raf.seek(offset)
-        readUleb128(raf, h.fileSize) // UTF-16 unit count
-        val bytes = ByteArray(maxBytes)
+        val (expectedUtf16Units, dataStart) = try {
+            PositionalReadCache.uleb128At(raf, offset, h.fileSize)
+        } catch (e: Exception) {
+            throw DexCodeFormatException(e.message ?: "invalid string length")
+        }
+        val expectedBytesHint = (expectedUtf16Units.coerceAtMost(maxBytes.toLong()) * 2L)
+            .coerceAtLeast(64L)
+            .coerceAtMost(4_096L)
+            .toInt()
+        var bytes = ByteArray(minOf(maxBytes, expectedBytesHint))
         var count = 0
+        var cursor = dataStart
         var terminated = false
-        while (raf.filePointer < h.fileSize) {
-            val b = raf.read()
-            if (b < 0) break
-            if (b == 0) { terminated = true; break }
+        while (cursor < h.fileSize) {
+            val b = try { PositionalReadCache.u8(raf, cursor++, h.fileSize) } catch (_: Exception) { break }
+            if (b == 0) {
+                terminated = true
+                break
+            }
             if (count >= maxBytes) throw DexCodeFormatException("string exceeds bounded code-xref limit")
+            if (count == bytes.size) {
+                val nextSize = minOf(maxBytes, maxOf(bytes.size + 1, bytes.size * 2))
+                bytes = bytes.copyOf(nextSize)
+            }
             bytes[count++] = b.toByte()
         }
         if (!terminated) throw DexCodeFormatException("unterminated string")
-        return bytes.copyOf(count).toString(Charsets.UTF_8)
+        return String(bytes, 0, count, Charsets.UTF_8)
     }
 
     private fun readUleb128(raf: RandomAccessFile, fileSize: Long): Long {
@@ -901,17 +951,12 @@ object DexCodeScanner {
 
     private fun readU16(raf: RandomAccessFile, offset: Long): Int {
         ensureRange(offset, 2, raf.length(), "u16")
-        raf.seek(offset)
-        return raf.readUnsignedByte() or (raf.readUnsignedByte() shl 8)
+        return PositionalReadCache.u16Le(raf, offset, raf.length())
     }
 
     private fun readU32(raf: RandomAccessFile, offset: Long): Long {
         ensureRange(offset, 4, raf.length(), "u32")
-        raf.seek(offset)
-        return raf.readUnsignedByte().toLong() or
-            (raf.readUnsignedByte().toLong() shl 8) or
-            (raf.readUnsignedByte().toLong() shl 16) or
-            (raf.readUnsignedByte().toLong() shl 24)
+        return PositionalReadCache.u32Le(raf, offset, raf.length())
     }
 
     private fun Long.toIntChecked(label: String): Int {

@@ -82,7 +82,7 @@ class AnalysisForegroundService : Service() {
         }
         acquireWakeLock()
         startForeground(NOTIFICATION_ID, buildNotification(state))
-        return START_NOT_STICKY
+        return START_STICKY
     }
 
     override fun onDestroy() {
