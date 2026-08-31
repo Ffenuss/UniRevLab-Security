@@ -1,5 +1,6 @@
 package org.unirevlab.security.analysis
 
+import org.unirevlab.security.model.AssessmentScope
 import org.unirevlab.security.model.StaticAnalysisReport
 
 enum class AnalysisStage(val title: String) {
@@ -39,12 +40,14 @@ sealed interface AnalysisRunState {
     data class Running(
         val runId: Long,
         val targetLabel: String,
+        val assessmentScope: AssessmentScope,
         val progress: AnalysisProgress,
     ) : AnalysisRunState
 
     data class Cancelling(
         val runId: Long,
         val targetLabel: String,
+        val assessmentScope: AssessmentScope,
         val progress: AnalysisProgress,
     ) : AnalysisRunState
 
