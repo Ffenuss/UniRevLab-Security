@@ -17,6 +17,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import org.unirevlab.security.analysis.AnalysisRunState
+import org.unirevlab.security.analysis.AnalysisStage
 
 @Composable
 fun AnalysisProgressDialog(
@@ -74,10 +75,8 @@ private fun ActiveAnalysisDialog(
     }
     val elapsedMs = (now - progress.startedAtEpochMs).coerceAtLeast(0L)
     val unchangedMs = (now - progress.updatedAtEpochMs).coerceAtLeast(0L)
-    val remainingMs = progress.estimatedFinishAtEpochMs
-        ?.minus(now)
-        ?.takeIf { it > 0L && unchangedMs < 180_000L }
     val percentLabel = formatProgressPercent(progress.fractionComplete)
+    val isDexStage = progress.stage == AnalysisStage.DEX
 
     AlertDialog(
         onDismissRequest = { /* Analysis state must remain visible while work is active. */ },
@@ -98,20 +97,27 @@ private fun ActiveAnalysisDialog(
                     progress = { progress.fractionComplete.toFloat() },
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Text(progress.detail)
+                Text(
+                    if (isDexStage) "Последнее обновление одного из параллельных DEX:\n${progress.detail}"
+                    else progress.detail,
+                )
                 progress.totalUnits?.takeIf { it > 0 }?.let { total ->
                     val completed = progress.completedUnits?.coerceIn(0, total) ?: 0
-                    Text("Объекты текущего этапа: $completed / $total", style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        if (isDexStage) "DEX завершено: $completed / $total"
+                        else "Объекты текущего этапа: $completed / $total",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                if (isDexStage && !cancelling) {
+                    Text(
+                        "DEX-файлы обрабатываются параллельно. Поэтому имя classes*.dex может меняться между обновлениями — это не возврат назад и не повторный анализ файла.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
                 Text(
-                    buildString {
-                        append("Прошло: ${formatDuration(elapsedMs)}")
-                        if (remainingMs != null) {
-                            append(" · Осталось примерно: ${formatDuration(remainingMs)}")
-                        } else if (!cancelling) {
-                            append(" · Осталось: оценка уточняется")
-                        }
-                    },
+                    "Прошло: ${formatDuration(elapsedMs)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
