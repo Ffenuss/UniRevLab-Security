@@ -271,11 +271,39 @@ object DexStringScanner {
 
     private data class DecodedString(val value: String, val truncated: Boolean)
 
+    private class BoundedLru<K, V>(private val limit: Int) : java.util.LinkedHashMap<K, V>(limit, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<K, V>?): Boolean = size > limit
+    }
+
+    private class MetadataCache {
+        var file: RandomAccessFile? = null
+        val strings = BoundedLru<Int, DecodedString>(4_096)
+        val types = BoundedLru<Int, String>(4_096)
+        val prototypes = BoundedLru<Int, String>(2_048)
+
+        fun use(raf: RandomAccessFile) {
+            if (file !== raf) {
+                file = raf
+                strings.clear()
+                types.clear()
+                prototypes.clear()
+            }
+        }
+    }
+
+    private val metadataCache = ThreadLocal.withInitial(::MetadataCache)
+
     private fun readStringByIndex(raf: RandomAccessFile, h: Header, index: Int, maxStringBytes: Int): DecodedString {
         if (index !in 0 until h.stringIdsSize) throw DexFormatException("string_idx outside string_ids")
+        val cache = metadataCache.get().also { it.use(raf) }
+        cache.strings[index]?.let { return it }
         val itemOffset = PositionalReadCache.u32Le(raf, h.stringIdsOff + index.toLong() * 4L, h.fileSize)
         if (itemOffset >= h.fileSize) throw DexFormatException("string_data_off outside DEX")
-        return readStringData(raf, itemOffset, h.fileSize, maxStringBytes)
+        val decoded = readStringData(raf, itemOffset, h.fileSize, maxStringBytes)
+        // Descriptors, names and prototype atoms are tiny and highly repetitive. Avoid retaining
+        // unusually large literals in the LRU merely for a possible second lookup.
+        if (decoded.value.length <= 2_048) cache.strings[index] = decoded
+        return decoded
     }
 
     private fun readStringData(raf: RandomAccessFile, offset: Long, fileSize: Long, maxStringBytes: Int): DecodedString {
@@ -369,8 +397,12 @@ object DexStringScanner {
 
     private fun typeDescriptor(raf: RandomAccessFile, h: Header, typeIndex: Int, maxStringBytes: Int): String {
         if (typeIndex !in 0 until h.typeIdsSize) throw DexFormatException("type_idx outside type_ids")
+        val cache = metadataCache.get().also { it.use(raf) }
+        cache.types[typeIndex]?.let { return it }
         val stringIndex = PositionalReadCache.u32Le(raf, h.typeIdsOff + typeIndex.toLong() * 4L, h.fileSize).toIntChecked("descriptor_idx")
-        return readStringByIndex(raf, h, stringIndex, maxStringBytes).value
+        val value = readStringByIndex(raf, h, stringIndex, maxStringBytes).value
+        if (value.length <= 2_048) cache.types[typeIndex] = value
+        return value
     }
 
     private fun readMethod(raf: RandomAccessFile, h: Header, dexEntry: String, methodIndex: Int, limits: Limits): DexMethodReference {
@@ -388,22 +420,30 @@ object DexStringScanner {
     }
 
     private fun readPrototype(raf: RandomAccessFile, h: Header, protoIdx: Int, limits: Limits): String {
+        if (protoIdx !in 0 until h.protoIdsSize) throw DexFormatException("proto_idx outside proto_ids")
+        val cache = metadataCache.get().also { it.use(raf) }
+        cache.prototypes[protoIdx]?.let { return it }
         val base = h.protoIdsOff + protoIdx.toLong() * 12L
         val returnTypeIdx = readU32(raf, base + 4).toIntChecked("return_type_idx")
         val parametersOff = readU32(raf, base + 8)
         val returnType = typeDescriptor(raf, h, returnTypeIdx, limits.maxStringBytes)
-        if (parametersOff == 0L) return "()$returnType"
-        ensureRange(parametersOff, 4, h.fileSize, "type_list")
-        val countLong = readU32(raf, parametersOff)
-        if (countLong > limits.maxProtoParameters) throw DexFormatException("prototype parameter count exceeds limit")
-        ensureRange(parametersOff + 4, countLong.checkedMul(2), h.fileSize, "type_list items")
-        val params = buildString {
-            repeat(countLong.toInt()) { index ->
-                val typeIdx = readU16(raf, parametersOff + 4 + index.toLong() * 2L)
-                append(typeDescriptor(raf, h, typeIdx, limits.maxStringBytes))
+        val value = if (parametersOff == 0L) {
+            "()$returnType"
+        } else {
+            ensureRange(parametersOff, 4, h.fileSize, "type_list")
+            val countLong = readU32(raf, parametersOff)
+            if (countLong > limits.maxProtoParameters) throw DexFormatException("prototype parameter count exceeds limit")
+            ensureRange(parametersOff + 4, countLong.checkedMul(2), h.fileSize, "type_list items")
+            val params = buildString {
+                repeat(countLong.toInt()) { index ->
+                    val typeIdx = readU16(raf, parametersOff + 4 + index.toLong() * 2L)
+                    append(typeDescriptor(raf, h, typeIdx, limits.maxStringBytes))
+                }
             }
+            "($params)$returnType"
         }
-        return "($params)$returnType"
+        if (value.length <= 4_096) cache.prototypes[protoIdx] = value
+        return value
     }
 
     private fun readNativeMethodsFromClassData(

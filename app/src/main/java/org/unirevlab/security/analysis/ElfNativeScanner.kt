@@ -432,23 +432,17 @@ object ElfNativeScanner {
 
     private fun u8(raf: RandomAccessFile, offset: Long): Int {
         ensureRange(offset, 1, raf.length(), "u8")
-        raf.seek(offset)
-        return raf.readUnsignedByte()
+        return PositionalReadCache.u8(raf, offset, raf.length())
     }
 
     private fun u16(raf: RandomAccessFile, offset: Long): Int {
         ensureRange(offset, 2, raf.length(), "u16")
-        raf.seek(offset)
-        return raf.readUnsignedByte() or (raf.readUnsignedByte() shl 8)
+        return PositionalReadCache.u16Le(raf, offset, raf.length())
     }
 
     private fun u32(raf: RandomAccessFile, offset: Long): Long {
         ensureRange(offset, 4, raf.length(), "u32")
-        raf.seek(offset)
-        return raf.readUnsignedByte().toLong() or
-            (raf.readUnsignedByte().toLong() shl 8) or
-            (raf.readUnsignedByte().toLong() shl 16) or
-            (raf.readUnsignedByte().toLong() shl 24)
+        return PositionalReadCache.u32Le(raf, offset, raf.length())
     }
 
     private fun u64(raf: RandomAccessFile, offset: Long): Long {

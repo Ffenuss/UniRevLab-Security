@@ -765,8 +765,10 @@ class LocalArtifactInspector(
 
     private fun archiveStatsFromIndex(index: ApkArchiveIndex): ArchiveStats = ArchiveStats(
         entries = index.archiveEntries,
-        dexFiles = index.archiveDexFiles,
-        nativeLibraries = index.archiveNativeLibraries,
+        // Discovery gates must use the complete central-directory counts. archive* counters are
+        // intentionally bounded to the first ARCHIVE_STATS_LIMIT entries for summary statistics.
+        dexFiles = index.dexEntryCount,
+        nativeLibraries = index.nativeEntryCount,
         hasAndroidManifest = index.archiveHasManifest,
         suspiciousPaths = index.archiveSuspiciousPaths,
         truncated = index.archiveTruncated,
@@ -1677,7 +1679,7 @@ class LocalArtifactInspector(
     )
 
     companion object {
-        const val ENGINE_VERSION = "0.22.4-dev-fast-dex"
+        const val ENGINE_VERSION = "0.22.5-dev-native-speed"
 
         private fun checkCancelled() {
             if (Thread.currentThread().isInterrupted) throw InterruptedIOException("Analysis cancelled")
