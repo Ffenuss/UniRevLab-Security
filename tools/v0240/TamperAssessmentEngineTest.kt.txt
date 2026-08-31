@@ -1,0 +1,41 @@
+package org.unirevlab.security.analysis
+
+import java.io.File
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.unirevlab.security.model.*
+
+class TamperAssessmentEngineTest {
+    @Test
+    fun detectsClientTrustConfigAndRedactsSecretMaterial() {
+        val dir = createTempDir(prefix = "tamper-assessment-")
+        val apk = File(dir, "original.apk")
+        ZipOutputStream(apk.outputStream()).use { out ->
+            out.putNextEntry(ZipEntry("classes.dex")); out.write(byteArrayOf(1)); out.closeEntry()
+            out.putNextEntry(ZipEntry("assets/feature_config.json")); out.write("{\"feature\":\"premium\",\"api_key\":\"abcdefghijklmnop\"}".toByteArray()); out.closeEntry()
+        }
+        val report = StaticAnalysisReport(
+            engineVersion = "test",
+            assessment = AssessmentScope("id", 1, "p", "o", "authorized", true),
+            artifact = ArtifactSummary("x.apk", sizeBytes = apk.length(), sha256 = "a".repeat(64)),
+            manifest = ManifestSummary("org.example", "1", 1, 26, 36, false, false, false, false, false, false, emptyList(), emptyList(), components = emptyList(), signingCertificateSha256 = emptyList()),
+            dex = DexSummary(
+                1, 1, 1, 1,
+                methods = listOf(DexMethodReference("classes.dex", 1, "Lorg/example/Access;", "hasPremium", "()Z")),
+                codeMethods = listOf(DexMethodCodeReference("classes.dex", 1, "Lorg/example/Access;", "hasPremium", "()Z", 1, 2, 0, 0, 0, 1)),
+                callXrefs = emptyList(), stringXrefs = emptyList(), typeXrefs = emptyList(), fieldXrefs = emptyList(), basicBlocks = emptyList(), constants = emptyList(), invokeObservations = emptyList(),
+                httpUrls = emptyList(), httpsUrls = emptyList(), secretCandidates = emptyList(), parseErrors = 0, truncated = false,
+            ),
+            findings = emptyList(),
+        )
+        val workspace = PatchLabEngine.Workspace(dir, apk, "a".repeat(64), 36, 26, listOf("classes.dex"), emptyList(), listOf("classes.dex", "assets/feature_config.json"))
+        val assessment = TamperAssessmentEngine.scan(report, workspace)
+        assertTrue(assessment.categories.any { it.category == "ENTITLEMENT_TRUST" })
+        assertTrue(assessment.hookProposals.any { it.methodName == "hasPremium" })
+        assertTrue(assessment.secrets.isNotEmpty())
+        assertTrue(assessment.secrets.none { it.redactedPreview.contains("abcdefghijklmnop") })
+        dir.deleteRecursively()
+    }
+}
