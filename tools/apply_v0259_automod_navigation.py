@@ -9,7 +9,6 @@ def replace_once(path, old, new, label):
         raise SystemExit(f'{label}: anchor not found in {path}')
     p.write_text(text.replace(old, new, 1), encoding='utf-8')
 
-# AutoMod: drive planning from the exact Tamper Assessment hits first, then enrich with xrefs.
 path = 'app/src/main/java/org/unirevlab/security/analysis/AutoModEngine.kt'
 replace_once(path,
 '''        val assessment = TamperAssessmentEngine.scan(report, workspace)
@@ -25,14 +24,6 @@ replace_once(path,
         }
         val codeKeys = dex?.codeMethods.orEmpty().map { "${it.dexEntry}|${it.declaringClass}|${it.name}|${it.prototype}" }.toSet()
 ''', 'automod maps')
-
-replace_once(path,
-'''        val evidence = mutableListOf<Evidence>()
-        fun collect(method: org.unirevlab.security.model.DexMethodReference, text: String, scorePenalty: Int = 0) {
-''',
-'''        val evidence = mutableListOf<Evidence>()
-        fun collect(method: org.unirevlab.security.model.DexMethodReference, text: String, scorePenalty: Int = 0) {
-''', 'evidence anchor')
 
 replace_once(path,
 '''        dex?.methods.orEmpty().forEach { method ->
@@ -62,14 +53,12 @@ replace_once(path,
         }
 ''', 'tamper hits first')
 
-# Make boolean/int fallback usable for obfuscated methods when the category comes from exact assessment evidence.
 replace_once(path,
 '''        val evidenceBacked = evidenceTokens.isNotEmpty() && baseScore >= 46
 ''',
 '''        val evidenceBacked = evidenceTokens.isNotEmpty() && baseScore >= 42
 ''', 'evidence threshold')
 
-# Add diagnostics to plan without changing existing consumers incompatibly.
 replace_once(path,
 '''    data class Plan(
         val artifactSha256: String,
@@ -118,32 +107,32 @@ replace_once(path,
         )
 ''', 'diagnostics result')
 
-# UI: show real reason instead of a generic zero-target sentence.
 path = 'app/src/main/java/org/unirevlab/security/ui/AutoModPanel.kt'
 replace_once(path,
-'''            if (plan.actions.isEmpty()) {
-                Text(
-                    "Высокоуверенных app-owned целей для автоматической модификации не найдено. Это не означает отсутствия риска — используйте ручной Patch Lab/trace.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
+'''                if (current.actions.isEmpty()) {
+                    Text(
+                        "Автоматически патчабельных DEX-целей не найдено. AutoMod проверил project-owned методы, " +
+                            "string/field/constant evidence и поддерживаемые boolean/int return-типы. " +
+                            "Если состояние хранится во время выполнения, используйте Runtime State Lab; если цель native/IL2CPP — соответствующий native/managed режим.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                } else {
 ''',
-'''            if (plan.actions.isEmpty()) {
-                Text(
-                    "AutoMod не выбрал автоматическую цель. ${plan.diagnostics}",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            } else if (plan.diagnostics.isNotBlank()) {
-                Text(plan.diagnostics, style = MaterialTheme.typography.bodySmall)
-            }
+'''                if (current.actions.isEmpty()) {
+                    Text(
+                        "AutoMod не выбрал автоматическую цель. ${current.diagnostics}",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                } else {
+                    if (current.diagnostics.isNotBlank()) {
+                        Text(current.diagnostics, style = MaterialTheme.typography.bodySmall)
+                    }
 ''', 'automod diagnostics ui')
 
-# Version bump.
 path = 'app/build.gradle.kts'
 replace_once(path, 'versionCode = 35', 'versionCode = 36', 'version code')
 replace_once(path, 'versionName = "0.25.8-dev-apkset-sources"', 'versionName = "0.25.9-dev-automod-navigation"', 'version name')
 
-# Regression tests: exact high-signal evidence must still select an obfuscated boolean/int target.
 path = 'app/src/test/java/org/unirevlab/security/analysis/AutoModEngineTest.kt'
 replace_once(path,
 '''    @Test
