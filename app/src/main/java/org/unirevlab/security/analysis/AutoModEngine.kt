@@ -50,44 +50,78 @@ object AutoModEngine {
     fun plan(report: StaticAnalysisReport, workspace: PatchLabEngine.Workspace): Plan {
         if (report.artifact.sha256.isNotBlank()) {
             require(workspace.artifactSha256.equals(report.artifact.sha256, ignoreCase = true)) {
-                "AutoMod заблокирован: workspace не совпадает с SHA-256 проанализированного APK"
+                "AutoMod заблокирован: workspace не совпадает с проанализированным APK"
             }
         }
         val packagePrefix = report.manifest?.packageName
             ?.takeIf { it.isNotBlank() }
             ?.replace('.', '/')
             ?.let { "L$it/" }
-            ?: return Plan(workspace.artifactSha256, 0, "MINIMAL", emptyList(), 0)
 
         val assessment = TamperAssessmentEngine.scan(report, workspace)
-        val candidates = assessment.hits.asSequence()
-            .filter {
-                it.dexEntry != null && it.classDescriptor != null && it.methodName != null && it.prototype != null
+        val dex = report.dex
+        val methodsByKey = dex?.methods.orEmpty().associateBy { it.dexEntry to it.methodIndex }
+        val codeKeys = dex?.codeMethods.orEmpty().map { "${it.dexEntry}|${it.declaringClass}|${it.name}|${it.prototype}" }.toSet()
+        fun editableProject(method: org.unirevlab.security.model.DexMethodReference): Boolean =
+            "${method.dexEntry}|${method.declaringClass}|${method.name}|${method.prototype}" in codeKeys &&
+                TamperAssessmentEngine.isProjectCodeForAutomation(method.declaringClass, packagePrefix)
+
+        data class Evidence(
+            val category: String,
+            val method: org.unirevlab.security.model.DexMethodReference,
+            val score: Int,
+            val text: String,
+        )
+        val evidence = mutableListOf<Evidence>()
+        fun collect(method: org.unirevlab.security.model.DexMethodReference, text: String, scorePenalty: Int = 0) {
+            if (!editableProject(method)) return
+            TamperAssessmentEngine.categoriesForAutomation(text).forEach { (category, score) ->
+                evidence += Evidence(category, method, (score - scorePenalty).coerceAtLeast(1), text)
             }
-            .filter { requireNotNull(it.classDescriptor).startsWith(packagePrefix) }
-            .mapNotNull { hit ->
+        }
+
+        dex?.methods.orEmpty().forEach { method ->
+            collect(method, "${method.declaringClass}->${method.name}${method.prototype}")
+        }
+        dex?.stringXrefs.orEmpty().forEach { xref ->
+            val method = methodsByKey[xref.dexEntry to xref.callerMethodIndex] ?: return@forEach
+            collect(method, "${xref.value} ${xref.callerClass} ${xref.callerName}", 2)
+        }
+        dex?.fieldXrefs.orEmpty().forEach { xref ->
+            val method = methodsByKey[xref.dexEntry to xref.callerMethodIndex] ?: return@forEach
+            collect(method, "${xref.declaringClass} ${xref.fieldName} ${xref.fieldType} ${xref.callerClass} ${xref.callerName}", 1)
+        }
+        dex?.constants.orEmpty().forEach { constant ->
+            val method = methodsByKey[constant.dexEntry to constant.methodIndex] ?: return@forEach
+            collect(method, "${method.declaringClass} ${method.name} ${constant.kind} ${constant.value}", 5)
+        }
+
+        val candidates = evidence.asSequence()
+            .mapNotNull { item ->
+                val method = item.method
                 val suggestion = suggest(
-                    category = hit.category,
-                    methodName = requireNotNull(hit.methodName),
-                    prototype = requireNotNull(hit.prototype),
-                    baseScore = hit.score,
+                    category = item.category,
+                    methodName = method.name,
+                    prototype = method.prototype,
+                    baseScore = item.score,
+                    evidence = item.text,
                 ) ?: return@mapNotNull null
                 Action(
-                    id = "automod-${hit.category.lowercase(Locale.ROOT)}-${requireNotNull(hit.methodName)}",
-                    category = hit.category,
-                    dexEntry = requireNotNull(hit.dexEntry),
-                    classDescriptor = requireNotNull(hit.classDescriptor),
-                    methodName = requireNotNull(hit.methodName),
-                    prototype = requireNotNull(hit.prototype),
+                    id = "automod-${item.category.lowercase(Locale.ROOT)}-${method.methodIndex}",
+                    category = item.category,
+                    dexEntry = method.dexEntry,
+                    classDescriptor = method.declaringClass,
+                    methodName = method.name,
+                    prototype = method.prototype,
                     mode = suggestion.mode,
                     intValue = suggestion.intValue,
                     confidence = suggestion.confidence,
                     reason = suggestion.reason,
                 )
             }
-            .distinctBy { it.methodKey }
+            .groupBy { it.methodKey }
+            .mapNotNull { (_, values) -> values.maxByOrNull { it.confidence } }
             .sortedWith(compareByDescending<Action> { it.confidence }.thenBy { it.target })
-            .toList()
 
         val selected = selectDiverse(candidates)
         return Plan(
@@ -142,7 +176,8 @@ object AutoModEngine {
         methodName: String,
         prototype: String,
         baseScore: Int = 70,
-    ): Suggestion? = suggest(category, methodName, prototype, baseScore)
+        evidence: String = "",
+    ): Suggestion? = suggest(category, methodName, prototype, baseScore, evidence)
 
     internal fun forceIntReturnForTesting(
         classText: String,
@@ -165,109 +200,86 @@ object AutoModEngine {
         return selected
     }
 
-    private fun suggest(category: String, methodName: String, prototype: String, baseScore: Int): Suggestion? {
-        val tokens = identifierTokens(methodName)
+    private fun suggest(
+        category: String,
+        methodName: String,
+        prototype: String,
+        baseScore: Int,
+        evidence: String = "",
+    ): Suggestion? {
+        val methodTokens = identifierTokens(methodName)
+        val evidenceTokens = identifierTokens(evidence)
+        val tokens = methodTokens + evidenceTokens
         val compact = tokens.joinToString("")
+        val methodCompact = methodTokens.joinToString("")
+        val decisionPrefix = methodTokens.firstOrNull() in DECISION_PREFIXES
+        val evidenceBacked = evidenceTokens.isNotEmpty() && baseScore >= 46
+
         if (prototype.endsWith(")Z")) {
             val negative = NEGATIVE_BOOLEAN_MARKERS.any { marker -> marker in tokens || compact.contains(marker) }
-            val decisionPrefix = tokens.firstOrNull() in DECISION_PREFIXES
             return when (category) {
                 "ENTITLEMENT_TRUST" -> {
                     if (PENDING_MARKERS.any { it in tokens }) return null
                     val signal = ENTITLEMENT_BOOLEAN_MARKERS.any { marker -> marker in tokens || compact.contains(marker) }
-                    if (!signal || !decisionPrefix) null
+                    if (!signal || (!decisionPrefix && !evidenceBacked)) null
                     else if (negative) {
                         Suggestion(
-                            Mode.RETURN_FALSE,
-                            null,
-                            (baseScore + 8).coerceIn(0, 100),
-                            "Демонстрация: отрицательное client-side entitlement-состояние принудительно возвращает false.",
+                            Mode.RETURN_FALSE, null, (baseScore + if (decisionPrefix) 8 else 2).coerceIn(0, 100),
+                            "Демонстрация: client-side entitlement/access gate подтверждён кодом/ссылками и принудительно возвращает false.",
                         )
                     } else {
                         Suggestion(
-                            Mode.RETURN_TRUE,
-                            null,
-                            (baseScore + 10).coerceIn(0, 100),
-                            "Демонстрация: локальное решение о premium/access/entitlement принудительно возвращает true.",
+                            Mode.RETURN_TRUE, null, (baseScore + if (decisionPrefix) 10 else 3).coerceIn(0, 100),
+                            "Демонстрация: client-side premium/access/entitlement gate подтверждён кодом/ссылками и принудительно возвращает true.",
                         )
                     }
                 }
-
                 "FEATURE_CONFIG" -> {
                     val signal = FEATURE_BOOLEAN_MARKERS.any { marker -> marker in tokens || compact.contains(marker) }
-                    if (!signal || !decisionPrefix) null
+                    if (!signal || (!decisionPrefix && !evidenceBacked)) null
                     else if (negative) {
-                        Suggestion(
-                            Mode.RETURN_FALSE,
-                            null,
-                            (baseScore + 4).coerceIn(0, 100),
-                            "Демонстрация: локальный disabled/blocked feature-флаг принудительно возвращает false.",
-                        )
+                        Suggestion(Mode.RETURN_FALSE, null, (baseScore + 2).coerceIn(0, 100), "Демонстрация: локальный disabled/blocked feature-флаг принудительно возвращает false.")
                     } else {
-                        Suggestion(
-                            Mode.RETURN_TRUE,
-                            null,
-                            (baseScore + 6).coerceIn(0, 100),
-                            "Демонстрация: локальный feature/config gate принудительно возвращает true.",
-                        )
+                        Suggestion(Mode.RETURN_TRUE, null, (baseScore + 4).coerceIn(0, 100), "Демонстрация: локальный feature/config gate принудительно возвращает true.")
                     }
                 }
-
                 "INTEGRITY" -> {
                     val signal = INTEGRITY_BOOLEAN_MARKERS.any { marker -> marker in tokens || compact.contains(marker) }
-                    if (!signal || !decisionPrefix) null
+                    if (!signal || (!decisionPrefix && !evidenceBacked)) null
                     else if (negative) {
-                        Suggestion(
-                            Mode.RETURN_FALSE,
-                            null,
-                            (baseScore + 8).coerceIn(0, 100),
-                            "Демонстрация: client-side tamper/root/emulator/debugger сигнал принудительно возвращает false.",
-                        )
+                        Suggestion(Mode.RETURN_FALSE, null, (baseScore + 6).coerceIn(0, 100), "Демонстрация: client-side tamper/root/emulator/debugger сигнал принудительно возвращает false.")
                     } else {
-                        Suggestion(
-                            Mode.RETURN_TRUE,
-                            null,
-                            (baseScore + 6).coerceIn(0, 100),
-                            "Демонстрация: локальная integrity/signature/attestation проверка принудительно возвращает true.",
-                        )
+                        Suggestion(Mode.RETURN_TRUE, null, (baseScore + 4).coerceIn(0, 100), "Демонстрация: локальная integrity/signature/attestation проверка принудительно возвращает true.")
                     }
                 }
-
                 "LOCAL_STATE" -> {
                     val signal = LOCAL_BOOLEAN_MARKERS.any { marker -> marker in tokens || compact.contains(marker) }
-                    if (!signal || !decisionPrefix) null
+                    if (!signal || (!decisionPrefix && !evidenceBacked)) null
                     else if ("dead" in tokens || "empty" in tokens || "depleted" in tokens) {
-                        Suggestion(
-                            Mode.RETURN_FALSE,
-                            null,
-                            baseScore.coerceIn(0, 100),
-                            "Демонстрация: локальное отрицательное state-решение принудительно возвращает false.",
-                        )
+                        Suggestion(Mode.RETURN_FALSE, null, baseScore.coerceIn(0, 100), "Демонстрация: локальное отрицательное state-решение принудительно возвращает false.")
                     } else {
-                        Suggestion(
-                            Mode.RETURN_TRUE,
-                            null,
-                            baseScore.coerceIn(0, 100),
-                            "Демонстрация: локальное state-решение принудительно возвращает true.",
-                        )
+                        Suggestion(Mode.RETURN_TRUE, null, baseScore.coerceIn(0, 100), "Демонстрация: локальное state-решение принудительно возвращает true.")
                     }
                 }
-
                 else -> null
             }
         }
 
         if (category == "LOCAL_STATE" && prototype.lastReturnType() in setOf('I', 'S', 'B', 'C')) {
-            val selected = LOCAL_INT_VALUES.entries.firstOrNull { (term, _) -> term in tokens } ?: return null
+            val selected = LOCAL_INT_VALUES.entries.firstOrNull { (term, _) -> term in methodTokens }
+                ?: LOCAL_INT_VALUES.entries.firstOrNull { (term, _) -> term in evidenceTokens }
+                ?: return null
+            val confidence = (baseScore + if (termInMethod(selected.key, methodTokens, methodCompact)) 4 else 0).coerceIn(0, 100)
             return Suggestion(
-                Mode.RETURN_INT,
-                selected.value,
-                (baseScore + 4).coerceIn(0, 100),
-                "Демонстрация: application-owned ${selected.key} getter получает фиксированное тестовое значение ${selected.value}.",
+                Mode.RETURN_INT, selected.value, confidence,
+                "Демонстрация: project-owned ${selected.key} state getter/consumer подтверждён индексом и получает фиксированное тестовое значение ${selected.value}.",
             )
         }
         return null
     }
+
+    private fun termInMethod(term: String, methodTokens: Set<String>, methodCompact: String): Boolean =
+        term in methodTokens || methodCompact.contains(term)
 
     private fun String.lastReturnType(): Char? {
         val index = lastIndexOf(')')
@@ -332,7 +344,7 @@ object AutoModEngine {
         "integrity", "tamper", "signature", "checksum", "attestation", "attest", "root", "rooted",
         "emulator", "debug", "debugger", "hook", "hooked", "modified", "trusted", "valid", "verified", "secure",
     )
-    private val LOCAL_BOOLEAN_MARKERS = setOf("alive", "dead", "lives", "energy", "stamina", "ammo", "currency", "coins", "gems")
+    private val LOCAL_BOOLEAN_MARKERS = setOf("alive", "dead", "lives", "energy", "stamina", "ammo", "currency", "coins", "gems", "money", "cash", "gold", "mana")
     private val LOCAL_INT_VALUES = linkedMapOf(
         "cooldown" to 0,
         "rank" to 1,
@@ -353,6 +365,25 @@ object AutoModEngine {
         "currency" to 9999,
         "wallet" to 9999,
         "credits" to 9999,
+        "money" to 9999,
+        "cash" to 9999,
+        "gold" to 9999,
+        "diamond" to 9999,
+        "diamonds" to 9999,
+        "xp" to 9999,
+        "experience" to 9999,
+        "level" to 99,
+        "mana" to 999,
+        "ammo" to 999,
+        "attack" to 999,
+        "defense" to 999,
+        "defence" to 999,
+        "power" to 999,
+        "fuel" to 999,
+        "ticket" to 999,
+        "tickets" to 999,
+        "points" to 9999,
+        "stars" to 999,
     )
     private val CATEGORY_PRIORITY = listOf("ENTITLEMENT_TRUST", "LOCAL_STATE", "FEATURE_CONFIG", "INTEGRITY")
     private const val MAX_ACTIONS = 4

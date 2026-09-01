@@ -29,6 +29,17 @@ class AutoModEngineTest {
     }
 
     @Test
+    fun evidenceBackedObfuscatedMethodsCanStillBecomeDemoTargets() {
+        assertEquals(
+            AutoModEngine.Mode.RETURN_TRUE,
+            AutoModEngine.suggestForTesting("ENTITLEMENT_TRUST", "a", "()Z", 68, "premium entitlement access")?.mode,
+        )
+        val money = AutoModEngine.suggestForTesting("LOCAL_STATE", "b", "()I", 58, "player money balance")
+        assertEquals(AutoModEngine.Mode.RETURN_INT, money?.mode)
+        assertEquals(9999, money?.intValue)
+    }
+
+    @Test
     fun choosesBoundedLocalStateIntegerDemo() {
         val suggestion = AutoModEngine.suggestForTesting("LOCAL_STATE", "getHighScore", "()I")
         assertEquals(AutoModEngine.Mode.RETURN_INT, suggestion?.mode)

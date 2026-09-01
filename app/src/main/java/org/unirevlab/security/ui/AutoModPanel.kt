@@ -99,8 +99,9 @@ fun AutoModPanel(
                 )
                 if (current.actions.isEmpty()) {
                     Text(
-                        "Высокоуверенных app-owned целей для автоматической модификации не найдено. " +
-                            "Это не означает отсутствия риска — используйте ручной Patch Lab/trace.",
+                        "Автоматически патчабельных DEX-целей не найдено. AutoMod проверил project-owned методы, " +
+                            "string/field/constant evidence и поддерживаемые boolean/int return-типы. " +
+                            "Если состояние хранится во время выполнения, используйте Runtime State Lab; если цель native/IL2CPP — соответствующий native/managed режим.",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 } else {

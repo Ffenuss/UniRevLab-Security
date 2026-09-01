@@ -27,6 +27,7 @@ class TamperAssessmentClassifierTest {
     @Test
     fun camelCaseAndExactSecurityTermsStillClassify() {
         assertTrue("LOCAL_STATE" in TamperAssessmentEngine.categoriesForTesting("getHighScore"))
+        assertTrue("LOCAL_STATE" in TamperAssessmentEngine.categoriesForTesting("playerMoney"))
         assertTrue("ENTITLEMENT_TRUST" in TamperAssessmentEngine.categoriesForTesting("isPro"))
         assertTrue("ENTITLEMENT_TRUST" in TamperAssessmentEngine.categoriesForTesting("hasPremiumAccess"))
         assertTrue("FEATURE_CONFIG" in TamperAssessmentEngine.categoriesForTesting("remoteConfig"))

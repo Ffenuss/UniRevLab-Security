@@ -90,10 +90,13 @@ object TamperAssessmentEngine {
         val parsed = parseQuery(rawQuery)
         val q = parsed.second.lowercase(Locale.ROOT)
         require(q.length >= 2) { "Введите минимум 2 символа для поиска" }
-        val filter = parsed.first
+        val rawMode = parsed.first == "raw"
+        val filter = if (rawMode) null else parsed.first
+        val defaultScoped = parsed.first == null
+        val packagePrefix = report.manifest?.packageName?.takeIf { it.isNotBlank() }?.replace('.', '/')?.let { "L$it/" }
         val out = mutableListOf<SearchResult>()
+
         fun add(kind: String, haystack: String, result: () -> SearchResult) {
-            if (out.size >= MAX_SEARCH_RESULTS) return
             if (filter != null && filter != kind.lowercase(Locale.ROOT)) return
             if (haystack.lowercase(Locale.ROOT).contains(q)) out += result()
         }
@@ -101,36 +104,43 @@ object TamperAssessmentEngine {
         val dex = report.dex
         val methodsByKey = dex?.methods.orEmpty().associateBy { it.dexEntry to it.methodIndex }
         dex?.classes.orEmpty().forEach { cls ->
+            if (defaultScoped && !isProjectCode(cls.descriptor, packagePrefix)) return@forEach
             add("class", cls.descriptor) { SearchResult("DEX_CLASS", "${cls.dexEntry}:${cls.descriptor}", cls.descriptor, cls.dexEntry, cls.descriptor) }
         }
         dex?.methods.orEmpty().forEach { method ->
+            if (defaultScoped && !isProjectCode(method.declaringClass, packagePrefix)) return@forEach
             val label = "${method.declaringClass}->${method.name}${method.prototype}"
             add("method", label) { methodResult("DEX_METHOD", method, label) }
         }
         dex?.stringXrefs.orEmpty().forEach { xref ->
             val method = methodsByKey[xref.dexEntry to xref.callerMethodIndex]
+            val callerClass = method?.declaringClass ?: xref.callerClass
+            if (defaultScoped && !isProjectCode(callerClass, packagePrefix)) return@forEach
             val hay = "${xref.value} ${xref.callerClass} ${xref.callerName}"
             add("string", hay) {
                 SearchResult(
                     "DEX_STRING", "${xref.dexEntry}:${xref.callerClass}->${xref.callerName}@${xref.instructionOffsetCodeUnits}",
-                    safePreview(xref.value), method?.dexEntry ?: xref.dexEntry, method?.declaringClass ?: xref.callerClass,
+                    safePreview(xref.value), method?.dexEntry ?: xref.dexEntry, callerClass,
                     method?.name ?: xref.callerName, method?.prototype,
                 )
             }
         }
         dex?.fieldXrefs.orEmpty().forEach { xref ->
             val method = methodsByKey[xref.dexEntry to xref.callerMethodIndex]
+            val callerClass = method?.declaringClass ?: xref.callerClass
+            if (defaultScoped && !isProjectCode(callerClass, packagePrefix)) return@forEach
             val hay = "${xref.declaringClass} ${xref.fieldName} ${xref.fieldType} ${xref.callerClass} ${xref.callerName}"
             add("field", hay) {
                 SearchResult(
                     "DEX_FIELD", "${xref.dexEntry}:${xref.declaringClass}->${xref.fieldName}:${xref.fieldType}",
                     "${xref.kind}: ${xref.callerClass}->${xref.callerName}", method?.dexEntry ?: xref.dexEntry,
-                    method?.declaringClass ?: xref.callerClass, method?.name ?: xref.callerName, method?.prototype,
+                    callerClass, method?.name ?: xref.callerName, method?.prototype,
                 )
             }
         }
         dex?.constants.orEmpty().forEach { constant ->
             val method = methodsByKey[constant.dexEntry to constant.methodIndex]
+            if (defaultScoped && (method == null || !isProjectCode(method.declaringClass, packagePrefix))) return@forEach
             val hay = "${constant.kind} ${constant.value} ${method?.declaringClass.orEmpty()} ${method?.name.orEmpty()}"
             add("const", hay) {
                 SearchResult(
@@ -142,6 +152,7 @@ object TamperAssessmentEngine {
         }
 
         report.native?.libraries.orEmpty().forEach { lib ->
+            if (defaultScoped && !isLikelyProjectNative(lib.entryName)) return@forEach
             add("native", lib.entryName) { SearchResult("NATIVE_LIBRARY", lib.entryName, "${lib.abi} ${lib.machine}", archiveEntry = lib.entryName) }
             (lib.exportedSymbols + lib.importedSymbols).forEach { symbol ->
                 add("native", "${lib.entryName} ${symbol.name}") {
@@ -178,11 +189,11 @@ object TamperAssessmentEngine {
             searchTextEntries(workspace, q, out)
         }
         if (filter == "secret") {
-            scan(report, workspace).secrets.take(MAX_SEARCH_RESULTS - out.size).forEach { secret ->
+            scan(report, workspace).secrets.forEach { secret ->
                 out += SearchResult("SECRET_CANDIDATE", secret.location, "${secret.kind}: ${secret.redactedPreview}")
             }
         }
-        return out.take(MAX_SEARCH_RESULTS)
+        return out.distinctBy { listOf(it.kind, it.location, it.preview).joinToString("|") }
     }
 
     fun hardeningAdvice(
@@ -366,7 +377,7 @@ object TamperAssessmentEngine {
             lib.secretCandidates.forEach { secret ->
                 secrets += SecretHit(secret.kind, secret.libraryEntry, secret.redactedPreview, secret.valueSha256)
             }
-            (lib.exportedSymbols + lib.importedSymbols).forEach { symbol ->
+            if (isLikelyProjectNative(lib.entryName)) (lib.exportedSymbols + lib.importedSymbols).forEach { symbol ->
                 categoriesFor("${lib.entryName} ${symbol.name}").forEach { (category, score) ->
                     hit(SurfaceHit(category, "NATIVE_SYMBOL", "${lib.entryName}:${symbol.name}", "${symbol.symbolType} ${symbol.binding}", score - 4, archiveEntry = lib.entryName))
                 }
@@ -446,13 +457,9 @@ object TamperAssessmentEngine {
     }
 
     private fun searchTextEntries(workspace: PatchLabEngine.Workspace, q: String, out: MutableList<SearchResult>) {
-        var scanned = 0L
         workspace.archiveEntries.asSequence().filter(::isTextCandidate).forEach { entry ->
-            if (out.size >= MAX_SEARCH_RESULTS || scanned >= MAX_MANUAL_TEXT_BYTES) return@forEach
             val text = runCatching { PatchLabEngine.loadArchiveText(workspace, entry) }.getOrNull() ?: return@forEach
-            scanned += text.toByteArray(Charsets.UTF_8).size
             text.lineSequence().withIndex().forEach { indexed ->
-                if (out.size >= MAX_SEARCH_RESULTS) return@forEach
                 if (indexed.value.lowercase(Locale.ROOT).contains(q)) {
                     out += SearchResult("TEXT_FILE", "$entry:${indexed.index + 1}", safePreview(indexed.value), archiveEntry = entry)
                 }
@@ -561,7 +568,7 @@ object TamperAssessmentEngine {
         val index = trimmed.indexOf(':')
         if (index <= 0) return null to trimmed
         val prefix = trimmed.substring(0, index).lowercase(Locale.ROOT)
-        val known = setOf("file", "text", "method", "class", "field", "string", "const", "native", "secret", "type")
+        val known = setOf("file", "text", "method", "class", "field", "string", "const", "native", "secret", "type", "raw")
         return if (prefix in known) prefix to trimmed.substring(index + 1).trim() else null to trimmed
     }
 
@@ -627,6 +634,15 @@ object TamperAssessmentEngine {
         if (isAppOwned(descriptor, packagePrefix)) return true
         return NON_PROJECT_PREFIXES.none { descriptor.startsWith(it) }
     }
+    internal fun isProjectCodeForAutomation(descriptor: String, packagePrefix: String?): Boolean =
+        isProjectCode(descriptor, packagePrefix)
+    internal fun categoriesForAutomation(text: String): List<Pair<String, Int>> = categoriesFor(text)
+
+    private fun isLikelyProjectNative(entryName: String): Boolean {
+        val file = entryName.substringAfterLast('/').lowercase(Locale.ROOT)
+        if (file in setOf("libapp.so", "libil2cpp.so", "libmain.so", "libgame.so", "libnative-lib.so")) return true
+        return NATIVE_SDK_MARKERS.none { marker -> marker in file }
+    }
     private fun isInterestingConstant(value: String): Boolean {
         val normalized = value.trim().lowercase(Locale.ROOT)
         if (normalized in setOf("0", "0x0", "1", "0x1", "-1")) return false
@@ -655,13 +671,18 @@ object TamperAssessmentEngine {
 
     private val CATEGORY_TERMS = linkedMapOf(
         "ENTITLEMENT_TRUST" to listOf("premium", "subscription", "entitlement", "purchase", "isowned", "owned", "unlock", "license", "licence", "trial", "ispro", "hasaccess", "accesslevel", "vip", "paid"),
-        "LOCAL_STATE" to listOf("health", "hp", "lives", "life", "damage", "armor", "energy", "stamina", "speed", "cooldown", "score", "rank", "balance", "coins", "coin", "gems", "gem", "currency", "wallet", "credits"),
+        "LOCAL_STATE" to listOf("health", "hp", "lives", "life", "damage", "armor", "energy", "stamina", "speed", "cooldown", "score", "rank", "balance", "coins", "coin", "gems", "gem", "currency", "wallet", "credits", "money", "cash", "gold", "diamond", "diamonds", "xp", "experience", "level", "mana", "ammo", "attack", "defense", "defence", "power", "fuel", "ticket", "tickets", "points", "stars"),
         "FEATURE_CONFIG" to listOf("featureflag", "feature_flag", "remoteconfig", "remote_config", "experiment", "variant", "toggle", "feature", "config", "setting"),
         "INTEGRITY" to listOf("integrity", "tamper", "signature", "checksum", "attestation", "playintegrity", "rootcheck", "emulatorcheck"),
         "AUTH_SESSION" to listOf("apikey", "api_key", "clientsecret", "client_secret", "bearer", "sessiontoken", "auth_token", "accesstoken", "access_token"),
     )
     private val CATEGORY_SCORES = mapOf("ENTITLEMENT_TRUST" to 70, "LOCAL_STATE" to 60, "FEATURE_CONFIG" to 48, "INTEGRITY" to 56, "AUTH_SESSION" to 68)
     private val COMPOUND_TERMS = setOf("isowned", "ispro", "hasaccess", "accesslevel", "featureflag", "remoteconfig", "playintegrity", "rootcheck", "emulatorcheck", "apikey", "clientsecret", "sessiontoken", "authtoken", "accesstoken")
+    private val NATIVE_SDK_MARKERS = listOf(
+        "firebase", "sentry", "applovin", "facebook", "fban", "crashlytics", "flutter",
+        "mediakit", "mpv", "datastore", "sqlite", "boringssl", "ssl", "crypto", "protobuf",
+        "realm", "bugsnag", "adjust", "onesignal", "unity", "c++_shared", "gnustl", "openal",
+    )
     private val NON_PROJECT_PREFIXES = listOf(
         "Landroid/", "Landroidx/", "Ljava/", "Ljavax/", "Lkotlin/", "Lkotlinx/",
         "Ldalvik/", "Lsun/", "Lorg/apache/", "Lorg/chromium/", "Lorg/json/",
