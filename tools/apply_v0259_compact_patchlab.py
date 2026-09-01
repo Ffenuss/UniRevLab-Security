@@ -10,22 +10,27 @@ def replace_once(path, old, new, label):
     p.write_text(text.replace(old, new, 1), encoding='utf-8')
 
 path = 'app/src/main/java/org/unirevlab/security/ui/PatchLabScreen.kt'
-replace_once(path,
-'''    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-''',
-'''    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var openToolSection by remember { mutableStateOf<String?>("assessment") }
-''', 'section state')
-
 p = ROOT / path
 text = p.read_text(encoding='utf-8')
-marker = '@Composable\nfun PatchLabScreen('
-idx = text.find(marker)
-if idx < 0:
-    raise SystemExit('PatchLabScreen insertion point not found')
-helper = '''@Composable
+
+if 'var openToolSection by remember' not in text:
+    old = '''    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+'''
+    new = '''    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var openToolSection by remember { mutableStateOf<String?>("assessment") }
+'''
+    if old not in text:
+        raise SystemExit('section state: anchor not found in PatchLabScreen.kt')
+    text = text.replace(old, new, 1)
+
+if 'private fun PatchLabSectionHeader(' not in text:
+    marker = '@Composable\nfun PatchLabScreen('
+    idx = text.find(marker)
+    if idx < 0:
+        raise SystemExit('PatchLabScreen insertion point not found')
+    helper = '''@Composable
 private fun PatchLabSectionHeader(
     title: String,
     subtitle: String,
@@ -41,12 +46,15 @@ private fun PatchLabSectionHeader(
 }
 
 '''
-text = text[:idx] + helper + text[idx:]
+    text = text[:idx] + helper + text[idx:]
+
 p.write_text(text, encoding='utf-8')
 
 def wrap_first(calls, key, title, subtitle):
     p = ROOT / path
     src = p.read_text(encoding='utf-8')
+    if f'expanded = openToolSection == "{key}"' in src and f'if (openToolSection == "{key}")' in src:
+        return
     call = next((candidate for candidate in calls if candidate in src), None)
     if call is None:
         raise SystemExit(f'none of panel calls found: {calls}')
@@ -71,7 +79,8 @@ def wrap_first(calls, key, title, subtitle):
             if ch == '"':
                 in_string = True
             elif ch == '(':
-                depth += 1; seen = True
+                depth += 1
+                seen = True
             elif ch == ')':
                 depth -= 1
                 if seen and depth == 0:
@@ -96,4 +105,4 @@ wrap_first(['TamperAssessmentPanelV2(', 'TamperAssessmentPanel('], 'assessment',
 wrap_first(['AutoModPanel('], 'automod', 'AutoMod Demo', 'Автоматические демонстрационные изменения')
 wrap_first(['RuntimeStateLabPanel('], 'runtime', 'Runtime State Lab', 'Локальные сохранения и state-файлы')
 
-print('v0.25.9 compact Patch Lab sections applied')
+print('v0.25.9 compact Patch Lab sections applied/already present')
