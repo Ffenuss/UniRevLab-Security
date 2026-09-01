@@ -6,7 +6,9 @@ def replace_once(path, old, new, label):
     p = ROOT / path
     text = p.read_text(encoding='utf-8')
     if old not in text:
-        raise SystemExit(f'{label}: anchor not found in {path}')
+        if new in text:
+            return
+        raise SystemExit(f'{label}: neither source anchor nor applied result found in {path}')
     p.write_text(text.replace(old, new, 1), encoding='utf-8')
 
 path = 'app/src/main/java/org/unirevlab/security/analysis/AutoModEngine.kt'
