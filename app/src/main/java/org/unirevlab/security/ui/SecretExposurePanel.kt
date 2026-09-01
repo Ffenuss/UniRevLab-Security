@@ -42,13 +42,11 @@ fun SecretExposurePanel(
     var running by remember(workspace.artifactSha256) { mutableStateOf(false) }
     var proof by remember(workspace.artifactSha256) { mutableStateOf<SecretExposureEngine.ExposureReport?>(null) }
     var authorizationChecked by remember(workspace.artifactSha256) { mutableStateOf(false) }
-    var shaConfirmation by remember(workspace.artifactSha256) { mutableStateOf("") }
     var revealUnlocked by remember(workspace.artifactSha256) { mutableStateOf(false) }
     var revealed by remember(workspace.artifactSha256) { mutableStateOf<Map<String, SecretExposureEngine.RevealResult>>(emptyMap()) }
     var selectedTextEntry by remember(workspace.artifactSha256) { mutableStateOf<String?>(null) }
     var originalText by remember(workspace.artifactSha256) { mutableStateOf("") }
     var textValue by remember(workspace.artifactSha256) { mutableStateOf("") }
-    val confirmationSuffix = workspace.artifactSha256.takeLast(8).lowercase()
 
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.18f))) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -97,7 +95,7 @@ fun SecretExposurePanel(
                         Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text("Локальное подтверждение полномочий", fontWeight = FontWeight.SemiBold)
                             Text(
-                                "Полный reveal привязывается к SHA-256 этой цели. До подтверждения ниже отображаются только proof metadata и fingerprints.",
+                                "После подтверждения полный просмотр доступен для текущей открытой цели. До подтверждения отображаются proof metadata и fingerprints.",
                                 style = MaterialTheme.typography.bodySmall,
                             )
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -118,26 +116,12 @@ fun SecretExposurePanel(
                                     modifier = Modifier.weight(1f),
                                 )
                             }
-                            OutlinedTextField(
-                                value = shaConfirmation,
-                                onValueChange = {
-                                    shaConfirmation = it.filter(Char::isLetterOrDigit).take(8).lowercase()
-                                    if (revealUnlocked && shaConfirmation != confirmationSuffix) {
-                                        revealUnlocked = false
-                                        revealed = emptyMap()
-                                    }
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true,
-                                label = { Text("Последние 8 символов SHA-256 цели") },
-                                supportingText = { Text("Для этой цели: …$confirmationSuffix") },
-                            )
                             Button(
                                 onClick = {
                                     revealUnlocked = true
-                                    onStatus("Полный Secret Proof локально разблокирован для SHA …$confirmationSuffix")
+                                    onStatus("Полный Secret Proof локально разблокирован для текущей цели")
                                 },
-                                enabled = authorizationChecked && shaConfirmation == confirmationSuffix && !busy && !running,
+                                enabled = authorizationChecked && !busy && !running,
                                 modifier = Modifier.fillMaxWidth(),
                             ) { Text(if (revealUnlocked) "✓ Полный просмотр разблокирован" else "Разблокировать полный просмотр") }
                         }

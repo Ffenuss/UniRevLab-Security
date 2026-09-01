@@ -86,10 +86,6 @@ fun AutoModPanel(
                     "Максимум 4 точечных изменения. Исходный APK не меняется, подпись оригинала не сохраняется, store/billing не эмулируется.",
                 style = MaterialTheme.typography.bodySmall,
             )
-            Text(
-                "Привязка: SHA-256 ${workspace.artifactSha256}",
-                style = MaterialTheme.typography.bodySmall,
-            )
 
             if (plan == null) {
                 LinearProgressIndicator(Modifier.fillMaxWidth())
