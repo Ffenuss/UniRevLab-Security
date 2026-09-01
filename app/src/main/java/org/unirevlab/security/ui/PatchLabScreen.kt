@@ -427,229 +427,249 @@ fun PatchLabScreen(
                     onError = { error = it },
                 )
                 }
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f))) {
-                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("DEX", fontWeight = FontWeight.SemiBold)
-                        Text(selectedDex ?: "DEX не выбран", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                PatchLabSectionHeader(
+                    title = "DEX / Smali editor",
+                    subtitle = "Выбор DEX, класса и метода, trace hook и ручное редактирование",
+                    expanded = openToolSection == "dex",
+                    onClick = { openToolSection = if (openToolSection == "dex") null else "dex" },
+                )
+                if (openToolSection == "dex") {
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f))) {
+                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("DEX", fontWeight = FontWeight.SemiBold)
+                            Text(selectedDex ?: "DEX не выбран", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                            OutlinedButton(
+                                onClick = { showDexPicker = true },
+                                enabled = reportDexEntries.isNotEmpty() && !busy,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text("Выбрать DEX (${reportDexEntries.size})") }
+                        }
+                    }
+                    Button(onClick = ::disassembleCurrentDex, enabled = selectedDex != null && !busy, modifier = Modifier.fillMaxWidth()) {
+                        Text("Разобрать выбранный DEX в Smali")
+                    }
+
+                    if (classes.isNotEmpty()) {
+                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f))) {
+                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("Класс", fontWeight = FontWeight.SemiBold)
+                                Text(selectedClass ?: "Класс не выбран", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                                OutlinedButton(
+                                    onClick = { showClassPicker = true },
+                                    enabled = !busy,
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) { Text("Выбрать класс (${classes.size})") }
+                                Button(onClick = ::loadCurrentClass, enabled = selectedClass != null && !busy, modifier = Modifier.fillMaxWidth()) {
+                                    Text("Открыть Smali-класс")
+                                }
+                            }
+                        }
+                    }
+
+                    val classMethods = remember(report, selectedDex, selectedClass) {
+                        report.dex?.methods.orEmpty().filter { it.dexEntry == selectedDex && it.declaringClass == selectedClass }
+                    }
+                    if (classMethods.isNotEmpty()) {
+                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f))) {
+                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("Метод из RE-индекса", fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    selectedMethodName?.let { it + selectedPrototype.orEmpty() } ?: "Метод не выбран",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                )
+                                OutlinedButton(
+                                    onClick = { showMethodPicker = true },
+                                    enabled = !busy,
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) { Text("Выбрать метод (${classMethods.size})") }
+                            }
+                        }
+                    }
+
+                    if (showDexPicker) {
+                        PatchStringPickerDialog(
+                            title = "DEX-файлы",
+                            items = reportDexEntries,
+                            selected = selectedDex,
+                            searchLabel = "Поиск DEX",
+                            onDismiss = { showDexPicker = false },
+                            onSelect = { dex ->
+                                selectedDex = dex
+                                classes = emptyList()
+                                selectedClass = null
+                                selectedMethodName = null
+                                selectedPrototype = null
+                                smaliText = ""
+                                originalSmaliText = ""
+                                showDexPicker = false
+                            },
+                        )
+                    }
+                    if (showClassPicker && classes.isNotEmpty()) {
+                        PatchStringPickerDialog(
+                            title = "Классы DEX",
+                            items = classes,
+                            selected = selectedClass,
+                            searchLabel = "Поиск класса",
+                            onDismiss = { showClassPicker = false },
+                            onSelect = { cls ->
+                                selectedClass = cls
+                                val firstMethod = report.dex?.methods?.firstOrNull { it.dexEntry == selectedDex && it.declaringClass == cls }
+                                selectedMethodName = firstMethod?.name
+                                selectedPrototype = firstMethod?.prototype
+                                smaliText = ""
+                                originalSmaliText = ""
+                                showClassPicker = false
+                            },
+                        )
+                    }
+                    if (showMethodPicker && classMethods.isNotEmpty()) {
+                        PatchMethodPickerDialog(
+                            methods = classMethods.map { PatchMethodChoice(it.name, it.prototype) },
+                            selectedName = selectedMethodName,
+                            selectedPrototype = selectedPrototype,
+                            onDismiss = { showMethodPicker = false },
+                            onSelect = { method ->
+                                selectedMethodName = method.name
+                                selectedPrototype = method.prototype
+                                showMethodPicker = false
+                            },
+                        )
+                    }
+                    if (showArchivePicker) {
+                        PatchStringPickerDialog(
+                            title = "Файлы внутри APK",
+                            items = ws.archiveEntries,
+                            selected = selectedReplacementEntry,
+                            searchLabel = "Поиск пути / entry",
+                            onDismiss = { showArchivePicker = false },
+                            onSelect = { entry ->
+                                selectedReplacementEntry = entry
+                                showArchivePicker = false
+                            },
+                        )
+                    }
+
+                    if (smaliText.isNotBlank()) {
+                        HorizontalDivider()
+                        Text("3. Редактор / test hook", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text("${selectedClass ?: ""}  ${selectedMethodName.orEmpty()}${selectedPrototype.orEmpty()}", style = MaterialTheme.typography.bodySmall)
                         OutlinedButton(
-                            onClick = { showDexPicker = true },
-                            enabled = reportDexEntries.isNotEmpty() && !busy,
+                            onClick = {
+                                val name = selectedMethodName
+                                val proto = selectedPrototype
+                                if (name != null && proto != null) {
+                                    runCatching { PatchLabEngine.addEntryLogHook(smaliText, name, proto, initialFinding?.id) }
+                                        .onSuccess { smaliText = it; error = null; status = "Добавлен trace-only Log hook в $name$proto" }
+                                        .onFailure { error = it.message }
+                                }
+                            },
+                            enabled = selectedMethodName != null && selectedPrototype != null && !busy,
                             modifier = Modifier.fillMaxWidth(),
-                        ) { Text("Выбрать DEX (${reportDexEntries.size})") }
+                        ) { Text("+ Trace Log hook") }
+                        OutlinedTextField(
+                            value = smaliText,
+                            onValueChange = { smaliText = it },
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 420.dp),
+                            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                            label = { Text("Smali — можно редактировать вручную") },
+                        )
+                        Text(
+                            if (smaliText == originalSmaliText) "Нет несохранённых изменений" else "Есть несохранённые изменения",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Button(onClick = ::saveCurrentClass, enabled = smaliText.isNotBlank() && smaliText != originalSmaliText && !busy, modifier = Modifier.fillMaxWidth()) {
+                            Text("Сохранить патч класса")
+                        }
                     }
-                }
-                Button(onClick = ::disassembleCurrentDex, enabled = selectedDex != null && !busy, modifier = Modifier.fillMaxWidth()) {
-                    Text("Разобрать выбранный DEX в Smali")
-                }
-
-                if (classes.isNotEmpty()) {
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f))) {
-                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("Класс", fontWeight = FontWeight.SemiBold)
-                            Text(selectedClass ?: "Класс не выбран", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
-                            OutlinedButton(
-                                onClick = { showClassPicker = true },
-                                enabled = !busy,
-                                modifier = Modifier.fillMaxWidth(),
-                            ) { Text("Выбрать класс (${classes.size})") }
-                            Button(onClick = ::loadCurrentClass, enabled = selectedClass != null && !busy, modifier = Modifier.fillMaxWidth()) {
-                                Text("Открыть Smali-класс")
+                }                PatchLabSectionHeader(
+                    title = "Файлы / Native / Archive",
+                    subtitle = "Замена archive entries и native-библиотек",
+                    expanded = openToolSection == "files",
+                    onClick = { openToolSection = if (openToolSection == "files") null else "files" },
+                )
+                if (openToolSection == "files") {
+                    run {
+                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))) {
+                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("Native / file replacement", fontWeight = FontWeight.SemiBold)
+                                Text("Найдено ELF/.so: ${ws.nativeEntries.size}. Несжатые .so при пересборке выравниваются на 16 KiB.", style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    selectedReplacementEntry ?: "Файл внутри APK не выбран",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                )
+                                OutlinedButton(
+                                    onClick = { showArchivePicker = true },
+                                    enabled = ws.archiveEntries.isNotEmpty() && !busy,
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) { Text("Выбрать entry (${ws.archiveEntries.size})") }
+                                OutlinedTextField(
+                                    value = selectedReplacementEntry.orEmpty(),
+                                    onValueChange = { value -> selectedReplacementEntry = value.take(512) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = true,
+                                    label = { Text("Путь файла внутри APK") },
+                                    supportingText = { Text("Можно указать любой существующий entry из APK, не только .so") },
+                                )
+                                Button(
+                                    onClick = { replacementPicker.launch(arrayOf("*/*")) },
+                                    enabled = selectedReplacementEntry?.let { it in ws.archiveEntries } == true && !busy,
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) { Text("Выбрать файл замены") }
+                                if (ws.replacements.isNotEmpty()) {
+                                    Text("Запланированные замены:", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
+                                    ws.replacements.keys.sorted().forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+                                }
                             }
                         }
                     }
-                }
-
-                val classMethods = remember(report, selectedDex, selectedClass) {
-                    report.dex?.methods.orEmpty().filter { it.dexEntry == selectedDex && it.declaringClass == selectedClass }
-                }
-                if (classMethods.isNotEmpty()) {
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f))) {
-                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("Метод из RE-индекса", fontWeight = FontWeight.SemiBold)
-                            Text(
-                                selectedMethodName?.let { it + selectedPrototype.orEmpty() } ?: "Метод не выбран",
-                                style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace,
-                            )
-                            OutlinedButton(
-                                onClick = { showMethodPicker = true },
-                                enabled = !busy,
-                                modifier = Modifier.fillMaxWidth(),
-                            ) { Text("Выбрать метод (${classMethods.size})") }
-                        }
-                    }
-                }
-
-                if (showDexPicker) {
-                    PatchStringPickerDialog(
-                        title = "DEX-файлы",
-                        items = reportDexEntries,
-                        selected = selectedDex,
-                        searchLabel = "Поиск DEX",
-                        onDismiss = { showDexPicker = false },
-                        onSelect = { dex ->
-                            selectedDex = dex
-                            classes = emptyList()
-                            selectedClass = null
-                            selectedMethodName = null
-                            selectedPrototype = null
-                            smaliText = ""
-                            originalSmaliText = ""
-                            showDexPicker = false
-                        },
-                    )
-                }
-                if (showClassPicker && classes.isNotEmpty()) {
-                    PatchStringPickerDialog(
-                        title = "Классы DEX",
-                        items = classes,
-                        selected = selectedClass,
-                        searchLabel = "Поиск класса",
-                        onDismiss = { showClassPicker = false },
-                        onSelect = { cls ->
-                            selectedClass = cls
-                            val firstMethod = report.dex?.methods?.firstOrNull { it.dexEntry == selectedDex && it.declaringClass == cls }
-                            selectedMethodName = firstMethod?.name
-                            selectedPrototype = firstMethod?.prototype
-                            smaliText = ""
-                            originalSmaliText = ""
-                            showClassPicker = false
-                        },
-                    )
-                }
-                if (showMethodPicker && classMethods.isNotEmpty()) {
-                    PatchMethodPickerDialog(
-                        methods = classMethods.map { PatchMethodChoice(it.name, it.prototype) },
-                        selectedName = selectedMethodName,
-                        selectedPrototype = selectedPrototype,
-                        onDismiss = { showMethodPicker = false },
-                        onSelect = { method ->
-                            selectedMethodName = method.name
-                            selectedPrototype = method.prototype
-                            showMethodPicker = false
-                        },
-                    )
-                }
-                if (showArchivePicker) {
-                    PatchStringPickerDialog(
-                        title = "Файлы внутри APK",
-                        items = ws.archiveEntries,
-                        selected = selectedReplacementEntry,
-                        searchLabel = "Поиск пути / entry",
-                        onDismiss = { showArchivePicker = false },
-                        onSelect = { entry ->
-                            selectedReplacementEntry = entry
-                            showArchivePicker = false
-                        },
-                    )
-                }
-
-                if (smaliText.isNotBlank()) {
+                }                PatchLabSectionHeader(
+                    title = "Сборка / Diff / установка",
+                    subtitle = "Подпись, APK Mutation Diff, экспорт, установка и повторный анализ",
+                    expanded = openToolSection == "build",
+                    onClick = { openToolSection = if (openToolSection == "build") null else "build" },
+                )
+                if (openToolSection == "build") {
                     HorizontalDivider()
-                    Text("3. Редактор / test hook", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text("${selectedClass ?: ""}  ${selectedMethodName.orEmpty()}${selectedPrototype.orEmpty()}", style = MaterialTheme.typography.bodySmall)
-                    OutlinedButton(
-                        onClick = {
-                            val name = selectedMethodName
-                            val proto = selectedPrototype
-                            if (name != null && proto != null) {
-                                runCatching { PatchLabEngine.addEntryLogHook(smaliText, name, proto, initialFinding?.id) }
-                                    .onSuccess { smaliText = it; error = null; status = "Добавлен trace-only Log hook в $name$proto" }
-                                    .onFailure { error = it.message }
-                            }
-                        },
-                        enabled = selectedMethodName != null && selectedPrototype != null && !busy,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("+ Trace Log hook") }
-                    OutlinedTextField(
-                        value = smaliText,
-                        onValueChange = { smaliText = it },
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 420.dp),
-                        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                        label = { Text("Smali — можно редактировать вручную") },
-                    )
-                    Text(
-                        if (smaliText == originalSmaliText) "Нет несохранённых изменений" else "Есть несохранённые изменения",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    Button(onClick = ::saveCurrentClass, enabled = smaliText.isNotBlank() && smaliText != originalSmaliText && !busy, modifier = Modifier.fillMaxWidth()) {
-                        Text("Сохранить патч класса")
+                    Text("4. Сборка и проверка", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text("Сборка удаляет старые APK signatures и подписывает отдельным лабораторным тестовым ключом.", style = MaterialTheme.typography.bodySmall)
+                    Button(onClick = ::buildApk, enabled = (ws.modifiedDexEntries.isNotEmpty() || ws.replacements.isNotEmpty()) && !busy, modifier = Modifier.fillMaxWidth()) {
+                        Text("Собрать и подписать тестовый APK")
                     }
-                }
-
-                run {
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))) {
-                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("Native / file replacement", fontWeight = FontWeight.SemiBold)
-                            Text("Найдено ELF/.so: ${ws.nativeEntries.size}. Несжатые .so при пересборке выравниваются на 16 KiB.", style = MaterialTheme.typography.bodySmall)
-                            Text(
-                                selectedReplacementEntry ?: "Файл внутри APK не выбран",
-                                style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace,
-                            )
-                            OutlinedButton(
-                                onClick = { showArchivePicker = true },
-                                enabled = ws.archiveEntries.isNotEmpty() && !busy,
-                                modifier = Modifier.fillMaxWidth(),
-                            ) { Text("Выбрать entry (${ws.archiveEntries.size})") }
-                            OutlinedTextField(
-                                value = selectedReplacementEntry.orEmpty(),
-                                onValueChange = { value -> selectedReplacementEntry = value.take(512) },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true,
-                                label = { Text("Путь файла внутри APK") },
-                                supportingText = { Text("Можно указать любой существующий entry из APK, не только .so") },
-                            )
-                            Button(
-                                onClick = { replacementPicker.launch(arrayOf("*/*")) },
-                                enabled = selectedReplacementEntry?.let { it in ws.archiveEntries } == true && !busy,
-                                modifier = Modifier.fillMaxWidth(),
-                            ) { Text("Выбрать файл замены") }
-                            if (ws.replacements.isNotEmpty()) {
-                                Text("Запланированные замены:", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
-                                ws.replacements.keys.sorted().forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+                    built?.let { result ->
+                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f))) {
+                            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                Text("Тестовая сборка готова", fontWeight = FontWeight.Bold)
+                                Text("SHA-256: ${result.sha256}", style = MaterialTheme.typography.bodySmall)
+                                Text("Signer: ${result.signerLabel}", style = MaterialTheme.typography.bodySmall)
+                                Text("Изменения: ${result.changedEntries.joinToString()}", style = MaterialTheme.typography.bodySmall)
                             }
                         }
-                    }
-                }
-
-                HorizontalDivider()
-                Text("4. Сборка и проверка", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text("Сборка удаляет старые APK signatures и подписывает отдельным лабораторным тестовым ключом.", style = MaterialTheme.typography.bodySmall)
-                Button(onClick = ::buildApk, enabled = (ws.modifiedDexEntries.isNotEmpty() || ws.replacements.isNotEmpty()) && !busy, modifier = Modifier.fillMaxWidth()) {
-                    Text("Собрать и подписать тестовый APK")
-                }
-                built?.let { result ->
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f))) {
-                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                            Text("Тестовая сборка готова", fontWeight = FontWeight.Bold)
-                            Text("SHA-256: ${result.sha256}", style = MaterialTheme.typography.bodySmall)
-                            Text("Signer: ${result.signerLabel}", style = MaterialTheme.typography.bodySmall)
-                            Text("Изменения: ${result.changedEntries.joinToString()}", style = MaterialTheme.typography.bodySmall)
+                        PatchBuildAuditPanel(report = report, workspace = ws, result = result)
+                        OutlinedButton(
+                            onClick = {
+                                val name = report.artifact.displayName.substringBeforeLast('.').replace(Regex("[^A-Za-z0-9._-]"), "_").take(72)
+                                exportPicker.launch("${name}-unirevlab-patched.apk")
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("Экспортировать APK") }
+                        OutlinedButton(
+                            onClick = {
+                                runCatching {
+                                    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", result.signedApk)
+                                    val intent = Intent(Intent.ACTION_VIEW)
+                                        .setDataAndType(uri, "application/vnd.android.package-archive")
+                                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    context.startActivity(intent)
+                                }.onFailure { error = it.message }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("Установить тестовую сборку") }
+                        Button(onClick = { onAnalyzeBuilt(result.signedApk) }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Повторно проанализировать и сравнить")
                         }
-                    }
-                    PatchBuildAuditPanel(report = report, workspace = ws, result = result)
-                    OutlinedButton(
-                        onClick = {
-                            val name = report.artifact.displayName.substringBeforeLast('.').replace(Regex("[^A-Za-z0-9._-]"), "_").take(72)
-                            exportPicker.launch("${name}-unirevlab-patched.apk")
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Экспортировать APK") }
-                    OutlinedButton(
-                        onClick = {
-                            runCatching {
-                                val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", result.signedApk)
-                                val intent = Intent(Intent.ACTION_VIEW)
-                                    .setDataAndType(uri, "application/vnd.android.package-archive")
-                                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-                                context.startActivity(intent)
-                            }.onFailure { error = it.message }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Установить тестовую сборку") }
-                    Button(onClick = { onAnalyzeBuilt(result.signedApk) }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Повторно проанализировать и сравнить")
                     }
                 }
             }
