@@ -53,7 +53,9 @@ p.write_text(text, encoding='utf-8')
 def wrap_first(calls, key, title, subtitle):
     p = ROOT / path
     src = p.read_text(encoding='utf-8')
-    if f'expanded = openToolSection == "{key}"' in src and f'if (openToolSection == "{key}")' in src:
+    # Treat already-migrated sections as complete even if an earlier patch changed
+    # whitespace or the exact panel call name. This keeps CI migrations idempotent.
+    if f'title = "{title}"' in src and f'openToolSection == "{key}"' in src:
         return
     call = next((candidate for candidate in calls if candidate in src), None)
     if call is None:
