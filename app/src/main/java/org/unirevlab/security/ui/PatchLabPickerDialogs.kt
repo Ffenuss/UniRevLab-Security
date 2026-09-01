@@ -6,9 +6,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -73,7 +72,7 @@ internal fun PatchStringPickerDialog(
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    items(filtered, key = { it }) { item ->
+                    lazyItems(filtered, key = { it }) { item ->
                         val isSelected = item == selected
                         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (isSelected) 0.72f else 0.38f))) {
                             Button(
@@ -125,7 +124,7 @@ internal fun PatchMethodPickerDialog(
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    items(filtered, key = { it.label }) { method ->
+                    lazyItems(filtered, key = { it.label }) { method ->
                         val selected = method.name == selectedName && method.prototype == selectedPrototype
                         Button(onClick = { onSelect(method) }, modifier = Modifier.fillMaxWidth()) {
                             Text(if (selected) "✓ ${method.label}" else method.label, fontFamily = FontFamily.Monospace)
