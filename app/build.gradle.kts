@@ -15,8 +15,8 @@ android {
         applicationId = "org.unirevlab.security"
         minSdk = 26
         targetSdk = 36
-        versionCode = 35
-        versionName = "0.25.6-dev-runtime-state-lab"
+        versionCode = 36
+        versionName = "0.25.7-dev-full-pickers"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
