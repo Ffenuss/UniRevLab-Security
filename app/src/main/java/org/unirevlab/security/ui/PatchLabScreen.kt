@@ -583,7 +583,8 @@ fun PatchLabScreen(
                             Text("Сохранить патч класса")
                         }
                     }
-                }                PatchLabSectionHeader(
+                }
+                PatchLabSectionHeader(
                     title = "Файлы / Native / Archive",
                     subtitle = "Замена archive entries и native-библиотек",
                     expanded = openToolSection == "files",
@@ -625,7 +626,8 @@ fun PatchLabScreen(
                             }
                         }
                     }
-                }                PatchLabSectionHeader(
+                }
+                PatchLabSectionHeader(
                     title = "Сборка / Diff / установка",
                     subtitle = "Подпись, APK Mutation Diff, экспорт, установка и повторный анализ",
                     expanded = openToolSection == "build",
