@@ -40,6 +40,18 @@ class AutoModEngineTest {
     }
 
     @Test
+    fun lowerBoundExactEvidenceStillSupportsObfuscatedTargets() {
+        assertEquals(
+            AutoModEngine.Mode.RETURN_TRUE,
+            AutoModEngine.suggestForTesting("ENTITLEMENT_TRUST", "a", "()Z", 42, "premium access entitlement")?.mode,
+        )
+        assertEquals(
+            AutoModEngine.Mode.RETURN_INT,
+            AutoModEngine.suggestForTesting("LOCAL_STATE", "b", "()I", 42, "player score")?.mode,
+        )
+    }
+
+    @Test
     fun choosesBoundedLocalStateIntegerDemo() {
         val suggestion = AutoModEngine.suggestForTesting("LOCAL_STATE", "getHighScore", "()I")
         assertEquals(AutoModEngine.Mode.RETURN_INT, suggestion?.mode)

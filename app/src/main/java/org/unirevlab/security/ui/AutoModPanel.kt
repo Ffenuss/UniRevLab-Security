@@ -99,12 +99,13 @@ fun AutoModPanel(
                 )
                 if (current.actions.isEmpty()) {
                     Text(
-                        "Автоматически патчабельных DEX-целей не найдено. AutoMod проверил project-owned методы, " +
-                            "string/field/constant evidence и поддерживаемые boolean/int return-типы. " +
-                            "Если состояние хранится во время выполнения, используйте Runtime State Lab; если цель native/IL2CPP — соответствующий native/managed режим.",
+                        "AutoMod не выбрал автоматическую цель. ${current.diagnostics}",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 } else {
+                    if (current.diagnostics.isNotBlank()) {
+                        Text(current.diagnostics, style = MaterialTheme.typography.bodySmall)
+                    }
                     current.actions.forEach { action ->
                         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f))) {
                             Column(Modifier.padding(9.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {

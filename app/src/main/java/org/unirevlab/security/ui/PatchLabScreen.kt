@@ -46,6 +46,21 @@ import org.unirevlab.security.model.InstalledAppDescriptor
 import org.unirevlab.security.model.StaticAnalysisReport
 
 @Composable
+private fun PatchLabSectionHeader(
+    title: String,
+    subtitle: String,
+    expanded: Boolean,
+    onClick: () -> Unit,
+) {
+    OutlinedButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text((if (expanded) "▼ " else "▶ ") + title, style = MaterialTheme.typography.titleMedium)
+            if (subtitle.isNotBlank()) Text(subtitle, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+@Composable
 fun PatchLabScreen(
     report: StaticAnalysisReport,
     initialFinding: Finding?,
@@ -56,6 +71,7 @@ fun PatchLabScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    var openToolSection by remember { mutableStateOf<String?>("assessment") }
     val initialTarget = remember(report, initialFinding) { PatchLabEngine.resolveTarget(report, initialFinding) }
 
     var sourceUri by remember(report.artifact.sha256) { mutableStateOf(initialSourceUri) }
@@ -365,7 +381,14 @@ fun PatchLabScreen(
                 HorizontalDivider()
                 Text("2. DEX / класс / метод", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Text("SHA-256 исходника: ${ws.artifactSha256}", style = MaterialTheme.typography.bodySmall)
-                TamperAssessmentPanelV2(
+                PatchLabSectionHeader(
+                    title = "Tamper Assessment",
+                    subtitle = "Риски, поверхности, секреты и ручной поиск",
+                    expanded = openToolSection == "assessment",
+                    onClick = { openToolSection = if (openToolSection == "assessment") null else "assessment" },
+                )
+                if (openToolSection == "assessment") {
+                    TamperAssessmentPanelV2(
                     report = report,
                     workspace = ws,
                     busy = busy,
@@ -374,7 +397,15 @@ fun PatchLabScreen(
                     onStatus = { status = it },
                     onError = { error = it },
                 )
-                AutoModPanel(
+                }
+                PatchLabSectionHeader(
+                    title = "AutoMod Demo",
+                    subtitle = "Автоматические демонстрационные изменения",
+                    expanded = openToolSection == "automod",
+                    onClick = { openToolSection = if (openToolSection == "automod") null else "automod" },
+                )
+                if (openToolSection == "automod") {
+                    AutoModPanel(
                     report = report,
                     workspace = ws,
                     busy = busy,
@@ -382,11 +413,20 @@ fun PatchLabScreen(
                     onStatus = { status = it },
                     onError = { error = it },
                 )
-                RuntimeStateLabPanel(
+                }
+                PatchLabSectionHeader(
+                    title = "Runtime State Lab",
+                    subtitle = "Локальные сохранения и state-файлы",
+                    expanded = openToolSection == "runtime",
+                    onClick = { openToolSection = if (openToolSection == "runtime") null else "runtime" },
+                )
+                if (openToolSection == "runtime") {
+                    RuntimeStateLabPanel(
                     busy = busy,
                     onStatus = { status = it },
                     onError = { error = it },
                 )
+                }
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f))) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("DEX", fontWeight = FontWeight.SemiBold)

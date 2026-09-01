@@ -36,6 +36,7 @@ object AutoModEngine {
         val assessmentBand: String,
         val actions: List<Action>,
         val eligibleBeforeCap: Int,
+        val diagnostics: String = "",
     )
 
     data class ApplyResult(val applied: List<Action>)
@@ -61,6 +62,9 @@ object AutoModEngine {
         val assessment = TamperAssessmentEngine.scan(report, workspace)
         val dex = report.dex
         val methodsByKey = dex?.methods.orEmpty().associateBy { it.dexEntry to it.methodIndex }
+        val methodsBySignature = dex?.methods.orEmpty().associateBy { method ->
+            "${method.dexEntry}|${method.declaringClass}|${method.name}|${method.prototype}"
+        }
         val codeKeys = dex?.codeMethods.orEmpty().map { "${it.dexEntry}|${it.declaringClass}|${it.name}|${it.prototype}" }.toSet()
         fun editableProject(method: org.unirevlab.security.model.DexMethodReference): Boolean =
             "${method.dexEntry}|${method.declaringClass}|${method.name}|${method.prototype}" in codeKeys &&
@@ -80,6 +84,24 @@ object AutoModEngine {
             }
         }
 
+        // Highest-signal source: exact surfaces already resolved by Tamper Assessment.
+        assessment.hits.forEach { hit ->
+            val dexEntry = hit.dexEntry ?: return@forEach
+            val classDescriptor = hit.classDescriptor ?: return@forEach
+            val methodName = hit.methodName ?: return@forEach
+            val prototype = hit.prototype ?: return@forEach
+            val method = methodsBySignature["$dexEntry|$classDescriptor|$methodName|$prototype"] ?: return@forEach
+            if (!editableProject(method)) return@forEach
+            evidence += Evidence(
+                category = hit.category,
+                method = method,
+                score = hit.score.coerceIn(1, 100),
+                text = "${hit.preview} ${hit.location} ${method.declaringClass} ${method.name}",
+            )
+        }
+
+        // Then scan the complete editable project method index. This keeps obfuscated app code eligible
+        // even when package ownership cannot be inferred from a conventional Java/Kotlin namespace.
         dex?.methods.orEmpty().forEach { method ->
             collect(method, "${method.declaringClass}->${method.name}${method.prototype}")
         }
@@ -124,12 +146,23 @@ object AutoModEngine {
             .sortedWith(compareByDescending<Action> { it.confidence }.thenBy { it.target })
 
         val selected = selectDiverse(candidates)
+        val editableMethodCount = dex?.methods.orEmpty().count(::editableProject)
+        val exactTamperMethodHits = assessment.hits.count {
+            it.dexEntry != null && it.classDescriptor != null && it.methodName != null && it.prototype != null
+        }
+        val diagnostics = when {
+            candidates.isNotEmpty() -> "editable methods: $editableMethodCount; exact tamper method hits: $exactTamperMethodHits; eligible: ${candidates.size}"
+            editableMethodCount == 0 -> "Нет редактируемых DEX method bodies: возможно логика находится в native/IL2CPP/managed runtime."
+            exactTamperMethodHits == 0 -> "Tamper Assessment не связал поверхности с точными DEX method bodies; используйте scoped search/Runtime State Lab."
+            else -> "Найдены редактируемые методы и tamper hits, но сигнатуры return/type не подходят для безопасного AutoMod-шаблона."
+        }
         return Plan(
             artifactSha256 = workspace.artifactSha256,
             assessmentScore = assessment.score,
             assessmentBand = assessment.band,
             actions = selected,
             eligibleBeforeCap = candidates.size,
+            diagnostics = diagnostics,
         )
     }
 
@@ -213,7 +246,7 @@ object AutoModEngine {
         val compact = tokens.joinToString("")
         val methodCompact = methodTokens.joinToString("")
         val decisionPrefix = methodTokens.firstOrNull() in DECISION_PREFIXES
-        val evidenceBacked = evidenceTokens.isNotEmpty() && baseScore >= 46
+        val evidenceBacked = evidenceTokens.isNotEmpty() && baseScore >= 42
 
         if (prototype.endsWith(")Z")) {
             val negative = NEGATIVE_BOOLEAN_MARKERS.any { marker -> marker in tokens || compact.contains(marker) }

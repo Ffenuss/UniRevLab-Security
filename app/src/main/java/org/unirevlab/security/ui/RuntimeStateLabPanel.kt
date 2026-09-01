@@ -91,14 +91,14 @@ fun RuntimeStateLabPanel(
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Runtime State Lab — реальные локальные сохранения", fontWeight = FontWeight.Bold)
             Text(
-                "Ищет key/value в выбранной папке данных: SharedPreferences XML, JSON, properties/INI/text и SQLite. " +
+                "Ищет key/value в локальных данных цели: SharedPreferences XML, JSON, properties/INI/text и SQLite. " +
                     "Совпадение идёт и по имени ключа, и по текущему значению. * показывает все распознанные значения. " +
                     "Перед первой записью создаётся backup.",
                 style = MaterialTheme.typography.bodySmall,
             )
             Text(
-                "Android не разрешает одному обычному приложению читать /data/data другого приложения. " +
-                    "Выберите экспорт/backup заказчика, debug-директорию или другую папку, к которой Android выдал доступ. Sandbox не обходится.",
+                "Для установленной цели используйте её snapshot/backup или debug-директорию, если Android не дал прямой доступ к private sandbox. " +
+                    "Импортированный APK сам по себе не содержит runtime-сохранения пользователя.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -106,7 +106,7 @@ fun RuntimeStateLabPanel(
                 onClick = { treePicker.launch(treeUri) },
                 enabled = !busy && !searching && !editing,
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text(if (treeUri == null) "Выбрать папку локальных данных" else "Выбрать другую папку данных") }
+            ) { Text(if (treeUri == null) "Подключить snapshot / папку данных" else "Выбрать другой snapshot / папку") }
             treeUri?.let { Text(it.toString(), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace) }
 
             OutlinedTextField(
