@@ -42,6 +42,7 @@ import kotlinx.coroutines.withContext
 import org.unirevlab.security.analysis.PatchLabEngine
 import org.unirevlab.security.analysis.TamperAssessmentEngine
 import org.unirevlab.security.model.Finding
+import org.unirevlab.security.model.InstalledAppDescriptor
 import org.unirevlab.security.model.StaticAnalysisReport
 
 @Composable
@@ -49,6 +50,7 @@ fun PatchLabScreen(
     report: StaticAnalysisReport,
     initialFinding: Finding?,
     initialSourceUri: Uri?,
+    initialInstalledApp: InstalledAppDescriptor?,
     onBack: () -> Unit,
     onAnalyzeBuilt: (File) -> Unit,
 ) {
@@ -57,6 +59,7 @@ fun PatchLabScreen(
     val initialTarget = remember(report, initialFinding) { PatchLabEngine.resolveTarget(report, initialFinding) }
 
     var sourceUri by remember(report.artifact.sha256) { mutableStateOf(initialSourceUri) }
+    var sourceInstalledApp by remember(report.artifact.sha256) { mutableStateOf(initialInstalledApp) }
     var workspace by remember(report.artifact.sha256) { mutableStateOf<PatchLabEngine.Workspace?>(null) }
     var selectedDex by remember(report.artifact.sha256) { mutableStateOf(initialTarget?.dexEntry) }
     var classes by remember(report.artifact.sha256) { mutableStateOf<List<String>>(emptyList()) }
@@ -79,6 +82,7 @@ fun PatchLabScreen(
         if (uri != null) {
             runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
             sourceUri = uri
+            sourceInstalledApp = null
             workspace = null
             classes = emptyList()
             smaliText = ""
@@ -129,12 +133,20 @@ fun PatchLabScreen(
     }
 
     fun prepareWorkspace() {
-        val uri = sourceUri ?: return
+        val uri = sourceUri
+        val installed = sourceInstalledApp
+        if (uri == null && installed == null) return
         scope.launch {
             busy = true
             error = null
-            status = "Копирование и проверка исходного APK…"
-            val result = runCatching { withContext(Dispatchers.IO) { PatchLabEngine.prepare(context, uri, report) } }
+            status = if (installed != null) "Готовим base/split APK установленного приложения…" else "Копирование и проверка исходного APK/APK-set…"
+            val preferred = initialTarget?.dexEntry ?: initialTarget?.nativeEntry
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    if (installed != null) PatchLabEngine.prepareInstalled(context, installed, report, preferred)
+                    else PatchLabEngine.prepare(context, requireNotNull(uri), report, preferred)
+                }
+            }
             result.getOrNull()?.let { ws ->
                 workspace = ws
                 if (selectedDex !in ws.dexEntries) selectedDex = initialTarget?.dexEntry?.takeIf { it in ws.dexEntries } ?: ws.dexEntries.firstOrNull()
@@ -151,15 +163,31 @@ fun PatchLabScreen(
         }
     }
 
+    suspend fun workspaceForReportEntry(reportEntry: String): PatchLabEngine.Workspace {
+        val current = workspace
+        if (current != null && (reportEntry in current.dexEntries || reportEntry in current.archiveEntries || reportEntry in current.nativeEntries)) return current
+        val installed = sourceInstalledApp
+        val uri = sourceUri
+        return withContext(Dispatchers.IO) {
+            if (installed != null) PatchLabEngine.prepareInstalled(context, installed, report, reportEntry)
+            else if (uri != null) PatchLabEngine.prepare(context, uri, report, reportEntry)
+            else error("Источник анализа недоступен")
+        }
+    }
+
     fun disassembleCurrentDex() {
-        val ws = workspace ?: return
         val dex = selectedDex ?: return
         scope.launch {
             busy = true
             error = null
             status = "baksmali: разбор $dex…"
-            val result = runCatching { withContext(Dispatchers.IO) { PatchLabEngine.disassembleDex(ws, dex) } }
-            result.getOrNull()?.let { list ->
+            val result = runCatching {
+                val targetWs = workspaceForReportEntry(dex)
+                val list = withContext(Dispatchers.IO) { PatchLabEngine.disassembleDex(targetWs, dex) }
+                targetWs to list
+            }
+            result.getOrNull()?.let { (targetWs, list) ->
+                workspace = targetWs
                 classes = list
                 val preferred = initialTarget?.classDescriptor?.takeIf { it in list }
                 if (selectedClass !in list) selectedClass = preferred ?: list.firstOrNull()
@@ -207,7 +235,6 @@ fun PatchLabScreen(
     }
 
     fun openTamperTarget(item: TamperAssessmentEngine.SearchResult) {
-        val ws = workspace ?: return
         val dex = item.dexEntry ?: return
         val cls = item.classDescriptor ?: return
         scope.launch {
@@ -215,13 +242,15 @@ fun PatchLabScreen(
             error = null
             status = "Открываем найденную цель: $cls…"
             val result = runCatching {
+                val targetWs = workspaceForReportEntry(dex)
                 withContext(Dispatchers.IO) {
-                    val list = PatchLabEngine.disassembleDex(ws, dex)
-                    val text = PatchLabEngine.loadClass(ws, dex, cls)
-                    list to text
+                    val list = PatchLabEngine.disassembleDex(targetWs, dex)
+                    val text = PatchLabEngine.loadClass(targetWs, dex, cls)
+                    Triple(targetWs, list, text)
                 }
             }
-            result.getOrNull()?.let { (list, text) ->
+            result.getOrNull()?.let { (targetWs, list, text) ->
+                workspace = targetWs
                 selectedDex = dex
                 classes = list
                 selectedClass = cls
@@ -237,22 +266,23 @@ fun PatchLabScreen(
     }
 
     fun applyGeneratedTraceHook(proposal: TamperAssessmentEngine.HookProposal) {
-        val ws = workspace ?: return
         scope.launch {
             busy = true
             error = null
             built = null
             status = "Генерируем trace hook: ${proposal.classDescriptor}->${proposal.methodName}${proposal.prototype}…"
             val result = runCatching {
+                val targetWs = workspaceForReportEntry(proposal.dexEntry)
                 withContext(Dispatchers.IO) {
-                    val list = PatchLabEngine.disassembleDex(ws, proposal.dexEntry)
-                    val before = PatchLabEngine.loadClass(ws, proposal.dexEntry, proposal.classDescriptor)
+                    val list = PatchLabEngine.disassembleDex(targetWs, proposal.dexEntry)
+                    val before = PatchLabEngine.loadClass(targetWs, proposal.dexEntry, proposal.classDescriptor)
                     val after = PatchLabEngine.addEntryLogHook(before, proposal.methodName, proposal.prototype, "auto:${proposal.category}")
-                    PatchLabEngine.saveClass(ws, proposal.dexEntry, proposal.classDescriptor, after)
-                    list to after
+                    PatchLabEngine.saveClass(targetWs, proposal.dexEntry, proposal.classDescriptor, after)
+                    Triple(targetWs, list, after)
                 }
             }
-            result.getOrNull()?.let { (list, after) ->
+            result.getOrNull()?.let { (targetWs, list, after) ->
+                workspace = targetWs
                 selectedDex = proposal.dexEntry
                 classes = list
                 selectedClass = proposal.classDescriptor
@@ -316,17 +346,22 @@ fun PatchLabScreen(
             error?.let { Text("Ошибка: $it", color = MaterialTheme.colorScheme.error) }
 
             Text("1. Исходный APK", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text(sourceUri?.lastPathSegment ?: "APK не выбран", style = MaterialTheme.typography.bodySmall)
+            Text(sourceInstalledApp?.let { "Установлено: ${it.label} (${it.packageName}) · APK: ${it.apkCount}" } ?: sourceUri?.lastPathSegment ?: "APK не выбран", style = MaterialTheme.typography.bodySmall)
             OutlinedButton(
                 onClick = { sourcePicker.launch(arrayOf("application/vnd.android.package-archive", "application/zip", "application/octet-stream")) },
                 enabled = !busy,
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text(if (sourceUri == null) "Выбрать исходный APK" else "Выбрать другой APK") }
-            Button(onClick = ::prepareWorkspace, enabled = sourceUri != null && !busy, modifier = Modifier.fillMaxWidth()) {
+            ) { Text(if (sourceUri == null && sourceInstalledApp == null) "Выбрать исходный APK" else "Выбрать другой APK/APK-set") }
+            Button(onClick = ::prepareWorkspace, enabled = (sourceUri != null || sourceInstalledApp != null) && !busy, modifier = Modifier.fillMaxWidth()) {
                 Text("Подготовить Patch Lab workspace")
             }
 
             workspace?.let { ws ->
+                val reportDexEntries = remember(report, ws.sourcePrefix) {
+                    (report.dex?.methods.orEmpty().map { it.dexEntry } + report.dex?.codeMethods.orEmpty().map { it.dexEntry })
+                        .distinct().sortedWith(compareBy { it })
+                        .ifEmpty { ws.dexEntries }
+                }
                 HorizontalDivider()
                 Text("2. DEX / класс / метод", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Text("SHA-256 исходника: ${ws.artifactSha256}", style = MaterialTheme.typography.bodySmall)
@@ -358,9 +393,9 @@ fun PatchLabScreen(
                         Text(selectedDex ?: "DEX не выбран", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
                         OutlinedButton(
                             onClick = { showDexPicker = true },
-                            enabled = ws.dexEntries.isNotEmpty() && !busy,
+                            enabled = reportDexEntries.isNotEmpty() && !busy,
                             modifier = Modifier.fillMaxWidth(),
-                        ) { Text("Выбрать DEX (${ws.dexEntries.size})") }
+                        ) { Text("Выбрать DEX (${reportDexEntries.size})") }
                     }
                 }
                 Button(onClick = ::disassembleCurrentDex, enabled = selectedDex != null && !busy, modifier = Modifier.fillMaxWidth()) {
@@ -408,7 +443,7 @@ fun PatchLabScreen(
                 if (showDexPicker) {
                     PatchStringPickerDialog(
                         title = "DEX-файлы",
-                        items = ws.dexEntries,
+                        items = reportDexEntries,
                         selected = selectedDex,
                         searchLabel = "Поиск DEX",
                         onDismiss = { showDexPicker = false },

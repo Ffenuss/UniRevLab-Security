@@ -89,6 +89,7 @@ private fun UniRevLabApp() {
     var coordinatorSyncStatus by remember { mutableStateOf<String?>(null) }
     var patchFinding by remember { mutableStateOf<Finding?>(null) }
     var lastArtifactUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    var lastInstalledApp by remember { mutableStateOf<InstalledAppDescriptor?>(null) }
     var preparedReportExport by remember { mutableStateOf<PreparedReportFile?>(null) }
     var reportExportStatus by remember { mutableStateOf<String?>(null) }
     val coroutineScope = rememberCoroutineScope()
@@ -152,6 +153,7 @@ private fun UniRevLabApp() {
                 // Some providers grant only temporary access; inspection still works in this callback lifecycle.
             }
             lastArtifactUri = uri
+            lastInstalledApp = null
             requestAnalysisNotificationPermission()
             AnalysisManager.startFile(uri, requireNotNull(scope))
         }
@@ -403,6 +405,7 @@ private fun UniRevLabApp() {
                     report = currentReport,
                     initialFinding = patchFinding,
                     initialSourceUri = lastArtifactUri,
+                    initialInstalledApp = lastInstalledApp,
                     onBack = { route = Route.DASHBOARD },
                     onAnalyzeBuilt = { file ->
                         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
@@ -423,6 +426,7 @@ private fun UniRevLabApp() {
             onSelect = { app ->
                 route = Route.DASHBOARD
                 lastArtifactUri = null
+                lastInstalledApp = app
                 requestAnalysisNotificationPermission()
                 AnalysisManager.startInstalled(app, requireNotNull(scope))
             },

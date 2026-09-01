@@ -27,6 +27,7 @@ import org.jf.dexlib2.Opcodes
 import org.jf.smali.Smali
 import org.jf.smali.SmaliOptions
 import org.unirevlab.security.model.Finding
+import org.unirevlab.security.model.InstalledAppDescriptor
 import org.unirevlab.security.model.StaticAnalysisReport
 
 /**
@@ -61,6 +62,7 @@ object PatchLabEngine {
         val dexEntries: List<String>,
         val nativeEntries: List<String>,
         val archiveEntries: List<String>,
+        val sourcePrefix: String? = null,
         val modifiedDexEntries: MutableSet<String> = linkedSetOf(),
         val replacements: MutableMap<String, File> = linkedMapOf(),
         val smaliBaselines: MutableMap<String, String> = linkedMapOf(),
@@ -145,25 +147,82 @@ object PatchLabEngine {
         )
     }
 
-    fun prepare(context: Context, sourceUri: Uri, report: StaticAnalysisReport): Workspace {
-        val sha = report.artifact.sha256.ifBlank { sha256Uri(context, sourceUri) }
-        val root = File(context.cacheDir, "patchlab/${sha.take(24)}").apply {
-            deleteRecursively()
-            mkdirs()
-        }
-        val original = File(root, "original.apk")
+    fun prepare(
+        context: Context,
+        sourceUri: Uri,
+        report: StaticAnalysisReport,
+        preferredReportEntry: String? = null,
+    ): Workspace {
+        val artifactSha = report.artifact.sha256.ifBlank { sha256Uri(context, sourceUri) }
+        val root = freshRoot(context, artifactSha, preferredReportEntry)
+        val container = File(root, "selected-source.bin")
         context.contentResolver.openInputStream(sourceUri).use { input ->
-            requireNotNull(input) { "Не удалось открыть исходный APK" }
-            FileOutputStream(original).use { output -> input.copyTo(output, COPY_BUFFER) }
+            requireNotNull(input) { "Не удалось открыть исходный APK/APK-set" }
+            FileOutputStream(container).use { output -> input.copyTo(output, COPY_BUFFER) }
         }
-        require(original.length() > 0L) { "Исходный APK пуст" }
-        val actualSha = sha256(original)
+        require(container.length() > 0L) { "Исходный файл пуст" }
+        val actualOuterSha = sha256(container)
         if (report.artifact.sha256.isNotBlank()) {
-            require(actualSha.equals(report.artifact.sha256, ignoreCase = true)) {
-                "Выбранный APK не совпадает с проанализированным артефактом: SHA-256 отличается"
+            require(actualOuterSha.equals(report.artifact.sha256, ignoreCase = true)) {
+                "Выбранный файл не совпадает с проанализированным артефактом: SHA-256 отличается"
             }
         }
+        val nested = NestedApkSet.extract(container, File(root, "apkset"))
+        return if (nested != null) {
+            val selected = nested.selectForReportEntry(preferredReportEntry)
+            prepareCopiedApk(root, selected.file, report, selected.prefix, artifactSha)
+        } else {
+            prepareCopiedApk(root, container, report, null, actualOuterSha, sourceAlreadyInsideRoot = true)
+        }
+    }
 
+    fun prepareInstalled(
+        context: Context,
+        app: InstalledAppDescriptor,
+        report: StaticAnalysisReport,
+        preferredReportEntry: String? = null,
+    ): Workspace {
+        require(report.artifact.sourceKind == "INSTALLED_APP") { "Отчёт не относится к установленному приложению" }
+        require(report.artifact.sourcePackageName == null || report.artifact.sourcePackageName == app.packageName) {
+            "Выбранный установленный пакет не совпадает с отчётом"
+        }
+        val prefix = preferredReportEntry?.substringBefore("!/", missingDelimiterValue = "")
+        val selected: Pair<File, String> = if (prefix != null && prefix.startsWith("split:")) {
+            val leaf = prefix.removePrefix("split:")
+            val file = app.splitApkPaths.map(::File).firstOrNull { it.name == leaf }
+                ?: error("Split APK из отчёта больше не установлен: $leaf")
+            file to "split:${file.name}"
+        } else {
+            File(app.baseApkPath) to "base.apk"
+        }
+        require(selected.first.isFile && selected.first.canRead()) { "APK установленного приложения недоступен" }
+        val artifactSha = report.artifact.sha256.ifBlank { sha256(selected.first) }
+        val root = freshRoot(context, artifactSha, selected.second)
+        return prepareCopiedApk(root, selected.first, report, selected.second, artifactSha)
+    }
+
+    private fun freshRoot(context: Context, artifactSha: String, discriminator: String?): File {
+        val suffix = discriminator?.let { "-${sha256Text(it).take(8)}" }.orEmpty()
+        return File(context.cacheDir, "patchlab/${artifactSha.take(24)}$suffix").apply {
+            deleteRecursively()
+            require(mkdirs() || isDirectory) { "Не удалось создать Patch Lab workspace" }
+        }
+    }
+
+    private fun prepareCopiedApk(
+        root: File,
+        source: File,
+        report: StaticAnalysisReport,
+        sourcePrefix: String?,
+        artifactSha: String,
+        sourceAlreadyInsideRoot: Boolean = false,
+    ): Workspace {
+        val original = if (sourceAlreadyInsideRoot) source else File(root, "original.apk").also { destination ->
+            source.inputStream().buffered(COPY_BUFFER).use { input ->
+                destination.outputStream().buffered(COPY_BUFFER).use { output -> input.copyTo(output, COPY_BUFFER) }
+            }
+        }
+        require(original.length() > 0L) { "Исходный APK пуст" }
         val entries = mutableListOf<String>()
         val dex = mutableListOf<String>()
         val native = mutableListOf<String>()
@@ -172,21 +231,23 @@ object PatchLabEngine {
             while (sequence.hasMoreElements()) {
                 val entry = sequence.nextElement()
                 if (entry.isDirectory) continue
-                entries += entry.name
-                if (DEX_ENTRY.matches(entry.name.substringAfterLast('/'))) dex += entry.name
-                if (entry.name.lowercase(Locale.ROOT).endsWith(".so")) native += entry.name
+                val display = displayEntry(sourcePrefix, entry.name)
+                entries += display
+                if (DEX_ENTRY.matches(entry.name.substringAfterLast('/'))) dex += display
+                if (entry.name.lowercase(Locale.ROOT).endsWith(".so")) native += display
             }
         }
-        require(dex.isNotEmpty()) { "В APK не найдено DEX-файлов" }
+        require(dex.isNotEmpty() || native.isNotEmpty() || entries.isNotEmpty()) { "APK не содержит анализируемых entry" }
         return Workspace(
             root = root,
             originalApk = original,
-            artifactSha256 = actualSha,
+            artifactSha256 = artifactSha,
             apiLevel = (report.manifest?.targetSdk ?: 35).coerceIn(15, 36),
             minSdk = (report.manifest?.minSdk ?: 26).coerceAtLeast(1),
             dexEntries = dex.sortedWith(compareBy(::dexOrdinal)),
             nativeEntries = native.sorted(),
             archiveEntries = entries.sorted(),
+            sourcePrefix = sourcePrefix,
         )
     }
 
@@ -201,7 +262,8 @@ object PatchLabEngine {
                 parentFile?.mkdirs()
             }
             ZipFile(workspace.originalApk).use { zip ->
-                val entry = requireNotNull(zip.getEntry(dexEntry)) { "DEX отсутствует в исходном APK: $dexEntry" }
+                val rawDexEntry = rawEntryName(workspace, dexEntry)
+                val entry = requireNotNull(zip.getEntry(rawDexEntry)) { "DEX отсутствует в исходном APK: $dexEntry" }
                 zip.getInputStream(entry).use { input ->
                     FileOutputStream(dexFile).use { output -> input.copyTo(output, COPY_BUFFER) }
                 }
@@ -318,7 +380,8 @@ object PatchLabEngine {
     fun loadArchiveText(workspace: Workspace, entryName: String): String {
         require(entryName in workspace.archiveEntries) { "Файл не найден в APK: $entryName" }
         val bytes = workspace.replacements[entryName]?.readBytes() ?: ZipFile(workspace.originalApk).use { zip ->
-            val entry = requireNotNull(zip.getEntry(entryName)) { "Файл не найден в APK: $entryName" }
+            val rawName = rawEntryName(workspace, entryName)
+            val entry = requireNotNull(zip.getEntry(rawName)) { "Файл не найден в APK: $entryName" }
             require(entry.size < 0L || entry.size <= MAX_EDITABLE_TEXT_BYTES) { "Файл слишком большой для текстового редактора" }
             zip.getInputStream(entry).use { input ->
                 val out = java.io.ByteArrayOutputStream()
@@ -380,7 +443,7 @@ object PatchLabEngine {
         signTestApk(unsigned, signed, workspace.minSdk)
         require(signed.length() > 0L) { "Подписанный APK пуст" }
         val changedEntries = (workspace.modifiedDexEntries + workspace.replacements.keys).sorted()
-        val apkDiff = ApkMutationDiffEngine.compare(workspace.originalApk, signed, changedEntries)
+        val apkDiff = ApkMutationDiffEngine.compare(workspace.originalApk, signed, changedEntries.map { rawEntryName(workspace, it) })
         require(apkDiff.unexpectedContentChanges.isEmpty()) {
             "Пересборка изменила неожиданные entry: ${apkDiff.unexpectedContentChanges.take(8).joinToString()}"
         }
@@ -412,7 +475,8 @@ object PatchLabEngine {
                     val originalEntry = entries.nextElement()
                     val name = originalEntry.name
                     if (isSignatureEntry(name)) continue
-                    val replacement = rebuiltDex[name] ?: workspace.replacements[name]
+                    val displayName = displayEntry(workspace.sourcePrefix, name)
+                    val replacement = rebuiltDex[displayName] ?: workspace.replacements[displayName]
                     val isStoredNative = name.lowercase(Locale.ROOT).endsWith(".so") && originalEntry.method == ZipEntry.STORED
                     if (replacement != null) {
                         val entry = if (isStoredNative) {
@@ -538,6 +602,16 @@ object PatchLabEngine {
         .toList()
 
     private fun safeEntryName(value: String): String = value.replace('/', '_').replace('\\', '_')
+
+    private fun displayEntry(prefix: String?, rawName: String): String =
+        if (prefix.isNullOrBlank()) rawName else "$prefix!/$rawName"
+
+    private fun rawEntryName(workspace: Workspace, displayName: String): String {
+        val prefix = workspace.sourcePrefix ?: return displayName
+        val marker = "$prefix!/"
+        require(displayName.startsWith(marker)) { "Entry относится к другому APK в наборе: $displayName" }
+        return displayName.removePrefix(marker)
+    }
 
     private fun dexOrdinal(value: String): Int {
         val name = value.substringAfterLast('/')

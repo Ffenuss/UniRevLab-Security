@@ -164,14 +164,60 @@ class LocalArtifactInspector(
                     sourceKind = "FILE", sourcePackageName = null, sourceInstallerPackageName = null, splitApkCount = 0,
                 )
             }
-            val report = inspectPreparedFile(
-                apk = temp,
-                scope = scope,
-                displayName = displayName,
-                sizeBytes = sizeBytes,
-                sha256 = digest,
-                progress = progress,
-            )
+            val nestedRoot = File(cacheDir, "nested-apkset/${digest.take(24)}")
+            val nested = NestedApkSet.extract(temp, nestedRoot)
+            val report = if (nested != null) {
+                try {
+                    val baseInfo = context.packageManager.getPackageArchiveInfo(nested.base.file.absolutePath, 0)
+                        ?: error("Не удалось прочитать base APK внутри контейнера")
+                    val packageName = baseInfo.packageName ?: error("В base APK отсутствует packageName")
+                    val descriptor = InstalledAppDescriptor(
+                        label = displayName,
+                        packageName = packageName,
+                        versionName = baseInfo.versionName,
+                        versionCode = baseInfo.longVersionCodeCompat(),
+                        isSystem = false,
+                        isEnabled = true,
+                        baseApkPath = nested.base.file.absolutePath,
+                        splitApkPaths = nested.splits.map { it.file.absolutePath },
+                        installerPackageName = null,
+                    )
+                    val nestedReport = inspectInstalledApp(descriptor, scope) { nestedProgress ->
+                        val scaled = 10 + ((nestedProgress.percent.coerceIn(0, 100) * 88) / 100)
+                        val fraction = scaled / 100.0
+                        onProgress?.invoke(
+                            nestedProgress.copy(
+                                percent = scaled,
+                                fractionComplete = fraction,
+                                startedAtEpochMs = progress.startedAtEpochMs,
+                                detail = "APK-set: ${nestedProgress.detail}",
+                            )
+                        )
+                    }
+                    nestedReport.copy(
+                        artifact = nestedReport.artifact.copy(
+                            displayName = displayName,
+                            sizeBytes = sizeBytes,
+                            sha256 = digest,
+                            sourceKind = "APK_SET_FILE",
+                            sourcePackageName = packageName,
+                            sourceInstallerPackageName = null,
+                            splitApkCount = nested.splits.size,
+                        )
+                    )
+                } finally {
+                    nested.cleanup()
+                }
+            } else {
+                inspectPreparedFile(
+                    apk = temp,
+                    scope = scope,
+                    displayName = displayName,
+                    sizeBytes = sizeBytes,
+                    sha256 = digest,
+                    progress = progress,
+                )
+            }
             progress.emit(AnalysisStage.SAVING, 99, "Сохраняем нормализованный результат в локальный SHA-256 кэш…")
             resultCache.store(report)
             progress.emit(AnalysisStage.COMPLETE, 100, "Анализ завершён")
@@ -1679,7 +1725,7 @@ class LocalArtifactInspector(
     )
 
     companion object {
-        const val ENGINE_VERSION = "0.22.5-dev-native-speed"
+        const val ENGINE_VERSION = "0.25.8-dev-apkset-sources"
 
         private fun checkCancelled() {
             if (Thread.currentThread().isInterrupted) throw InterruptedIOException("Analysis cancelled")
