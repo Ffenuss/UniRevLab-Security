@@ -1,4 +1,4 @@
-name: Build UniRevLab v0.25.6 Runtime State Lab APK
+name: Build UniRevLab v0.25.7 Full Picker APK
 
 on:
   push:
@@ -25,21 +25,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Apply v0.25.6 Runtime State Lab wiring
+      - name: Apply v0.25.7 full picker wiring
         shell: bash
         run: |
           set -euo pipefail
           grep -q 'versionName = "0.25.6-dev-runtime-state-lab"' app/build.gradle.kts
-          python tools/apply_v0256_runtime_state_ui.py
-          test -f app/src/main/java/org/unirevlab/security/analysis/RuntimeStateLabEngine.kt
-          test -f app/src/main/java/org/unirevlab/security/ui/RuntimeStateLabPanel.kt
-          test -f app/src/main/java/org/unirevlab/security/ui/TamperAssessmentPanelV2.kt
-          grep -q 'TamperAssessmentPanelV2(' app/src/main/java/org/unirevlab/security/ui/PatchLabScreen.kt
+          python tools/apply_v0257_full_pickers_safe.py
+          grep -q 'versionName = "0.25.7-dev-full-pickers"' app/build.gradle.kts
+          test -f app/src/main/java/org/unirevlab/security/ui/PatchLabPickerDialogs.kt
+          grep -q 'LazyColumn' app/src/main/java/org/unirevlab/security/ui/PatchLabPickerDialogs.kt
+          grep -q 'title = "DEX-файлы"' app/src/main/java/org/unirevlab/security/ui/PatchLabScreen.kt
+          grep -q 'title = "Классы DEX"' app/src/main/java/org/unirevlab/security/ui/PatchLabScreen.kt
+          grep -q 'PatchMethodPickerDialog(' app/src/main/java/org/unirevlab/security/ui/PatchLabScreen.kt
+          grep -q 'title = "Файлы внутри APK"' app/src/main/java/org/unirevlab/security/ui/PatchLabScreen.kt
+          ! grep -q 'classes.take(24)' app/src/main/java/org/unirevlab/security/ui/PatchLabScreen.kt
+          ! grep -q 'classes.take(25)' app/src/main/java/org/unirevlab/security/ui/PatchLabScreen.kt
+          ! grep -q '.take(80)' app/src/main/java/org/unirevlab/security/ui/PatchLabScreen.kt
+          ! grep -q '.take(160)' app/src/main/java/org/unirevlab/security/ui/PatchLabScreen.kt
+          ! grep -q 'nativeEntries.take(20)' app/src/main/java/org/unirevlab/security/ui/PatchLabScreen.kt
           grep -q 'RuntimeStateLabPanel(' app/src/main/java/org/unirevlab/security/ui/PatchLabScreen.kt
-          grep -q 'LazyColumn' app/src/main/java/org/unirevlab/security/ui/TamperAssessmentPanelV2.kt
-          ! grep -q 'results.take(40)' app/src/main/java/org/unirevlab/security/ui/TamperAssessmentPanelV2.kt
-          grep -q 'query == "\*"' app/src/main/java/org/unirevlab/security/analysis/RuntimeStateLabEngine.kt
-          rm -f tools/apply_v0256_runtime_state_ui.py tools/apply_v0255_automod_search_ux.py tools/apply_v0254_remove_manual_sha_gate.py tools/apply_v0253_classifier_automod.py tools/apply_v0252_secret_proof.py tools/fix_v0252_secret_proof_quality.py
+          grep -q 'TamperAssessmentPanelV2(' app/src/main/java/org/unirevlab/security/ui/PatchLabScreen.kt
           git diff --check
 
       - uses: actions/setup-java@v4
@@ -105,10 +110,10 @@ jobs:
           APK="$(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | head -n 1)"
           test -n "${APK}"
           unzip -t "${APK}" >/dev/null
-          cp "${APK}" UniRevLab-Security-v0.25.6-runtime-state-lab-debug.apk
-          sha256sum UniRevLab-Security-v0.25.6-runtime-state-lab-debug.apk | tee UniRevLab-Security-v0.25.6-runtime-state-lab-debug.apk.sha256
+          cp "${APK}" UniRevLab-Security-v0.25.7-full-pickers-debug.apk
+          sha256sum UniRevLab-Security-v0.25.7-full-pickers-debug.apk | tee UniRevLab-Security-v0.25.7-full-pickers-debug.apk.sha256
 
-      - name: Commit verified v0.25.6 source patch
+      - name: Commit verified v0.25.7 source patch
         if: github.ref_name == 'fix-analysis-progress-v0221'
         shell: bash
         run: |
@@ -117,15 +122,15 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add app/src app/build.gradle.kts
-            git commit -m "Integrate Runtime State Lab and compact result UX [skip ci]"
+            git commit -m "Integrate full Patch Lab pickers without list caps [skip ci]"
             git push origin HEAD:fix-analysis-progress-v0221
           fi
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: UniRevLab-Security-v0.25.6-runtime-state-lab-debug
+          name: UniRevLab-Security-v0.25.7-full-pickers-debug
           path: |
-            UniRevLab-Security-v0.25.6-runtime-state-lab-debug.apk
-            UniRevLab-Security-v0.25.6-runtime-state-lab-debug.apk.sha256
+            UniRevLab-Security-v0.25.7-full-pickers-debug.apk
+            UniRevLab-Security-v0.25.7-full-pickers-debug.apk.sha256
           if-no-files-found: error
