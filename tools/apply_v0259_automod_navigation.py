@@ -130,7 +130,7 @@ replace_once(path,
 ''', 'automod diagnostics ui')
 
 path = 'app/build.gradle.kts'
-replace_once(path, 'versionCode = 35', 'versionCode = 36', 'version code')
+replace_once(path, 'versionCode = 37', 'versionCode = 38', 'version code')
 replace_once(path, 'versionName = "0.25.8-dev-apkset-sources"', 'versionName = "0.25.9-dev-automod-navigation"', 'version name')
 
 path = 'app/src/test/java/org/unirevlab/security/analysis/AutoModEngineTest.kt'
