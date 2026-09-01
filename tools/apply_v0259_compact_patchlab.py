@@ -10,8 +10,6 @@ def replace_once(path, old, new, label):
     p.write_text(text.replace(old, new, 1), encoding='utf-8')
 
 path = 'app/src/main/java/org/unirevlab/security/ui/PatchLabScreen.kt'
-
-# mutableStateOf is already part of PatchLabScreen state; add only the section state.
 replace_once(path,
 '''    val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -21,7 +19,6 @@ replace_once(path,
     var openToolSection by remember { mutableStateOf<String?>("assessment") }
 ''', 'section state')
 
-# Insert reusable compact header directly before PatchLabScreen.
 p = ROOT / path
 text = p.read_text(encoding='utf-8')
 marker = '@Composable\nfun PatchLabScreen('
@@ -47,18 +44,13 @@ private fun PatchLabSectionHeader(
 text = text[:idx] + helper + text[idx:]
 p.write_text(text, encoding='utf-8')
 
-# Wrap the three largest always-expanded tools. Balanced-call parsing avoids depending on argument layout.
-wraps = [
-    ('TamperAssessmentPanel(', 'assessment', 'Tamper Assessment', 'Риски, поверхности, секреты и ручной поиск'),
-    ('AutoModPanel(', 'automod', 'AutoMod Demo', 'Автоматические демонстрационные изменения'),
-    ('RuntimeStateLabPanel(', 'runtime', 'Runtime State Lab', 'Локальные сохранения и state-файлы'),
-]
-for call, key, title, subtitle in wraps:
+def wrap_first(calls, key, title, subtitle):
     p = ROOT / path
     src = p.read_text(encoding='utf-8')
+    call = next((candidate for candidate in calls if candidate in src), None)
+    if call is None:
+        raise SystemExit(f'none of panel calls found: {calls}')
     pos = src.find(call)
-    if pos < 0:
-        raise SystemExit(f'{call} not found')
     line_start = src.rfind('\n', 0, pos) + 1
     indent = src[line_start:pos]
     depth = 0
@@ -79,8 +71,7 @@ for call, key, title, subtitle in wraps:
             if ch == '"':
                 in_string = True
             elif ch == '(':
-                depth += 1
-                seen = True
+                depth += 1; seen = True
             elif ch == ')':
                 depth -= 1
                 if seen and depth == 0:
@@ -99,7 +90,10 @@ for call, key, title, subtitle in wraps:
 {indent}if (openToolSection == "{key}") {{
 {indent}    {original}
 {indent}}}'''
-    src = src[:pos] + replacement + src[i:]
-    p.write_text(src, encoding='utf-8')
+    p.write_text(src[:pos] + replacement + src[i:], encoding='utf-8')
+
+wrap_first(['TamperAssessmentPanelV2(', 'TamperAssessmentPanel('], 'assessment', 'Tamper Assessment', 'Риски, поверхности, секреты и ручной поиск')
+wrap_first(['AutoModPanel('], 'automod', 'AutoMod Demo', 'Автоматические демонстрационные изменения')
+wrap_first(['RuntimeStateLabPanel('], 'runtime', 'Runtime State Lab', 'Локальные сохранения и state-файлы')
 
 print('v0.25.9 compact Patch Lab sections applied')
