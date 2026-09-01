@@ -30,6 +30,7 @@ jobs:
         run: |
           set -euo pipefail
           grep -q 'versionName = "0.25.7-dev-full-pickers"' app/build.gradle.kts
+          python tools/fix_v0258_patch_driver.py
           python tools/apply_v0258_apkset_sources.py
           grep -q 'versionName = "0.25.8-dev-apkset-sources"' app/build.gradle.kts
           grep -q 'object NestedApkSet' app/src/main/java/org/unirevlab/security/analysis/NestedApkSet.kt
