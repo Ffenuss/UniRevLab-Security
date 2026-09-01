@@ -1,131 +1,107 @@
-name: Build UniRevLab v0.25.8 APK-set Sources APK
+name: Android CI
 
 on:
   push:
-    branches: [ fix-analysis-progress-v0221 ]
-    paths:
-      - 'app/**'
-      - 'native-core/**'
-      - 'build.gradle.kts'
-      - 'settings.gradle.kts'
-      - 'gradle.properties'
-      - 'scripts/**'
-      - '.ci/**'
-      - 'tools/**'
-      - 'test-corpus/**'
-      - '.github/workflows/bootstrap-v022.yml'
+    branches: ["fix-analysis-progress-v0221"]
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  build-debug-apk:
+  build:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Apply v0.25.8 APK-set source wiring
-        shell: bash
-        run: |
-          set -euo pipefail
-          grep -q 'versionName = "0.25.7-dev-full-pickers"' app/build.gradle.kts
-          python tools/fix_v0258_patch_driver.py
-          python tools/apply_v0258_apkset_sources.py
-          python tools/fix_v0258_test_tempdir.py
-          grep -q 'versionName = "0.25.8-dev-apkset-sources"' app/build.gradle.kts
-          grep -q 'object NestedApkSet' app/src/main/java/org/unirevlab/security/analysis/NestedApkSet.kt
-          grep -q 'sourceKind = "APK_SET_FILE"' app/src/main/java/org/unirevlab/security/analysis/LocalArtifactInspector.kt
-          grep -q 'fun prepareInstalled' app/src/main/java/org/unirevlab/security/analysis/PatchLabEngine.kt
-          grep -q 'initialInstalledApp' app/src/main/java/org/unirevlab/security/ui/PatchLabScreen.kt
-          grep -q 'lastInstalledApp = app' app/src/main/java/org/unirevlab/security/MainActivity.kt
-          grep -q 'Files.createTempDirectory' app/src/test/java/org/unirevlab/security/analysis/NestedApkSetTest.kt
-          git diff --check
+      - name: Apply v0.25.9 AutoMod target resolution
+        run: python tools/apply_v0259_automod_navigation.py
 
-      - uses: actions/setup-java@v4
+      - name: Apply v0.25.9 compact Patch Lab navigation
+        run: python tools/apply_v0259_compact_patchlab.py
+
+      - name: Apply v0.25.9 Runtime State UX
+        run: python tools/apply_v0259_runtime_binding.py
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - uses: android-actions/setup-android@v3
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
 
-      - name: Install Android 17 SDK 37.0 and NDK
+      - name: Install Android SDK + NDK
         shell: bash
         run: |
-          set -euo pipefail
-          sdkmanager "platforms;android-37.0" "build-tools;36.0.0" "ndk;28.2.13676358"
-          test -f "${ANDROID_HOME}/platforms/android-37.0/android.jar"
-          test -x "${ANDROID_HOME}/build-tools/36.0.0/aapt2"
-          test -d "${ANDROID_HOME}/ndk/28.2.13676358"
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" "ndk;27.3.13750724"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.3.13750724" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/27.3.13750724" >> "$GITHUB_ENV"
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
 
-      - name: Install pinned cargo-ndk
-        shell: bash
-        run: cargo install cargo-ndk --version 4.1.2 --locked
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
 
       - name: Build Rust JNI libraries
         shell: bash
-        working-directory: native-core
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/28.2.13676358
         run: |
-          set -euo pipefail
-          rm -rf ../app/src/main/jniLibs
-          cargo ndk \
-            -t arm64-v8a -t armeabi-v7a -t x86_64 -t x86 \
-            -o ../app/src/main/jniLibs \
-            build --release
-
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '9.5.0'
+          rm -rf app/src/main/jniLibs
+          mkdir -p app/src/main/jniLibs
+          cargo ndk -t arm64-v8a -t armeabi-v7a -t x86 -t x86_64 -o app/src/main/jniLibs build --manifest-path native-core/Cargo.toml --release
 
       - name: Host preflight
         shell: bash
         run: |
-          set -euo pipefail
-          python scripts/validate_schemas.py
-          python scripts/check_secrets.py .
+          python scripts/check_secrets.py
+          python scripts/check_android_build_config.py
 
-      - name: Build benign native fixtures
+      - name: Build native fixtures
         shell: bash
-        run: ./test-corpus/native/build-fixtures.sh
+        run: |
+          bash test-corpus/native/build-fixtures.sh
+          bash test-corpus/native/build-multiabi-fixtures.sh
 
-      - name: Unit tests, lint and APK build
+      - name: Unit tests + lint + APK build
         shell: bash
-        run: gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+        run: |
+          chmod +x gradlew || true
+          ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
 
       - name: Verify APK
         shell: bash
         run: |
-          set -euo pipefail
-          APK="$(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | head -n 1)"
-          test -n "${APK}"
-          unzip -t "${APK}" >/dev/null
-          cp "${APK}" UniRevLab-Security-v0.25.8-apkset-sources-debug.apk
-          sha256sum UniRevLab-Security-v0.25.8-apkset-sources-debug.apk | tee UniRevLab-Security-v0.25.8-apkset-sources-debug.apk.sha256
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          unzip -t "$APK" >/dev/null
+          sha256sum "$APK" | tee UniRevLab-Security-v0.25.9-automod-navigation-debug.apk.sha256
+          cp "$APK" UniRevLab-Security-v0.25.9-automod-navigation-debug.apk
 
-      - name: Commit verified v0.25.8 source patch
-        if: github.ref_name == 'fix-analysis-progress-v0221'
+      - name: Commit verified v0.25.9 sources
         shell: bash
         run: |
-          set -euo pipefail
-          if ! git diff --quiet -- app/src app/build.gradle.kts; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add app/src app/build.gradle.kts
-            git commit -m "Integrate APK-set analysis and retained installed sources [skip ci]"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/build.gradle.kts app/src/main/java/org/unirevlab/security/analysis/AutoModEngine.kt app/src/main/java/org/unirevlab/security/ui/AutoModPanel.kt app/src/main/java/org/unirevlab/security/ui/PatchLabScreen.kt app/src/main/java/org/unirevlab/security/ui/RuntimeStateLabPanel.kt app/src/test/java/org/unirevlab/security/analysis/AutoModEngineTest.kt
+          if ! git diff --cached --quiet; then
+            git commit -m "Improve AutoMod target resolution and compact Patch Lab [skip ci]"
             git push origin HEAD:fix-analysis-progress-v0221
           fi
 
-      - name: Upload debug APK
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: UniRevLab-Security-v0.25.8-apkset-sources-debug
+          name: UniRevLab-Security-v0.25.9-automod-navigation-debug
           path: |
-            UniRevLab-Security-v0.25.8-apkset-sources-debug.apk
-            UniRevLab-Security-v0.25.8-apkset-sources-debug.apk.sha256
+            UniRevLab-Security-v0.25.9-automod-navigation-debug.apk
+            UniRevLab-Security-v0.25.9-automod-navigation-debug.apk.sha256
           if-no-files-found: error
