@@ -272,14 +272,17 @@ object RuntimeStateLabEngine {
         val escapedKey = Regex.escape(escapeXml(locator.name))
         var updated: String? = null
         val attrRegex = Regex("""(<\s*(?:boolean|int|long|float)\b[^>]*?\bname\s*=\s*\"$escapedKey\"[^>]*?\bvalue\s*=\s*\")([^\"]*)(\"[^>]*/\s*>)""", RegexOption.IGNORE_CASE)
-        if (attrRegex.containsMatchIn(text)) {
+        val attrMatch = attrRegex.find(text)
+        if (attrMatch != null) {
             val coerced = coerceText(raw, hit.valueType)
-            updated = attrRegex.replaceFirst(text) { m -> m.groupValues[1] + escapeXml(coerced) + m.groupValues[3] }
+            val replacement = attrMatch.groupValues[1] + escapeXml(coerced) + attrMatch.groupValues[3]
+            updated = text.replaceRange(attrMatch.range, replacement)
         }
         if (updated == null) {
             val stringRegex = Regex("""(<\s*string\b[^>]*?\bname\s*=\s*\"$escapedKey\"[^>]*>)(.*?)(<\s*/\s*string\s*>)""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
-            require(stringRegex.containsMatchIn(text)) { "Ключ ${locator.name} не найден при сохранении" }
-            updated = stringRegex.replaceFirst(text) { m -> m.groupValues[1] + escapeXml(raw) + m.groupValues[3] }
+            val stringMatch = requireNotNull(stringRegex.find(text)) { "Ключ ${locator.name} не найден при сохранении" }
+            val replacement = stringMatch.groupValues[1] + escapeXml(raw) + stringMatch.groupValues[3]
+            updated = text.replaceRange(stringMatch.range, replacement)
         }
         writeText(context, uri, requireNotNull(updated))
         return hit.copy(value = coerceText(raw, hit.valueType))

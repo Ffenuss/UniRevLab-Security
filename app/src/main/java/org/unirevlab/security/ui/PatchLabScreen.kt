@@ -328,7 +328,7 @@ fun PatchLabScreen(
                 HorizontalDivider()
                 Text("2. DEX / класс / метод", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Text("SHA-256 исходника: ${ws.artifactSha256}", style = MaterialTheme.typography.bodySmall)
-                TamperAssessmentPanel(
+                TamperAssessmentPanelV2(
                     report = report,
                     workspace = ws,
                     busy = busy,
@@ -342,6 +342,11 @@ fun PatchLabScreen(
                     workspace = ws,
                     busy = busy,
                     onAnalyzeBuilt = onAnalyzeBuilt,
+                    onStatus = { status = it },
+                    onError = { error = it },
+                )
+                RuntimeStateLabPanel(
+                    busy = busy,
                     onStatus = { status = it },
                     onError = { error = it },
                 )
