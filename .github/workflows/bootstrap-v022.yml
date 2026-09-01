@@ -18,6 +18,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: v0259-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-debug-apk:
     runs-on: ubuntu-latest
@@ -27,6 +31,16 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Record CI run id
+        if: github.ref_name == 'fix-analysis-progress-v0221'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "Start v0.25.9 CI run ${{ github.run_id }} [skip ci]"
+          git push origin HEAD:fix-analysis-progress-v0221
 
       - name: Apply v0.25.9 AutoMod target resolution
         run: python tools/apply_v0259_automod_navigation.py
