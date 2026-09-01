@@ -32,12 +32,14 @@ jobs:
           grep -q 'versionName = "0.25.7-dev-full-pickers"' app/build.gradle.kts
           python tools/fix_v0258_patch_driver.py
           python tools/apply_v0258_apkset_sources.py
+          python tools/fix_v0258_test_tempdir.py
           grep -q 'versionName = "0.25.8-dev-apkset-sources"' app/build.gradle.kts
           grep -q 'object NestedApkSet' app/src/main/java/org/unirevlab/security/analysis/NestedApkSet.kt
           grep -q 'sourceKind = "APK_SET_FILE"' app/src/main/java/org/unirevlab/security/analysis/LocalArtifactInspector.kt
           grep -q 'fun prepareInstalled' app/src/main/java/org/unirevlab/security/analysis/PatchLabEngine.kt
           grep -q 'initialInstalledApp' app/src/main/java/org/unirevlab/security/ui/PatchLabScreen.kt
           grep -q 'lastInstalledApp = app' app/src/main/java/org/unirevlab/security/MainActivity.kt
+          grep -q 'Files.createTempDirectory' app/src/test/java/org/unirevlab/security/analysis/NestedApkSetTest.kt
           git diff --check
 
       - uses: actions/setup-java@v4
