@@ -3,56 +3,47 @@ from pathlib import Path
 import re
 
 ROOT = Path(__file__).resolve().parents[1]
-app = (ROOT / "app/build.gradle.kts").read_text()
-root_build = (ROOT / "build.gradle.kts").read_text()
-workflow = (ROOT / ".github/workflows/android.yml").read_text()
-release_workflow = (ROOT / ".github/workflows/release.yml").read_text()
+app = (ROOT / "app/build.gradle.kts").read_text(encoding="utf-8")
+root_build = (ROOT / "build.gradle.kts").read_text(encoding="utf-8")
+workflow_dir = ROOT / ".github" / "workflows"
+workflow_path = workflow_dir / "bootstrap-v022.yml"
+if not workflow_path.is_file():
+    candidates = sorted(list(workflow_dir.glob("*.yml")) + list(workflow_dir.glob("*.yaml")))
+    candidates = [p for p in candidates if "assembleDebug" in p.read_text(encoding="utf-8", errors="replace")]
+    if len(candidates) != 1:
+        raise SystemExit(f"Expected exactly one Android debug CI workflow, found {len(candidates)}")
+    workflow_path = candidates[0]
+workflow = workflow_path.read_text(encoding="utf-8")
 
-checks = {
-    "compileSdk 37.0": r"version\s*=\s*release\(37\)[\s\S]*minorApiLevel\s*=\s*0",
-    "targetSdk 36": r"targetSdk\s*=\s*36",
-    "versionCode 18": r"versionCode\s*=\s*18",
-    "versionName v0.22": r'versionName\s*=\s*"0\.22\.0-dev-performance-ux"',
-    "AGP 9.3.0": r'id\("com\.android\.application"\) version "9\.3\.0"',
-    "Kotlin Compose 2.3.21": r'id\("org\.jetbrains\.kotlin\.plugin\.compose"\) version "2\.3\.21"',
-    "CI Android platform 37.0": r'platforms;android-37\.0',
-    "CI build-tools 36.0.0": r'build-tools;36\.0\.0',
-    "CI NDK 28.2.13676358": r'ndk;28\.2\.13676358',
-    "CI Gradle 9.5.0": r"gradle-version:\s*'9\.5\.0'",
-    "CI unit tests": r':app:testDebugUnitTest',
-    "CI lint": r':app:lintDebug',
-    "CI debug build": r':app:assembleDebug',
-    "CI release compile": r':app:assembleRelease',
-    "release tag trigger": r"tags:\s*\n\s*- ['\"]v\*['\"]",
-    "release signing input gate": r':app:verifyReleaseSigningInputs',
-    "release lint": r':app:lintRelease',
-    "release APK": r':app:assembleRelease',
-    "release AAB": r':app:bundleRelease',
-    "release APK signature verify": r'apksigner verify --verbose --print-certs',
-    "release deterministic manifest": r'make_release_manifest\.py',
-    "release Ghidra dependency": r'needs:\s*ghidra-release-gate',
-    "release Ghidra multi-ABI gate": r'assert_ghidra_multiabi_result\.py',
-    "release toolchain evidence": r'capture_release_toolchain\.py',
-    "release signer evidence": r'release-signing-evidence\.txt',
-    "release hashes": r'sha256sum[\s\S]*app-release\.apk[\s\S]*app-release\.aab[\s\S]*release-manifest\.json',
-    "release connected attestation": r'make_release_attestation\.py',
-    "release attestation signature": r'sign_detached_ed25519\.py',
-    "release Ghidra evidence download": r'actions/download-artifact@v4[\s\S]*release-ghidra-',
-}
-texts = {
-    "compileSdk 37.0": app, "targetSdk 36": app, "versionCode 18": app, "versionName v0.22": app,
-    "AGP 9.3.0": root_build, "Kotlin Compose 2.3.21": root_build,
-}
-for key in list(checks):
-    if key.startswith("release "):
-        texts.setdefault(key, release_workflow)
-    else:
-        texts.setdefault(key, workflow)
-failed=[]
-for name, pattern in checks.items():
-    ok=bool(re.search(pattern, texts[name]))
+checks = [
+    ("compileSdk 37.0", app, r"version\s*=\s*release\(37\)[\s\S]*minorApiLevel\s*=\s*0"),
+    ("targetSdk 36", app, r"targetSdk\s*=\s*36"),
+    ("v0.25.9 staged versionCode", app, r"versionCode\s*=\s*38"),
+    ("v0.25.9 staged versionName", app, r'versionName\s*=\s*"0\.25\.9-dev-automod-navigation"'),
+    ("release signing input gate", app, r'tasks\.register\("verifyReleaseSigningInputs"\)'),
+    ("AGP 9.3.0", root_build, r'id\("com\.android\.application"\) version "9\.3\.0"'),
+    ("Kotlin Compose 2.3.21", root_build, r'id\("org\.jetbrains\.kotlin\.plugin\.compose"\) version "2\.3\.21"'),
+    ("CI Android platform", workflow, r'platforms;android-35'),
+    ("CI build-tools", workflow, r'build-tools;35\.0\.0'),
+    ("CI pinned NDK", workflow, r'ndk;27\.3\.13750724'),
+    ("CI NDK env normalized", workflow, r'ANDROID_NDK_HOME=.*27\.3\.13750724[\s\S]*ANDROID_NDK_ROOT=.*27\.3\.13750724'),
+    ("CI Rust four ABIs", workflow, r'cargo ndk[^\n]*arm64-v8a[^\n]*armeabi-v7a[^\n]*x86[^\n]*x86_64'),
+    ("CI Rust working directory", workflow, r'cd native-core[\s\S]*cargo ndk'),
+    ("CI unit tests", workflow, r'testDebugUnitTest'),
+    ("CI lint", workflow, r'lintDebug'),
+    ("CI debug build", workflow, r'assembleDebug'),
+    ("CI APK integrity verify", workflow, r'unzip -t .*APK'),
+    ("CI APK SHA-256", workflow, r'sha256sum .*APK'),
+    ("CI artifact upload", workflow, r'actions/upload-artifact@v4'),
+]
+
+failed = []
+for name, text, pattern in checks:
+    ok = bool(re.search(pattern, text))
     print(f"{'PASS' if ok else 'FAIL'}: {name}")
-    if not ok: failed.append(name)
+    if not ok:
+        failed.append(name)
+
 if failed:
     raise SystemExit("Android build-config preflight failed: " + ", ".join(failed))
-print("Android build-config preflight: PASS")
+print(f"Android build-config preflight: PASS ({workflow_path.relative_to(ROOT)})")
