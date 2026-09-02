@@ -1,7 +1,5 @@
 package org.unirevlab.security.ui
 
-import android.content.ContentResolver
-import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -14,8 +12,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -27,26 +23,21 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import org.unirevlab.security.R
+import org.unirevlab.security.BuildConfig
 import org.unirevlab.security.analysis.AnalysisRunState
-import org.unirevlab.security.analysis.DeobfuscationEngine
-import org.unirevlab.security.analysis.MappingDeobfuscator
 import org.unirevlab.security.analysis.ProtectionPostureEngine
 import org.unirevlab.security.analysis.SerializationInspector
 import org.unirevlab.security.model.AssessmentScope
 import org.unirevlab.security.model.StaticAnalysisReport
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 enum class ProductTool(
@@ -54,6 +45,7 @@ enum class ProductTool(
     val subtitle: String,
     val badge: String,
 ) {
+    EXECUTIVE("Executive Summary", "Customer risk, coverage, attack surface and next actions", "EXEC"),
     PROTECTION("Protection Matrix", "Root, emulator, debug, hook, signature, integrity", "SHIELD"),
     DIAGNOSTICS("Diagnostics / Self-Test", "Analyzer consistency, indexes, graph and coverage checks", "TEST"),
     FINDINGS("Security Findings", "Prioritized findings, evidence, remediation and references", "FIND"),
@@ -114,7 +106,7 @@ fun ToolsHomeScreen(
                 ProtectionSnapshot(current)
             }
 
-            Text("Tools Dashboard", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text("Инструменты", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Text(
                 if (report == null) {
                     "Сначала выберите APK/пакет и запустите полный аудит. После этого каждый модуль откроется как отдельный инструмент по тем же собранным данным."
@@ -131,6 +123,7 @@ fun ToolsHomeScreen(
                         ToolCard(
                             tool = tool,
                             enabled = report != null,
+                            report = report,
                             modifier = Modifier.weight(1f),
                             onClick = {
                                 when (tool) {
@@ -172,6 +165,7 @@ private fun ProductHeader(scope: AssessmentScope) {
             Text("UniRevLab Security", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Text(scope.projectName, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
             Text(scope.organization, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("v${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -190,9 +184,9 @@ private fun FullAuditHero(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
     ) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Full Automatic APK Audit", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text("Полный автоматический аудит", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Text(
-                "Один прогон: archive + Manifest + permissions/IPC + DEX/xrefs + deobfuscation + protection matrix + serialization + Native/JNI + runtimes + IL2CPP + network security + signatures + SBOM/CVE + findings.",
+                "Один прогон строит единый security index: archive, Manifest/IPC, DEX/xrefs, deobfuscation, protection matrix, serialization, Native/JNI, runtimes, IL2CPP, network security, signatures, SBOM/CVE и findings. После анализа автоматически доступен Executive Summary.",
                 style = MaterialTheme.typography.bodyMedium,
             )
 
@@ -213,10 +207,10 @@ private fun FullAuditHero(
                 else -> {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Button(onClick = onAnalyzeFile, enabled = !isInspecting, modifier = Modifier.weight(1f)) {
-                            Text(if (report == null) "APK / Bundle" else "Другой файл")
+                            Text(if (report == null) "Файл / APK / Bundle" else "Другой файл")
                         }
                         OutlinedButton(onClick = onAnalyzeInstalled, enabled = !isInspecting, modifier = Modifier.weight(1f)) {
-                            Text("Установленное")
+                            Text("Установленное приложение")
                         }
                     }
                     if (report != null) {
@@ -235,10 +229,10 @@ private fun LatestAssessmentCard(report: StaticAnalysisReport) {
     val high = report.findings.count { it.severity.name == "HIGH" }
     Card(shape = RoundedCornerShape(20.dp)) {
         Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text("Последний объект", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text("Последний анализ", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(report.artifact.displayName, fontWeight = FontWeight.Bold)
             Text(packageName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("Findings: ${report.findings.size} · Critical: $critical · High: $high", style = MaterialTheme.typography.bodySmall)
+            Text("Риск: ${dashboardRiskLabel(report)} · находок ${report.findings.size} · Critical $critical · High $high", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
             Text("SHA-256 ${report.artifact.sha256.take(20)}…", style = MaterialTheme.typography.bodySmall)
         }
     }
@@ -246,27 +240,38 @@ private fun LatestAssessmentCard(report: StaticAnalysisReport) {
 
 @Composable
 private fun ProtectionSnapshot(report: StaticAnalysisReport) {
-    val posture = remember(report.artifact.sha256, report.findings.size) { ProtectionPostureEngine.scan(report) }
+    val posture by produceState<ProtectionPostureEngine.Posture?>(
+        initialValue = null,
+        key1 = report.artifact.sha256,
+        key2 = report.findings.size,
+    ) {
+        value = withContext(Dispatchers.Default) { ProtectionPostureEngine.scan(report) }
+    }
     Card(
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
     ) {
         Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Text("Security Posture Snapshot", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Text(
-                "Проверки приложения: есть ${posture.presentCount} · не обнаружено ${posture.notDetectedCount} · неизвестно ${posture.unknownCount}",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            posture.checks.take(6).forEach { check ->
-                Text("${statusLabel(check.status)}  ${check.title}", style = MaterialTheme.typography.bodySmall)
+            when (val current = posture) {
+                null -> Text("Сводим root/debug/hook/signature/integrity сигналы…", style = MaterialTheme.typography.bodySmall)
+                else -> {
+                    Text(
+                        "Проверки приложения: есть ${current.presentCount} · не обнаружено ${current.notDetectedCount} · неизвестно ${current.unknownCount}",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    current.checks.take(6).forEach { check ->
+                        Text("${statusLabel(check.status)}  ${check.title}", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Text("Полная матрица — в инструменте Protection Matrix.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
-            Text("Полная матрица — в инструменте Protection Matrix.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
 
 @Composable
-private fun ToolCard(tool: ProductTool, enabled: Boolean, modifier: Modifier, onClick: () -> Unit) {
+private fun ToolCard(tool: ProductTool, enabled: Boolean, report: StaticAnalysisReport?, modifier: Modifier, onClick: () -> Unit) {
     Card(
         modifier = modifier.clickable(enabled = enabled, onClick = onClick),
         shape = RoundedCornerShape(20.dp),
@@ -278,7 +283,11 @@ private fun ToolCard(tool: ProductTool, enabled: Boolean, modifier: Modifier, on
             Text(tool.badge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge)
             Text(tool.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Text(tool.subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(if (enabled) "Открыть →" else "Нужен полный аудит", style = MaterialTheme.typography.labelMedium)
+            Text(
+                if (enabled && report != null) productToolMetric(tool, report) else "Нужен полный аудит",
+                style = MaterialTheme.typography.labelMedium,
+                color = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -296,11 +305,12 @@ fun ProductToolScreen(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("← Tools Dashboard") }
+            OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("← Инструменты") }
             Text(tool.title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Text(tool.subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
             when (tool) {
+                ProductTool.EXECUTIVE -> ExecutiveSummaryPanel(report)
                 ProductTool.PROTECTION -> ProtectionMatrixPanel(report)
                 ProductTool.DIAGNOSTICS -> DiagnosticsPanel(report)
                 ProductTool.FINDINGS -> CustomerFindingsPanel(report, onOpenPatchLab)
@@ -323,7 +333,13 @@ fun ProductToolScreen(
 
 @Composable
 private fun ProtectionMatrixPanel(report: StaticAnalysisReport) {
-    val posture = remember(report.artifact.sha256, report.findings.size) { ProtectionPostureEngine.scan(report) }
+    val posture by produceState<ProtectionPostureEngine.Posture?>(
+        initialValue = null,
+        key1 = report.artifact.sha256,
+        key2 = report.findings.size,
+    ) {
+        value = withContext(Dispatchers.Default) { ProtectionPostureEngine.scan(report) }
+    }
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Text("Что именно проверяет приложение", fontWeight = FontWeight.Bold)
@@ -331,10 +347,13 @@ private fun ProtectionMatrixPanel(report: StaticAnalysisReport) {
                 "Матрица отвечает на вопрос «есть ли в APK такая проверка». Она не утверждает, что текущий телефон рутован или что APK изменён: целевое приложение не запускается, а факт изменения требует доверенного baseline.",
                 style = MaterialTheme.typography.bodySmall,
             )
-            Text("DEX coverage: ${if (posture.dexCoverageComplete) "полный индекс" else "ограниченный/неполный"}", style = MaterialTheme.typography.bodySmall)
+            when (val current = posture) {
+                null -> Text("Строим матрицу защит…", style = MaterialTheme.typography.bodySmall)
+                else -> Text("DEX coverage: ${if (current.dexCoverageComplete) "полный индекс" else "ограниченный/неполный"}", style = MaterialTheme.typography.bodySmall)
+            }
         }
     }
-    posture.checks.forEach { check ->
+    posture?.checks?.forEach { check ->
         Card(shape = RoundedCornerShape(16.dp)) {
             Column(Modifier.padding(13.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -351,7 +370,12 @@ private fun ProtectionMatrixPanel(report: StaticAnalysisReport) {
 
 @Composable
 private fun SerializationInspectorPanel(report: StaticAnalysisReport) {
-    val result = remember(report.artifact.sha256) { SerializationInspector.scan(report) }
+    val result by produceState<SerializationInspector.Report?>(
+        initialValue = null,
+        key1 = report.artifact.sha256,
+    ) {
+        value = withContext(Dispatchers.Default) { SerializationInspector.scan(report) }
+    }
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("Static Deserialization Inspector", fontWeight = FontWeight.Bold)
@@ -359,26 +383,33 @@ private fun SerializationInspectorPanel(report: StaticAnalysisReport) {
                 "Никакие объекты из APK не создаются и payload не исполняется. Инструмент ищет реальные decode/readObject/fromJson/parseFrom точки и связывает их с caller'ами.",
                 style = MaterialTheme.typography.bodySmall,
             )
-            Text("Frameworks: ${result.frameworks.size} · deserializers: ${result.deserializeCount} · serializers: ${result.serializeCount}")
-            Text("High-risk: ${result.highRiskCount} · reachable from exported graph: ${result.externallyReachableCount}", style = MaterialTheme.typography.bodySmall)
+            when (val current = result) {
+                null -> Text("Индексируем serialization/deserialization surfaces…", style = MaterialTheme.typography.bodySmall)
+                else -> {
+                    Text("Frameworks: ${current.frameworks.size} · deserializers: ${current.deserializeCount} · serializers: ${current.serializeCount}")
+                    Text("High-risk: ${current.highRiskCount} · reachable from exported graph: ${current.externallyReachableCount}", style = MaterialTheme.typography.bodySmall)
+                }
+            }
         }
     }
-    if (result.surfaces.isEmpty()) {
-        Card {
-            Text(
-                if (result.coverageComplete) "Известные serialization/deserialization entry points в полном DEX-индексе не обнаружены." else "DEX coverage неполный — отсутствие десериализаторов не подтверждено.",
-                modifier = Modifier.padding(14.dp),
-            )
-        }
-    } else {
-        result.surfaces.forEach { surface ->
-            Card(shape = RoundedCornerShape(16.dp)) {
-                Column(Modifier.padding(13.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("${surface.framework} · ${surface.direction} · ${surface.risk}", fontWeight = FontWeight.SemiBold)
-                    Text("Caller: ${surface.caller}", style = MaterialTheme.typography.bodySmall)
-                    Text("Callee: ${surface.callee}", style = MaterialTheme.typography.bodySmall)
-                    if (surface.externallyReachable) Text("Reachability: возможно достижим из exported component graph", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                    Text(surface.reason, style = MaterialTheme.typography.bodySmall)
+    result?.let { current ->
+        if (current.surfaces.isEmpty()) {
+            Card {
+                Text(
+                    if (current.coverageComplete) "Известные serialization/deserialization entry points в полном DEX-индексе не обнаружены." else "DEX coverage неполный — отсутствие десериализаторов не подтверждено.",
+                    modifier = Modifier.padding(14.dp),
+                )
+            }
+        } else {
+            current.surfaces.forEach { surface ->
+                Card(shape = RoundedCornerShape(16.dp)) {
+                    Column(Modifier.padding(13.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("${surface.framework} · ${surface.direction} · ${surface.risk}", fontWeight = FontWeight.SemiBold)
+                        Text("Caller: ${surface.caller}", style = MaterialTheme.typography.bodySmall)
+                        Text("Callee: ${surface.callee}", style = MaterialTheme.typography.bodySmall)
+                        if (surface.externallyReachable) Text("Reachability: возможно достижим из exported component graph", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        Text(surface.reason, style = MaterialTheme.typography.bodySmall)
+                    }
                 }
             }
         }
@@ -420,128 +451,6 @@ private fun DexToolPanel(report: StaticAnalysisReport) {
     InfoCard("HTTP URLs: ${dex.httpUrls.size} · HTTPS URLs: ${dex.httpsUrls.size} · secret candidates: ${dex.secretCandidates.size}\nParse errors: ${dex.parseErrors} · truncated=${dex.truncated}")
 }
 
-
-@Composable
-private fun DeobfuscationToolPanel(report: StaticAnalysisReport) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val heuristic = remember(report.artifact.sha256) { DeobfuscationEngine.analyze(report) }
-    var mapping by remember(report.artifact.sha256) { mutableStateOf<DeobfuscationEngine.MappingSummary?>(null) }
-    var mappingError by remember(report.artifact.sha256) { mutableStateOf<String?>(null) }
-    val mappingPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            scope.launch {
-                val result = runCatching {
-                    withContext(Dispatchers.IO) {
-                        val text = readMappingTextBounded(context.contentResolver, uri)
-                        DeobfuscationEngine.parseMapping(text)
-                    }
-                }
-                result.onSuccess {
-                    mapping = it
-                    mappingError = null
-                }.onFailure {
-                    mapping = null
-                    mappingError = it.message ?: it.javaClass.simpleName
-                }
-            }
-        }
-    }
-    val exactAliases = remember(report.artifact.sha256, mapping) {
-        mapping?.let { MappingDeobfuscator.resolve(report, it) }.orEmpty()
-    }
-
-    Card(
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
-    ) {
-        Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            Text("Static Deobfuscation", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Text(
-                "Сначала оцениваем степень обфускации, затем строим неразрушающие semantic aliases по DEX xrefs/API/строкам. Это рабочие имена для анализа, а не утверждение о восстановлении исходных названий.",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Text(
-                "Obfuscation score: ${heuristic.score}/100 · ${if (heuristic.likelyObfuscated) "вероятно обфусцировано" else "сильная обфускация не подтверждена"}",
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                "Classes: ${heuristic.obfuscatedClasses}/${heuristic.classesAnalyzed} · methods: ${heuristic.obfuscatedMethods}/${heuristic.methodsAnalyzed} · opaque strings: ${heuristic.opaqueStringIndicators}",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Text(
-                "DEX coverage: ${if (heuristic.coverageComplete) "полный индекс" else "ограниченный/неполный"}",
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-    }
-
-    Card(shape = RoundedCornerShape(20.dp)) {
-        Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("R8 / ProGuard mapping.txt", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Text(
-                "Если заказчик предоставляет mapping.txt своей релизной сборки, UniRevLab сопоставляет его с DEX и показывает точные исходные имена классов/методов/полей.",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Button(
-                onClick = { mappingPicker.launch(arrayOf("text/plain", "application/octet-stream", "*/*")) },
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Импортировать mapping.txt") }
-            mappingError?.let { Text("Ошибка mapping.txt: $it", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-            mapping?.let { parsed ->
-                Text(
-                    "Parsed: classes ${parsed.classes.size} · members ${parsed.members.size} · exact DEX matches ${exactAliases.size} · errors ${parsed.parseErrors}${if (parsed.truncated) " · truncated" else ""}",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                exactAliases.take(80).forEach { alias ->
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-                        Column(Modifier.padding(11.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Text("${alias.kind} · EXACT", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
-                            Text(alias.obfuscatedSymbol, style = MaterialTheme.typography.bodySmall)
-                            Text("→ ${alias.originalSymbol}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    Text("Semantic aliases", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-    if (heuristic.aliases.isEmpty()) {
-        InfoCard("Надёжные semantic aliases по текущему DEX-индексу не выведены. Это лучше, чем придумывать названия без достаточного evidence.")
-    } else {
-        heuristic.aliases.forEach { alias ->
-            Card(shape = RoundedCornerShape(16.dp)) {
-                Column(Modifier.padding(13.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("${alias.kind} · ${alias.confidence}", fontWeight = FontWeight.SemiBold)
-                    Text(alias.original, style = MaterialTheme.typography.bodySmall)
-                    Text("→ ${alias.suggestedAlias}", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
-                    alias.reasons.take(3).forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
-                }
-            }
-        }
-    }
-}
-
-private fun readMappingTextBounded(resolver: ContentResolver, uri: Uri): String {
-    val reader = resolver.openInputStream(uri)?.bufferedReader()
-        ?: error("Не удалось открыть mapping.txt")
-    reader.use {
-        val out = StringBuilder()
-        val buffer = CharArray(8192)
-        while (true) {
-            val read = it.read(buffer)
-            if (read < 0) break
-            require(out.length + read <= MAX_MAPPING_TEXT_CHARS) {
-                "mapping.txt слишком большой: лимит ${MAX_MAPPING_TEXT_CHARS / 1_000_000} MB текста"
-            }
-            out.append(buffer, 0, read)
-        }
-        return out.toString()
-    }
-}
-
-private const val MAX_MAPPING_TEXT_CHARS = 4_000_000
 
 @Composable
 private fun SigningToolPanel(report: StaticAnalysisReport) {
@@ -648,6 +557,46 @@ private fun MetricCard(title: String, value: String) {
 private fun InfoCard(text: String) {
     Card(shape = RoundedCornerShape(16.dp)) {
         Text(text, modifier = Modifier.padding(13.dp), style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+
+private fun dashboardRiskLabel(report: StaticAnalysisReport): String = when {
+    report.findings.any { it.severity.name == "CRITICAL" } -> "CRITICAL"
+    report.findings.any { it.severity.name == "HIGH" } -> "HIGH"
+    report.findings.any { it.severity.name == "MEDIUM" } -> "MEDIUM"
+    report.findings.any { it.severity.name == "LOW" } -> "LOW"
+    report.findings.isNotEmpty() -> "INFO"
+    else -> "NO RULE-BASED FINDINGS"
+}
+
+private fun productToolMetric(tool: ProductTool, report: StaticAnalysisReport): String {
+    val manifest = report.manifest
+    val dex = report.dex
+    return when (tool) {
+        ProductTool.EXECUTIVE -> "Риск ${dashboardRiskLabel(report)} · coverage + next actions →"
+        ProductTool.PROTECTION -> "Root · debug · hook · signature · integrity →"
+        ProductTool.DIAGNOSTICS -> "DEX errors ${dex?.parseErrors ?: 0} · native errors ${report.native?.parseErrors ?: 0} →"
+        ProductTool.FINDINGS -> {
+            val critical = report.findings.count { it.severity.name == "CRITICAL" }
+            val high = report.findings.count { it.severity.name == "HIGH" }
+            "C $critical · H $high · всего ${report.findings.size} →"
+        }
+        ProductTool.MANIFEST -> "Exported ${manifest?.components?.count { it.exported } ?: 0} · deep links ${manifest?.deepLinks?.size ?: 0} →"
+        ProductTool.DEX -> "Methods ${dex?.methodsIndexed ?: 0} · call xrefs ${dex?.callXrefs?.size ?: 0} →"
+        ProductTool.DEOBFUSCATION -> {
+            val shortNames = dex?.methods?.count { it.name.length <= 2 } ?: 0
+            "Opaque/short methods $shortNames · auto mapping →"
+        }
+        ProductTool.SERIALIZATION -> "Inspect ${dex?.callXrefs?.size ?: 0} call xrefs for decoders →"
+        ProductTool.SIGNING -> "Schemes ${manifest?.signingSchemes?.joinToString()?.ifBlank { "?" } ?: "?"} · certs ${manifest?.signingCertificates?.size ?: 0} →"
+        ProductTool.NETWORK -> "Cleartext ${if (manifest?.usesCleartextTraffic == true) "YES" else "NO"} · pin-set ${manifest?.networkSecurity?.pinSetPresent ?: false} →"
+        ProductTool.NATIVE -> "Libraries ${report.native?.librariesScanned ?: 0} · JNI ${report.native?.jniBridges?.size ?: 0} →"
+        ProductTool.RUNTIME -> "Profiles ${report.runtimes?.profiles?.size ?: 0} · IL2CPP ${report.il2cpp?.detected ?: false} →"
+        ProductTool.SUPPLY_CHAIN -> "Components ${report.supplyChain?.components?.size ?: 0} · advisories ${report.supplyChain?.vulnerabilities?.size ?: 0} →"
+        ProductTool.RE_BROWSER -> "Call edges ${dex?.callXrefs?.size ?: 0} · blocks ${dex?.basicBlocks?.size ?: 0} →"
+        ProductTool.PATCH_LAB -> "Trace · diff · rebuild · installability →"
+        ProductTool.FULL_REPORT -> "${report.findings.size} findings · полный evidence/export →"
     }
 }
 
