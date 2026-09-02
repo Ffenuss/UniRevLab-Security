@@ -46,6 +46,9 @@ jobs:
       - name: Apply defensive patch-technique coverage
         run: python tools/apply_v0260_patch_technique_coverage.py
 
+      - name: Apply Patch Lab installability fix
+        run: python tools/apply_v0261_patchlab_installability_fix.py
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
@@ -62,6 +65,7 @@ jobs:
           sdkmanager "platforms;android-37.0" "build-tools;36.0.0" "ndk;28.2.13676358"
           test -f "${ANDROID_HOME}/platforms/android-37.0/android.jar"
           test -x "${ANDROID_HOME}/build-tools/36.0.0/aapt2"
+          test -x "${ANDROID_HOME}/build-tools/36.0.0/zipalign"
           test -d "${ANDROID_HOME}/ndk/28.2.13676358"
 
       - name: Set up Rust
@@ -123,6 +127,8 @@ jobs:
           test -s "${TARGET_APK}"
           unzip -t "${APK}" >/dev/null
           unzip -t "${TARGET_APK}" >/dev/null
+          "${ANDROID_HOME}/build-tools/36.0.0/zipalign" -c -P 16 -v 4 "${APK}" >/dev/null
+          "${ANDROID_HOME}/build-tools/36.0.0/zipalign" -c -P 16 -v 4 "${TARGET_APK}" >/dev/null
           cp "${APK}" UniRevLab-Security-v0.25.9-automod-navigation-debug.apk
           cp "${TARGET_APK}" UniRevLab-TestTarget-v1.0-debug.apk
           sha256sum UniRevLab-Security-v0.25.9-automod-navigation-debug.apk | tee UniRevLab-Security-v0.25.9-automod-navigation-debug.apk.sha256
@@ -135,9 +141,14 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/src/main/java/org/unirevlab/security/analysis/TamperAssessmentEngine.kt app/src/test/java/org/unirevlab/security/analysis/TamperAssessmentClassifierTest.kt
+          git add \
+            app/src/main/java/org/unirevlab/security/analysis/TamperAssessmentEngine.kt \
+            app/src/test/java/org/unirevlab/security/analysis/TamperAssessmentClassifierTest.kt \
+            app/src/main/java/org/unirevlab/security/analysis/PatchLabEngine.kt \
+            app/src/test/java/org/unirevlab/security/analysis/PatchLabEngineTest.kt \
+            app/src/main/java/org/unirevlab/security/ui/AutoModPanel.kt
           if ! git diff --cached --quiet; then
-            git commit -m "Improve defensive tamper technique coverage (run ${{ github.run_id }}) [skip ci]"
+            git commit -m "Fix Patch Lab APK installability (run ${{ github.run_id }}) [skip ci]"
           else
             git commit --allow-empty -m "Verify v0.25.9 sources (run ${{ github.run_id }}) [skip ci]"
           fi
