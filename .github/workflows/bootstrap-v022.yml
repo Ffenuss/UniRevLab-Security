@@ -58,6 +58,9 @@ jobs:
       - name: Apply v0.33.0 IL2CPP pair workspace UI
         run: python tools/apply_v0331_il2cpp_ui.py
 
+      - name: Normalize v0.33.0 IL2CPP workspace compile state
+        run: python tools/apply_v0332_il2cpp_compile_guard.py
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
