@@ -36,7 +36,7 @@ mod android_jni {
     /// No file access, process access, or target-code execution is available through this API.
     #[unsafe(no_mangle)]
     pub extern "system" fn Java_org_unirevlab_security_nativecore_NativeAnalysis_parseAxmlJson(
-        mut env: JNIEnv,
+        env: JNIEnv,
         _object: JObject,
         input: JByteArray,
     ) -> jstring {
