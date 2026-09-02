@@ -43,52 +43,8 @@ jobs:
           git commit --allow-empty -m "Start v0.30.0 CI run ${{ github.run_id }} [skip ci]"
           git push origin HEAD:fix-analysis-progress-v0221
 
-      - name: Apply defensive patch-technique coverage
-        shell: bash
-        run: |
-          set -euo pipefail
-          if grep -q '"COMPONENT_TRUST" to listOf' app/src/main/java/org/unirevlab/security/analysis/TamperAssessmentEngine.kt; then
-            echo "Defensive patch-technique coverage already present"
-          else
-            python tools/apply_v0260_patch_technique_coverage.py
-          fi
-
-      - name: Apply Patch Lab installability fix
-        run: python tools/apply_v0261_patchlab_installability_fix.py
-
-      - name: Apply product suite UI and AutoMod precision
-        run: python tools/apply_v0262_product_suite.py
-
-      - name: Require exact AutoMod semantic tokens
-        run: python tools/apply_v0263_automod_token_precision.py
-
-      - name: Apply deobfuscation tool UI
-        run: python tools/apply_v0264_deobfuscation_ui.py
-
-      - name: Move mapping import off UI thread
-        run: python tools/apply_v0265_deobfuscation_io.py
-
-      - name: Apply customer findings workspace
-        run: python tools/apply_v0266_findings_workspace_ui.py
-
-      - name: Apply automatic analyst mapping UI
-        run: python tools/apply_v0267_automatic_mapping_ui.py
-
-      - name: Apply Diagnostics / Self-Test UI
-        run: python tools/apply_v0268_diagnostics_ui.py
-
-      - name: Apply Call Graph workspace UI
-        run: python tools/apply_v0269_callgraph_workspace_ui.py
-
-      - name: Normalize deobfuscation migration state
-        run: python tools/apply_v0270_deobfuscation_migration_guard.py
-
-      - name: Apply v0.28.0 product polish
-        run: python tools/apply_v0280_product_polish.py
-
-      - name: Apply v0.29.0 projects/history + trusted baseline
-        run: python tools/apply_v0290_projects_history.py
-
+      # v0.29.0 sources are already committed on this branch. Re-applying historical
+      # migrations is intentionally avoided because those scripts target older source shapes.
       - name: Apply v0.30.0 full reconstructed mapping
         run: python tools/apply_v0300_full_mapping.py
 
@@ -191,21 +147,7 @@ jobs:
             app/src/main/java/org/unirevlab/security/analysis/LocalArtifactInspector.kt \
             app/src/main/java/org/unirevlab/security/analysis/FullMappingEngine.kt \
             app/src/test/java/org/unirevlab/security/analysis/FullMappingEngineTest.kt \
-            app/src/main/java/org/unirevlab/security/ui/AutomaticDeobfuscationPanel.kt \
-            app/src/main/java/org/unirevlab/security/analysis/TamperAssessmentEngine.kt \
-            app/src/test/java/org/unirevlab/security/analysis/TamperAssessmentClassifierTest.kt \
-            app/src/main/java/org/unirevlab/security/analysis/PatchLabEngine.kt \
-            app/src/test/java/org/unirevlab/security/analysis/PatchLabEngineTest.kt \
-            app/src/main/java/org/unirevlab/security/analysis/AutoModEngine.kt \
-            app/src/test/java/org/unirevlab/security/analysis/AutoModEngineTest.kt \
-            app/src/main/java/org/unirevlab/security/analysis/TrustedBaselineComparator.kt \
-            app/src/test/java/org/unirevlab/security/analysis/TrustedBaselineComparatorTest.kt \
-            app/src/main/java/org/unirevlab/security/data/AssessmentHistoryStore.kt \
-            app/src/main/java/org/unirevlab/security/model/ProjectHistoryModels.kt \
-            app/src/main/java/org/unirevlab/security/MainActivity.kt \
-            app/src/main/java/org/unirevlab/security/ui/AutoModPanel.kt \
-            app/src/main/java/org/unirevlab/security/ui/ProductToolsScreen.kt \
-            app/src/main/java/org/unirevlab/security/ui/ProjectHistoryScreen.kt
+            app/src/main/java/org/unirevlab/security/ui/AutomaticDeobfuscationPanel.kt
           if ! git diff --cached --quiet; then
             git commit -m "Apply v0.30.0 full mapping baseline (run ${{ github.run_id }}) [skip ci]"
           else
