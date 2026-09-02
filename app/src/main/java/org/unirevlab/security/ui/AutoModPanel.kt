@@ -120,6 +120,7 @@ fun AutoModPanel(
                                         AutoModEngine.Mode.RETURN_TRUE -> "Патч: return true"
                                         AutoModEngine.Mode.RETURN_FALSE -> "Патч: return false"
                                         AutoModEngine.Mode.RETURN_INT -> "Патч: return ${action.intValue}"
+                                        AutoModEngine.Mode.TRACE_ONLY -> "Диагностика: entry trace без изменения результата"
                                     },
                                     style = MaterialTheme.typography.bodySmall,
                                 )
