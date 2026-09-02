@@ -15,15 +15,21 @@ object DexRuleEngine {
         val dynamicLoading = ArrayList<org.unirevlab.security.model.DexMethodCallXref>(minOf(50, dex.callXrefs.size))
         val processExecution = ArrayList<org.unirevlab.security.model.DexMethodCallXref>(minOf(50, dex.callXrefs.size))
         val webViewSensitive = ArrayList<org.unirevlab.security.model.DexMethodCallXref>(minOf(50, dex.callXrefs.size))
+        val installerSource = ArrayList<org.unirevlab.security.model.DexMethodCallXref>(minOf(50, dex.callXrefs.size))
         for (xref in dex.callXrefs) {
             if (dynamicLoading.size < 50 && isDynamicLoadingCall(xref)) dynamicLoading += xref
             if (processExecution.size < 50 && isProcessExecutionCall(xref)) processExecution += xref
             if (webViewSensitive.size < 50 && isWebViewSensitiveCall(xref)) webViewSensitive += xref
-            if (dynamicLoading.size >= 50 && processExecution.size >= 50 && webViewSensitive.size >= 50) break
+            if (installerSource.size < 50 && isInstallerSourceCall(xref)) installerSource += xref
+            if (
+                dynamicLoading.size >= 50 && processExecution.size >= 50 &&
+                webViewSensitive.size >= 50 && installerSource.size >= 50
+            ) break
         }
         if (dynamicLoading.isNotEmpty()) add(dynamicLoadingReview(dynamicLoading))
         if (processExecution.isNotEmpty()) add(processExecutionReview(processExecution))
         if (webViewSensitive.isNotEmpty()) add(webViewReview(webViewSensitive))
+        if (installerSource.isNotEmpty()) add(installerSourceReview(installerSource))
 
         val riskyWebViewObservations = ArrayList<org.unirevlab.security.model.DexInvokeObservation>(minOf(50, dex.invokeObservations.size))
         for (observation in dex.invokeObservations) {
@@ -76,7 +82,6 @@ object DexRuleEngine {
         requiresManualReview = true,
     )
 
-
     private fun isDynamicLoadingCall(x: org.unirevlab.security.model.DexMethodCallXref): Boolean =
         x.calleeClass in setOf(
             "Ldalvik/system/DexClassLoader;",
@@ -95,6 +100,13 @@ object DexRuleEngine {
                 "setJavaScriptEnabled", "setAllowFileAccessFromFileURLs", "setAllowUniversalAccessFromFileURLs", "setMixedContentMode"
             ))
 
+    private fun isInstallerSourceCall(x: org.unirevlab.security.model.DexMethodCallXref): Boolean =
+        (x.calleeClass == "Landroid/content/pm/PackageManager;" && x.calleeName in setOf(
+            "getInstallerPackageName", "getInstallSourceInfo"
+        )) ||
+            (x.calleeClass == "Landroid/content/pm/InstallSourceInfo;" && x.calleeName in setOf(
+                "getInstallingPackageName", "getInitiatingPackageName", "getOriginatingPackageName"
+            ))
 
     private fun isKnownRiskyWebViewObservation(x: org.unirevlab.security.model.DexInvokeObservation): Boolean {
         val boolTrue = x.arguments.any { it.kind in setOf("INT", "NULL_OR_INT") && it.value == "1" }
@@ -159,6 +171,21 @@ object DexRuleEngine {
             Evidence(it.dexEntry, "${it.callerClass}->${it.callerName}+${it.instructionOffsetCodeUnits}", "${it.calleeClass}->${it.calleeName}${it.calleePrototype}")
         },
         remediation = "Review argument values and data flow for each call, restrict WebView navigation to trusted origins, minimize JavaScript/native bridges, and disable debugging or permissive file-origin settings in production.",
+        requiresManualReview = true,
+    )
+
+    private fun installerSourceReview(xrefs: List<org.unirevlab.security.model.DexMethodCallXref>) = Finding(
+        id = "DEX-INSTALL-SOURCE-CHECK",
+        title = "Installation-source APIs are referenced",
+        severity = Severity.INFORMATIONAL,
+        confidence = Confidence.HIGH,
+        category = "RESILIENCE",
+        description = "Bytecode xrefs show Android PackageManager/InstallSourceInfo calls that can distinguish Play Store, sideload, enterprise, or other installation sources. This is not a vulnerability by itself, but it can be part of integrity, anti-tamper, licensing, or distribution policy logic and should be included in resilience review.",
+        evidence = xrefs.map {
+            Evidence(it.dexEntry, "${it.callerClass}->${it.callerName}+${it.instructionOffsetCodeUnits}", "${it.calleeClass}->${it.calleeName}${it.calleePrototype}")
+        },
+        remediation = "Document why installation source affects behavior and ensure source checks are not treated as the sole authorization or entitlement boundary. For high-value decisions, enforce trust on a backend or through platform attestation rather than relying only on a client-side installer identifier.",
+        references = listOf(SecurityReference("OWASP MASVS", "MASVS-RESILIENCE")),
         requiresManualReview = true,
     )
 
