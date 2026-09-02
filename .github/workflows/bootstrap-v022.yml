@@ -44,7 +44,14 @@ jobs:
           git push origin HEAD:fix-analysis-progress-v0221
 
       - name: Apply defensive patch-technique coverage
-        run: python tools/apply_v0260_patch_technique_coverage.py
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -q '"COMPONENT_TRUST" to listOf' app/src/main/java/org/unirevlab/security/analysis/TamperAssessmentEngine.kt; then
+            echo "Defensive patch-technique coverage already present"
+          else
+            python tools/apply_v0260_patch_technique_coverage.py
+          fi
 
       - name: Apply Patch Lab installability fix
         run: python tools/apply_v0261_patchlab_installability_fix.py
@@ -54,6 +61,9 @@ jobs:
 
       - name: Require exact AutoMod semantic tokens
         run: python tools/apply_v0263_automod_token_precision.py
+
+      - name: Apply deobfuscation tool UI
+        run: python tools/apply_v0264_deobfuscation_ui.py
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -155,7 +165,8 @@ jobs:
             app/src/main/java/org/unirevlab/security/analysis/AutoModEngine.kt \
             app/src/test/java/org/unirevlab/security/analysis/AutoModEngineTest.kt \
             app/src/main/java/org/unirevlab/security/MainActivity.kt \
-            app/src/main/java/org/unirevlab/security/ui/AutoModPanel.kt
+            app/src/main/java/org/unirevlab/security/ui/AutoModPanel.kt \
+            app/src/main/java/org/unirevlab/security/ui/ProductToolsScreen.kt
           if ! git diff --cached --quiet; then
             git commit -m "Apply product security suite UI (run ${{ github.run_id }}) [skip ci]"
           else
