@@ -65,6 +65,9 @@ jobs:
       - name: Apply deobfuscation tool UI
         run: python tools/apply_v0264_deobfuscation_ui.py
 
+      - name: Move mapping import off UI thread
+        run: python tools/apply_v0265_deobfuscation_io.py
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
