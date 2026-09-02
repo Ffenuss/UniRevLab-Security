@@ -18,8 +18,8 @@ workflow = workflow_path.read_text(encoding="utf-8")
 checks = [
     ("compileSdk 37.0", app, r"version\s*=\s*release\(37\)[\s\S]*minorApiLevel\s*=\s*0"),
     ("targetSdk 36", app, r"targetSdk\s*=\s*36"),
-    ("v0.30.0 preview versionCode", app, r"versionCode\s*=\s*41"),
-    ("v0.30.0 full-mapping versionName", app, r'versionName\s*=\s*"0\.30\.0-preview-full-mapping"'),
+    ("v0.31.0 preview versionCode", app, r"versionCode\s*=\s*42"),
+    ("v0.31.0 semantic-recovery versionName", app, r'versionName\s*=\s*"0\.31\.0-preview-semantic-recovery"'),
     ("release signing input gate", app, r'tasks\.register\("verifyReleaseSigningInputs"\)'),
     ("AGP 9.3.0", root_build, r'id\("com\.android\.application"\) version "9\.3\.0"'),
     ("Kotlin Compose 2.3.21", root_build, r'id\("org\.jetbrains\.kotlin\.plugin\.compose"\) version "2\.3\.21"'),
@@ -35,9 +35,10 @@ checks = [
     ("CI lint", workflow, r':app:lintDebug'),
     ("CI debug build", workflow, r':app:assembleDebug'),
     ("CI APK integrity verify", workflow, r'unzip -t .*APK'),
-    ("CI APK SHA-256", workflow, r'sha256sum .*UniRevLab-Security-v0\.30\.0-full-mapping-preview'),
+    ("CI APK SHA-256", workflow, r'sha256sum .*UniRevLab-Security-v0\.31\.0-semantic-recovery-preview'),
     ("CI artifact upload", workflow, r'actions/upload-artifact@v4'),
     ("CI full-mapping migration", workflow, r'apply_v0300_full_mapping\.py'),
+    ("CI semantic-recovery migration", workflow, r'apply_v0310_semantic_recovery\.py'),
 ]
 
 failed = []
