@@ -47,6 +47,7 @@ object Il2CppMonetizationRiskEngine {
         val metadataVersion: Int?,
         val typeCount: Int,
         val methodCount: Int,
+        val fieldCount: Int,
         val candidates: List<Candidate>,
         val monetizationCandidates: Int,
         val validationCandidates: Int,
@@ -65,6 +66,7 @@ object Il2CppMonetizationRiskEngine {
                 metadataVersion = metadata?.metadataVersion,
                 typeCount = metadata?.typeDefinitions?.size ?: 0,
                 methodCount = metadata?.methodDefinitions?.size ?: 0,
+                fieldCount = metadata?.fieldDefinitions?.size ?: 0,
                 candidates = emptyList(),
                 monetizationCandidates = 0,
                 validationCandidates = 0,
@@ -106,6 +108,29 @@ object Il2CppMonetizationRiskEngine {
             }
         }
 
+        metadata.fieldDefinitions.forEach { field ->
+            val identity = "${field.declaringType}.${field.name}"
+            classify(identity).forEach { category ->
+                add(
+                    Candidate(
+                        kind = "FIELD",
+                        managedIdentity = identity,
+                        category = category,
+                        confidence = Confidence.HIGH,
+                        metadataToken = field.token,
+                        methodIndex = null,
+                        declaringType = field.declaringType,
+                        nativeFunctionName = null,
+                        evidence = listOf(
+                            "Exact managed field identity recovered from global-metadata.dat",
+                            "Semantic marker: ${markerFor(identity, category)}",
+                            "Metadata field index=${field.index}, typeIndex=${field.typeIndex}, token=0x${field.token.toString(16)}",
+                        ),
+                    ),
+                )
+            }
+        }
+
         metadata.methodDefinitions.forEach { method ->
             val identity = "${method.declaringType}.${method.name}"
             classify(identity).forEach { category ->
@@ -124,7 +149,7 @@ object Il2CppMonetizationRiskEngine {
                         kind = "METHOD",
                         managedIdentity = identity,
                         category = category,
-                        confidence = if (native != null) Confidence.HIGH else Confidence.HIGH,
+                        confidence = Confidence.HIGH,
                         metadataToken = method.token,
                         methodIndex = method.index,
                         declaringType = method.declaringType,
@@ -179,6 +204,7 @@ object Il2CppMonetizationRiskEngine {
             metadataVersion = metadata.metadataVersion,
             typeCount = metadata.typeDefinitions.size,
             methodCount = metadata.methodDefinitions.size,
+            fieldCount = metadata.fieldDefinitions.size,
             candidates = ordered,
             monetizationCandidates = monetization,
             validationCandidates = validation,
@@ -215,7 +241,7 @@ object Il2CppMonetizationRiskEngine {
     }
 
     private fun looksLikeClientStateGate(candidate: Candidate): Boolean {
-        if (candidate.category == Category.RECEIPT_VALIDATION || candidate.kind != "METHOD") return false
+        if (candidate.category == Category.RECEIPT_VALIDATION || candidate.kind !in setOf("METHOD", "FIELD")) return false
         val normalized = normalize(candidate.managedIdentity.substringAfterLast('.'))
         return CLIENT_STATE_PREFIXES.any(normalized::startsWith) || CLIENT_STATE_MARKERS.any(normalized::contains)
     }
