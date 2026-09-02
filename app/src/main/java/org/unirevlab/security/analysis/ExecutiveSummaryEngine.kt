@@ -58,7 +58,7 @@ object ExecutiveSummaryEngine {
         val native = report.native
 
         val coverage = buildList {
-            if (report.artifact.hasAndroidManifest) {
+            if (report.artifact.hasAndroidManifest == true) {
                 add(
                     CoverageCheck(
                         title = "AndroidManifest",
@@ -70,7 +70,7 @@ object ExecutiveSummaryEngine {
                 add(CoverageCheck("AndroidManifest", CoverageState.NOT_APPLICABLE, "Manifest not present in selected artifact"))
             }
 
-            if (report.artifact.dexFiles > 0) {
+            if ((report.artifact.dexFiles ?: 0) > 0) {
                 val complete = dex != null && !dex.truncated && dex.parseErrors == 0 && dex.dexFilesScanned >= dex.dexFilesDiscovered
                 val state = when {
                     dex == null -> CoverageState.MISSING
@@ -87,7 +87,7 @@ object ExecutiveSummaryEngine {
                 add(CoverageCheck("DEX / code index", CoverageState.NOT_APPLICABLE, "No DEX files discovered"))
             }
 
-            if (report.artifact.nativeLibraries > 0) {
+            if ((report.artifact.nativeLibraries ?: 0) > 0) {
                 val complete = native != null && !native.truncated && native.parseErrors == 0 && native.librariesScanned >= native.librariesDiscovered
                 val state = when {
                     native == null -> CoverageState.MISSING
