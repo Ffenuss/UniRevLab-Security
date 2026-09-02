@@ -35,7 +35,17 @@ data class AssessmentHistoryEntry(
     val nativeLibraries: Int?,
     val engineVersion: String,
     val schemaVersion: String,
-)
+    /** Internal full-report snapshot. Null means a legacy metadata-only history entry. */
+    val snapshotFileName: String? = null,
+    val snapshotSizeBytes: Long? = null,
+    val snapshotSha256: String? = null,
+    val snapshotFormatVersion: Int? = null,
+) {
+    val hasFullReportSnapshot: Boolean
+        get() = !snapshotFileName.isNullOrBlank() &&
+            snapshotSizeBytes != null && snapshotSizeBytes > 0 &&
+            !snapshotSha256.isNullOrBlank() && snapshotFormatVersion != null
+}
 
 data class BaselineComparison(
     val verdict: BaselineVerdict,
