@@ -35,7 +35,9 @@ fun ProjectHistoryScreen(
     baselineEntryIds: Set<String>,
     currentReport: StaticAnalysisReport?,
     currentComparison: BaselineComparison?,
+    isLoadingReport: Boolean,
     onBack: () -> Unit,
+    onOpen: (String) -> Unit,
     onSetBaseline: (String) -> Unit,
     onClearBaseline: (String) -> Unit,
     onDelete: (String) -> Unit,
@@ -45,13 +47,19 @@ fun ProjectHistoryScreen(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("← Инструменты") }
+            OutlinedButton(onClick = onBack, enabled = !isLoadingReport, modifier = Modifier.fillMaxWidth()) { Text("← Инструменты") }
             Text("Проекты / История / Baseline", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Text(
-                "Каждый завершённый аудит сохраняет локальную мета-запись. Вы можете явно назначить проверенную сборку trusted baseline для package name и затем видеть, совпадает ли новый APK с ней по SHA-256 и цепочке подписания.",
+                "Каждый завершённый аудит теперь сохраняет полный локальный отчёт до того, как UniRevLab показывает «Готово». Сохранённый анализ можно открыть после закрытия приложения без повторного сканирования. Проверенную сборку можно отдельно назначить trusted baseline.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+
+            if (isLoadingReport) {
+                Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+                    Text("Открываем и проверяем сохранённый отчёт…", modifier = Modifier.padding(14.dp), fontWeight = FontWeight.SemiBold)
+                }
+            }
 
             if (currentReport != null) {
                 CurrentBaselineCard(currentReport, currentComparison)
@@ -62,7 +70,7 @@ fun ProjectHistoryScreen(
             if (entries.isEmpty()) {
                 Card(shape = RoundedCornerShape(18.dp)) {
                     Text(
-                        "История пока пуста. Первая запись появится после завершения полного аудита.",
+                        "История пока пуста. Следующий полностью завершённый аудит будет сохранён вместе с полным отчётом и станет доступен после перезапуска приложения.",
                         modifier = Modifier.padding(14.dp),
                     )
                 }
@@ -72,6 +80,8 @@ fun ProjectHistoryScreen(
                     HistoryEntryCard(
                         entry = entry,
                         isBaseline = isBaseline,
+                        isLoadingReport = isLoadingReport,
+                        onOpen = { onOpen(entry.id) },
                         onSetBaseline = { onSetBaseline(entry.id) },
                         onClearBaseline = { entry.packageName?.let(onClearBaseline) },
                         onDelete = { onDelete(entry.id) },
@@ -116,6 +126,8 @@ private fun CurrentBaselineCard(report: StaticAnalysisReport, comparison: Baseli
 private fun HistoryEntryCard(
     entry: AssessmentHistoryEntry,
     isBaseline: Boolean,
+    isLoadingReport: Boolean,
+    onOpen: () -> Unit,
     onSetBaseline: () -> Unit,
     onClearBaseline: () -> Unit,
     onDelete: () -> Unit,
@@ -126,7 +138,7 @@ private fun HistoryEntryCard(
             containerColor = if (isBaseline) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
         ),
     ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(entry.projectName.ifBlank { "Без названия проекта" }, modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold)
                 if (isBaseline) Text("TRUSTED BASELINE", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
@@ -148,13 +160,33 @@ private fun HistoryEntryCard(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (entry.hasFullReportSnapshot) {
+                Text(
+                    "Полный отчёт сохранён · ${formatHistoryBytes(entry.snapshotSizeBytes ?: 0L)} · integrity SHA-256",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Button(
+                    onClick = onOpen,
+                    enabled = !isLoadingReport,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Открыть анализ") }
+            } else {
+                Text(
+                    "Старая запись: сохранены только метаданные. Полный отчёт этой версии нельзя восстановить без повторного анализа.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                OutlinedButton(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) { Text("Полный отчёт недоступен") }
+            }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (isBaseline) {
-                    Button(onClick = onClearBaseline, enabled = entry.packageName != null, modifier = Modifier.weight(1f)) { Text("Снять baseline") }
+                    Button(onClick = onClearBaseline, enabled = entry.packageName != null && !isLoadingReport, modifier = Modifier.weight(1f)) { Text("Снять baseline") }
                 } else {
-                    Button(onClick = onSetBaseline, enabled = !entry.packageName.isNullOrBlank(), modifier = Modifier.weight(1f)) { Text("Сделать baseline") }
+                    Button(onClick = onSetBaseline, enabled = !entry.packageName.isNullOrBlank() && !isLoadingReport, modifier = Modifier.weight(1f)) { Text("Сделать baseline") }
                 }
-                OutlinedButton(onClick = onDelete, modifier = Modifier.weight(1f)) { Text("Удалить") }
+                OutlinedButton(onClick = onDelete, enabled = !isLoadingReport, modifier = Modifier.weight(1f)) { Text("Удалить") }
             }
         }
     }
@@ -181,3 +213,9 @@ private fun baselineVerdictDetail(comparison: BaselineComparison?): String = whe
 private fun formatHistoryTime(epochMs: Long): String = runCatching {
     SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date(epochMs))
 }.getOrDefault(epochMs.toString())
+
+private fun formatHistoryBytes(bytes: Long): String = when {
+    bytes >= 1024L * 1024L -> "%.1f MiB".format(Locale.US, bytes / (1024.0 * 1024.0))
+    bytes >= 1024L -> "%.1f KiB".format(Locale.US, bytes / 1024.0)
+    else -> "$bytes B"
+}
