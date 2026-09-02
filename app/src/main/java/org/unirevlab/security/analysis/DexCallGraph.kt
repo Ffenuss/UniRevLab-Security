@@ -61,7 +61,7 @@ object DexCallGraph {
         return dex.methods.asSequence()
             .map(::nodeFor)
             .filter { node ->
-                node.signature.lowercase().contains(q) || node.dexEntry.lowercase().contains(q)
+                node.signature.lowercase().contains(q) || node.key.dexEntry.lowercase().contains(q)
             }
             .take(limit)
             .toList()
@@ -160,7 +160,7 @@ object DexCallGraph {
         }
 
         val nodes = depth.keys.mapNotNull(index.nodes::get)
-            .sortedWith(compareBy({ it.dexEntry }, { it.classDescriptor }, { it.name }, { it.prototype }))
+            .sortedWith(compareBy({ it.key.dexEntry }, { it.classDescriptor }, { it.name }, { it.prototype }))
         val nodeKeys = nodes.mapTo(HashSet()) { it.key }
         val edges = selectedEdges.filter { it.from in nodeKeys && it.to in nodeKeys }
             .sortedWith(compareBy({ it.from.dexEntry }, { it.from.methodIndex }, { it.instructionOffsetCodeUnits }, { it.to.methodIndex }))
