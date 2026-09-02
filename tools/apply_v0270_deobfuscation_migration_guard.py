@@ -29,14 +29,17 @@ def main() -> None:
 
     lines = canonicalize_unique(
         lines,
-        predicate=lambda line: line.strip().startswith('DEOBFUSCATION("Deobfuscation"'),
+        predicate=lambda line: line.startswith('    DEOBFUSCATION("Deobfuscation"'),
         canonical=CANONICAL_ENUM,
         anchor=DEX_ENUM,
         label="deobfuscation enum",
     )
+    # Only normalize the UI routing branch. Do not strip ProductTool.DEOBFUSCATION
+    # branches from helper when-expressions such as productToolMetric(). The old
+    # strip()-based predicate matched both and could leave an orphaned block.
     lines = canonicalize_unique(
         lines,
-        predicate=lambda line: line.strip().startswith("ProductTool.DEOBFUSCATION ->"),
+        predicate=lambda line: line.startswith("                ProductTool.DEOBFUSCATION ->"),
         canonical=CANONICAL_ROUTE,
         anchor=DEX_ROUTE,
         label="deobfuscation route",
