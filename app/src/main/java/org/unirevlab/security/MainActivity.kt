@@ -39,10 +39,12 @@ import org.unirevlab.security.analysis.ReportExportSpool
 import org.unirevlab.security.analysis.PreparedReportFile
 import org.unirevlab.security.analysis.SbomExporter
 import org.unirevlab.security.data.AgreementStore
+import org.unirevlab.security.data.AssessmentHistoryStore
 import org.unirevlab.security.data.InstalledAppRepository
 import org.unirevlab.security.data.CoordinatorSyncClient
 import org.unirevlab.security.model.AssessmentScope
 import org.unirevlab.security.model.AssessmentDiff
+import org.unirevlab.security.model.BaselineComparison
 import org.unirevlab.security.model.Finding
 import org.unirevlab.security.model.InstalledAppDescriptor
 import org.unirevlab.security.model.StaticAnalysisReport
@@ -55,6 +57,7 @@ import org.unirevlab.security.ui.HelpScreen
 import org.unirevlab.security.ui.PatchLabScreen
 import org.unirevlab.security.ui.ProductTool
 import org.unirevlab.security.ui.ProductToolScreen
+import org.unirevlab.security.ui.ProjectHistoryScreen
 import org.unirevlab.security.ui.ToolsHomeScreen
 import org.unirevlab.security.ui.UniRevLabTheme
 
@@ -69,13 +72,14 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Route { AGREEMENT, SCOPE, HOME, TOOL, DASHBOARD, INSTALLED_APPS, HELP, PATCH_LAB }
+private enum class Route { AGREEMENT, SCOPE, HOME, TOOL, DASHBOARD, PROJECTS, INSTALLED_APPS, HELP, PATCH_LAB }
 
 @Composable
 private fun UniRevLabApp() {
     val context = LocalContext.current
     val agreementStore = remember { AgreementStore(context.applicationContext) }
     val installedRepository = remember { InstalledAppRepository(context.applicationContext) }
+    val historyStore = remember { AssessmentHistoryStore(context.applicationContext) }
     remember(context.applicationContext) { AnalysisManager.apply { initialize(context.applicationContext) } }
     val analysisState by AnalysisManager.state.collectAsState()
     val analysisActive = analysisState is AnalysisRunState.Running || analysisState is AnalysisRunState.Cancelling
@@ -84,6 +88,9 @@ private fun UniRevLabApp() {
     var report by remember { mutableStateOf<StaticAnalysisReport?>(null) }
     var previousReport by remember { mutableStateOf<StaticAnalysisReport?>(null) }
     var comparison by remember { mutableStateOf<AssessmentDiff?>(null) }
+    var historyEntries by remember { mutableStateOf(historyStore.list()) }
+    var baselineEntryIds by remember { mutableStateOf(historyStore.baselineEntryIds()) }
+    var baselineComparison by remember { mutableStateOf<BaselineComparison?>(null) }
     var isInspecting by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var agreementError by remember { mutableStateOf<String?>(null) }
@@ -117,6 +124,13 @@ private fun UniRevLabApp() {
                     AssessmentDiffEngine.diff(previous, next)
                 } else null
                 scope = next.assessment
+                val savedHistory = withContext(Dispatchers.IO) {
+                    historyStore.record(next)
+                    Triple(historyStore.list(), historyStore.baselineEntryIds(), historyStore.compare(next))
+                }
+                historyEntries = savedHistory.first
+                baselineEntryIds = savedHistory.second
+                baselineComparison = savedHistory.third
                 preparedReportExport?.file?.let { runCatching { it.delete() } }
                 preparedReportExport = null
                 reportExportStatus = null
@@ -127,6 +141,12 @@ private fun UniRevLabApp() {
             }
             else -> Unit
         }
+    }
+
+    fun refreshHistoryState() {
+        historyEntries = historyStore.list()
+        baselineEntryIds = historyStore.baselineEntryIds()
+        baselineComparison = report?.let { historyStore.compare(it) }
     }
 
     fun reloadInstalledApps() {
@@ -278,7 +298,7 @@ private fun UniRevLabApp() {
     }
 
     BackHandler(
-        enabled = route in setOf(Route.TOOL, Route.DASHBOARD, Route.INSTALLED_APPS, Route.HELP, Route.PATCH_LAB),
+        enabled = route in setOf(Route.TOOL, Route.DASHBOARD, Route.PROJECTS, Route.INSTALLED_APPS, Route.HELP, Route.PATCH_LAB),
     ) {
         route = Route.HOME
     }
@@ -294,6 +314,7 @@ private fun UniRevLabApp() {
             report = null
             previousReport = null
             comparison = null
+            baselineComparison = null
             selectedTool = null
             route = Route.HOME
         }
@@ -303,6 +324,7 @@ private fun UniRevLabApp() {
             analysisState = analysisState,
             isInspecting = isInspecting || analysisActive,
             error = error,
+            baselineComparison = baselineComparison,
             onAnalyzeFile = {
                 picker.launch(arrayOf(
                     "application/vnd.android.package-archive",
@@ -324,6 +346,7 @@ private fun UniRevLabApp() {
                 route = Route.PATCH_LAB
             },
             onOpenHelp = { route = Route.HELP },
+            onOpenProjects = { route = Route.PROJECTS },
             onCancelAnalysis = { AnalysisManager.cancel() },
             onNewAssessment = {
                 if (!analysisActive) {
@@ -331,6 +354,7 @@ private fun UniRevLabApp() {
                     report = null
                     previousReport = null
                     comparison = null
+                    baselineComparison = null
                     selectedTool = null
                     coordinatorSyncStatus = null
                     preparedReportExport?.file?.let { runCatching { it.delete() } }
@@ -460,12 +484,35 @@ private fun UniRevLabApp() {
                     report = null
                     previousReport = null
                     comparison = null
+                    baselineComparison = null
                     coordinatorSyncStatus = null
                     preparedReportExport?.file?.let { runCatching { it.delete() } }
                     preparedReportExport = null
                     reportExportStatus = null
                     route = Route.SCOPE
                 }
+            },
+        )
+        Route.PROJECTS -> ProjectHistoryScreen(
+            entries = historyEntries,
+            baselineEntryIds = baselineEntryIds,
+            currentReport = report,
+            currentComparison = baselineComparison,
+            onBack = { route = Route.HOME },
+            onSetBaseline = { entryId ->
+                val result = runCatching { historyStore.setBaseline(entryId) }
+                error = result.exceptionOrNull()?.message
+                if (result.isSuccess) refreshHistoryState()
+            },
+            onClearBaseline = { packageName ->
+                val result = runCatching { historyStore.clearBaseline(packageName) }
+                error = result.exceptionOrNull()?.message
+                if (result.isSuccess) refreshHistoryState()
+            },
+            onDelete = { entryId ->
+                val result = runCatching { historyStore.remove(entryId) }
+                error = result.exceptionOrNull()?.message
+                if (result.isSuccess) refreshHistoryState()
             },
         )
         Route.HELP -> HelpScreen(onBack = { route = Route.HOME })

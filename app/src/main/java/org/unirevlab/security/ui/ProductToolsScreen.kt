@@ -23,6 +23,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
@@ -36,6 +37,8 @@ import org.unirevlab.security.analysis.AnalysisRunState
 import org.unirevlab.security.analysis.ProtectionPostureEngine
 import org.unirevlab.security.analysis.SerializationInspector
 import org.unirevlab.security.model.AssessmentScope
+import org.unirevlab.security.model.BaselineComparison
+import org.unirevlab.security.model.BaselineVerdict
 import org.unirevlab.security.model.StaticAnalysisReport
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -70,12 +73,14 @@ fun ToolsHomeScreen(
     analysisState: AnalysisRunState,
     isInspecting: Boolean,
     error: String?,
+    baselineComparison: BaselineComparison?,
     onAnalyzeFile: () -> Unit,
     onAnalyzeInstalled: () -> Unit,
     onOpenTool: (ProductTool) -> Unit,
     onOpenFullReport: () -> Unit,
     onOpenPatchLab: () -> Unit,
     onOpenHelp: () -> Unit,
+    onOpenProjects: () -> Unit,
     onCancelAnalysis: () -> Unit,
     onNewAssessment: () -> Unit,
 ) {
@@ -103,6 +108,7 @@ fun ToolsHomeScreen(
 
             report?.let { current ->
                 LatestAssessmentCard(current)
+                BaselineSnapshot(baselineComparison)
                 ProtectionSnapshot(current)
             }
 
@@ -141,6 +147,7 @@ fun ToolsHomeScreen(
             }
 
             HorizontalDivider()
+            OutlinedButton(onClick = onOpenProjects, modifier = Modifier.fillMaxWidth()) { Text("Проекты / История / Baseline") }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(onClick = onOpenHelp, modifier = Modifier.weight(1f)) { Text("Справка") }
                 OutlinedButton(onClick = onNewAssessment, enabled = !isInspecting, modifier = Modifier.weight(1f)) { Text("Новый проект") }
@@ -234,6 +241,36 @@ private fun LatestAssessmentCard(report: StaticAnalysisReport) {
             Text(packageName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text("Риск: ${dashboardRiskLabel(report)} · находок ${report.findings.size} · Critical $critical · High $high", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
             Text("SHA-256 ${report.artifact.sha256.take(20)}…", style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+@Composable
+private fun BaselineSnapshot(comparison: BaselineComparison?) {
+    val verdict = comparison?.verdict ?: BaselineVerdict.NO_BASELINE
+    val container = when (verdict) {
+        BaselineVerdict.SAME_ARTIFACT -> MaterialTheme.colorScheme.primaryContainer
+        BaselineVerdict.MODIFIED -> MaterialTheme.colorScheme.tertiaryContainer
+        BaselineVerdict.SIGNER_CHANGED -> MaterialTheme.colorScheme.errorContainer
+        else -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = container)) {
+        Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Trusted Baseline", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(
+                when (verdict) {
+                    BaselineVerdict.NO_BASELINE -> "Baseline не выбран — статус изменения остаётся UNKNOWN."
+                    BaselineVerdict.SAME_ARTIFACT -> "SHA-256 совпадает: текущий APK идентичен trusted baseline."
+                    BaselineVerdict.MODIFIED -> "SHA-256 отличается: текущий APK изменён относительно trusted baseline."
+                    BaselineVerdict.SIGNER_CHANGED -> "APK изменён, и сертификат подписания не совпадает с baseline."
+                    BaselineVerdict.NOT_COMPARABLE -> "Baseline относится к другому package и не используется."
+                    BaselineVerdict.INCOMPLETE_IDENTITY -> "Недостаточно package identity для надёжного сравнения."
+                },
+                style = MaterialTheme.typography.bodySmall,
+            )
+            comparison?.baseline?.let { baseline ->
+                Text("${baseline.artifactDisplayName} · ${baseline.artifactSha256.take(16)}…", style = MaterialTheme.typography.labelSmall)
+            }
         }
     }
 }
@@ -450,6 +487,7 @@ private fun DexToolPanel(report: StaticAnalysisReport) {
     MetricCard("Basic blocks", dex.basicBlocks.size.toString())
     InfoCard("HTTP URLs: ${dex.httpUrls.size} · HTTPS URLs: ${dex.httpsUrls.size} · secret candidates: ${dex.secretCandidates.size}\nParse errors: ${dex.parseErrors} · truncated=${dex.truncated}")
 }
+
 
 
 @Composable
