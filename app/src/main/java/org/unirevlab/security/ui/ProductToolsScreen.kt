@@ -55,6 +55,7 @@ enum class ProductTool(
     val badge: String,
 ) {
     PROTECTION("Protection Matrix", "Root, emulator, debug, hook, signature, integrity", "SHIELD"),
+    DIAGNOSTICS("Diagnostics / Self-Test", "Analyzer consistency, indexes, graph and coverage checks", "TEST"),
     FINDINGS("Security Findings", "Prioritized findings, evidence, remediation and references", "FIND"),
     MANIFEST("Manifest / IPC", "Permissions, exported components, providers, deep links", "APK"),
     DEX("DEX / Logic", "Methods, strings, xrefs, call graph and code index", "DEX"),
@@ -301,6 +302,7 @@ fun ProductToolScreen(
 
             when (tool) {
                 ProductTool.PROTECTION -> ProtectionMatrixPanel(report)
+                ProductTool.DIAGNOSTICS -> DiagnosticsPanel(report)
                 ProductTool.FINDINGS -> CustomerFindingsPanel(report, onOpenPatchLab)
                 ProductTool.SERIALIZATION -> SerializationInspectorPanel(report)
                 ProductTool.MANIFEST -> ManifestToolPanel(report)
@@ -629,13 +631,7 @@ private fun SupplyChainToolPanel(report: StaticAnalysisReport) {
 
 @Composable
 private fun ReverseEngineeringToolPanel(report: StaticAnalysisReport, onOpenFullReport: () -> Unit) {
-    val dex = report.dex
-    MetricCard("DEX call xrefs", dex?.callXrefs?.size?.toString() ?: "0")
-    MetricCard("Basic blocks", dex?.basicBlocks?.size?.toString() ?: "0")
-    MetricCard("Ghidra libraries", report.ghidra.size.toString())
-    MetricCard("Cross-runtime correlations", report.correlations?.links?.size?.toString() ?: "0")
-    InfoCard("Полный RE Browser, поиск xrefs, CallGraph и импорт Ghidra остаются в техническом отчёте. В следующем UI-шаге RE Browser будет вынесен в собственный полноэкранный workspace.")
-    Button(onClick = onOpenFullReport, modifier = Modifier.fillMaxWidth()) { Text("Открыть RE Browser в полном отчёте") }
+    CallGraphWorkspacePanel(report, onOpenFullReport)
 }
 
 @Composable
