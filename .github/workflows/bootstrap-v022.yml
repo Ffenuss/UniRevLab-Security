@@ -42,15 +42,6 @@ jobs:
           git commit --allow-empty -m "Start v0.25.9 CI run ${{ github.run_id }} [skip ci]"
           git push origin HEAD:fix-analysis-progress-v0221
 
-      - name: Apply v0.25.9 AutoMod target resolution
-        run: python tools/apply_v0259_automod_navigation.py
-
-      - name: Apply v0.25.9 compact Patch Lab navigation
-        run: python tools/apply_v0259_compact_patchlab.py
-
-      - name: Apply v0.25.9 Runtime State UX
-        run: python tools/apply_v0259_runtime_binding.py
-
       - name: Apply defensive patch-technique coverage
         run: python tools/apply_v0260_patch_technique_coverage.py
 
@@ -137,9 +128,9 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/build.gradle.kts app/src/main/java/org/unirevlab/security/analysis/AutoModEngine.kt app/src/main/java/org/unirevlab/security/analysis/TamperAssessmentEngine.kt app/src/main/java/org/unirevlab/security/ui/AutoModPanel.kt app/src/main/java/org/unirevlab/security/ui/PatchLabScreen.kt app/src/main/java/org/unirevlab/security/ui/RuntimeStateLabPanel.kt app/src/test/java/org/unirevlab/security/analysis/AutoModEngineTest.kt app/src/test/java/org/unirevlab/security/analysis/TamperAssessmentClassifierTest.kt
+          git add app/src/main/java/org/unirevlab/security/analysis/TamperAssessmentEngine.kt app/src/test/java/org/unirevlab/security/analysis/TamperAssessmentClassifierTest.kt
           if ! git diff --cached --quiet; then
-            git commit -m "Improve AutoMod navigation and defensive tamper coverage (run ${{ github.run_id }}) [skip ci]"
+            git commit -m "Improve defensive tamper technique coverage (run ${{ github.run_id }}) [skip ci]"
           else
             git commit --allow-empty -m "Verify v0.25.9 sources (run ${{ github.run_id }}) [skip ci]"
           fi
