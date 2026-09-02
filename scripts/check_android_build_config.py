@@ -18,8 +18,8 @@ workflow = workflow_path.read_text(encoding="utf-8")
 checks = [
     ("compileSdk 37.0", app, r"version\s*=\s*release\(37\)[\s\S]*minorApiLevel\s*=\s*0"),
     ("targetSdk 36", app, r"targetSdk\s*=\s*36"),
-    ("v0.25.9 staged versionCode", app, r"versionCode\s*=\s*38"),
-    ("v0.25.9 staged versionName", app, r'versionName\s*=\s*"0\.25\.9-dev-automod-navigation"'),
+    ("v0.28.0 preview versionCode", app, r"versionCode\s*=\s*39"),
+    ("v0.28.0 preview versionName", app, r'versionName\s*=\s*"0\.28\.0-preview"'),
     ("release signing input gate", app, r'tasks\.register\("verifyReleaseSigningInputs"\)'),
     ("AGP 9.3.0", root_build, r'id\("com\.android\.application"\) version "9\.3\.0"'),
     ("Kotlin Compose 2.3.21", root_build, r'id\("org\.jetbrains\.kotlin\.plugin\.compose"\) version "2\.3\.21"'),
@@ -35,7 +35,7 @@ checks = [
     ("CI lint", workflow, r':app:lintDebug'),
     ("CI debug build", workflow, r':app:assembleDebug'),
     ("CI APK integrity verify", workflow, r'unzip -t .*APK'),
-    ("CI APK SHA-256", workflow, r'sha256sum .*UniRevLab-Security-v0\.25\.9'),
+    ("CI APK SHA-256", workflow, r'sha256sum .*UniRevLab-Security-v0\.28\.0-preview'),
     ("CI artifact upload", workflow, r'actions/upload-artifact@v4'),
 ]
 
