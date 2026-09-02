@@ -23,10 +23,19 @@ public final class MainActivity extends Activity {
         boolean integrity = SecuritySurfaces.localIntegrityGate(this);
         boolean rooted = SecuritySurfaces.rootIndicatorPresent();
         boolean emulator = SecuritySurfaces.emulatorIndicatorPresent();
+        String installer = InstallerSourceSurface.installer(this);
+        String nativeMarker;
+        try {
+            nativeMarker = NativeFixture.marker();
+        } catch (Throwable t) {
+            nativeMarker = "<native-unavailable>";
+        }
         return "UniRevLab TestTarget\n" +
                 "premium=" + premium + "\n" +
                 "integrity=" + integrity + "\n" +
                 "root=" + rooted + " emulator=" + emulator + "\n" +
+                "installer=" + installer + "\n" +
+                "native=" + nativeMarker + "\n" +
                 "uri=" + (uri == null ? "<none>" : uri.toString()) + "\n\n" +
                 "Tap to open the WebView fixture.";
     }
