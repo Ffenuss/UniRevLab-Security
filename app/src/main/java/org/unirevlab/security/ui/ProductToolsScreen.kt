@@ -55,6 +55,7 @@ enum class ProductTool(
     val badge: String,
 ) {
     PROTECTION("Protection Matrix", "Root, emulator, debug, hook, signature, integrity", "SHIELD"),
+    FINDINGS("Security Findings", "Prioritized findings, evidence, remediation and references", "FIND"),
     MANIFEST("Manifest / IPC", "Permissions, exported components, providers, deep links", "APK"),
     DEX("DEX / Logic", "Methods, strings, xrefs, call graph and code index", "DEX"),
     DEOBFUSCATION("Deobfuscation", "Obfuscation score, semantic aliases and R8 mapping", "DEOB"),
@@ -300,6 +301,7 @@ fun ProductToolScreen(
 
             when (tool) {
                 ProductTool.PROTECTION -> ProtectionMatrixPanel(report)
+                ProductTool.FINDINGS -> CustomerFindingsPanel(report, onOpenPatchLab)
                 ProductTool.SERIALIZATION -> SerializationInspectorPanel(report)
                 ProductTool.MANIFEST -> ManifestToolPanel(report)
                 ProductTool.DEX -> DexToolPanel(report)
