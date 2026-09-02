@@ -76,7 +76,7 @@ object Il2CppPairAssessmentEngine {
 
     private fun updateDigest(digest: MessageDigest, label: String, file: File) {
         digest.update(label.toByteArray(Charsets.UTF_8))
-        digest.update(0)
+        digest.update(0.toByte())
         FileInputStream(file).buffered(128 * 1024).use { input ->
             val buffer = ByteArray(128 * 1024)
             while (true) {
