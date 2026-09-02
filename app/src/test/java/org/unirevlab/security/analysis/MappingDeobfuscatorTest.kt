@@ -62,7 +62,12 @@ class MappingDeobfuscatorTest {
 
     private fun report(dex: DexSummary) = StaticAnalysisReport(
         engineVersion = "test",
-        assessment = AssessmentScope("test", "test", "test", true),
+        assessment = AssessmentScope(
+            projectName = "test",
+            organization = "test",
+            purpose = "test",
+            confirmsAuthority = true,
+        ),
         artifact = ArtifactSummary(
             displayName = "test.apk",
             sizeBytes = 1,
