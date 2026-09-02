@@ -5,6 +5,7 @@ on:
     branches: [ fix-analysis-progress-v0221 ]
     paths:
       - 'app/**'
+      - 'testtarget/**'
       - 'native-core/**'
       - 'build.gradle.kts'
       - 'settings.gradle.kts'
@@ -106,20 +107,26 @@ jobs:
           bash test-corpus/native/build-fixtures.sh
           bash test-corpus/native/build-multiabi-fixtures.sh
 
-      - name: Unit tests + lint + APK build
+      - name: Unit tests + lint + APK builds
         shell: bash
-        run: gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+        run: gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :testtarget:assembleDebug
 
-      - name: Verify APK
+      - name: Verify APKs
         shell: bash
         run: |
           set -euo pipefail
           APK="$(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          TARGET_APK="$(find testtarget/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | head -n 1)"
           test -n "${APK}"
           test -s "${APK}"
+          test -n "${TARGET_APK}"
+          test -s "${TARGET_APK}"
           unzip -t "${APK}" >/dev/null
+          unzip -t "${TARGET_APK}" >/dev/null
           cp "${APK}" UniRevLab-Security-v0.25.9-automod-navigation-debug.apk
+          cp "${TARGET_APK}" UniRevLab-TestTarget-v1.0-debug.apk
           sha256sum UniRevLab-Security-v0.25.9-automod-navigation-debug.apk | tee UniRevLab-Security-v0.25.9-automod-navigation-debug.apk.sha256
+          sha256sum UniRevLab-TestTarget-v1.0-debug.apk | tee UniRevLab-TestTarget-v1.0-debug.apk.sha256
 
       - name: Commit verified v0.25.9 sources
         if: github.ref_name == 'fix-analysis-progress-v0221'
@@ -136,11 +143,20 @@ jobs:
           fi
           git push origin HEAD:fix-analysis-progress-v0221
 
-      - name: Upload APK artifact
+      - name: Upload UniRevLab APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: UniRevLab-Security-v0.25.9-automod-navigation-debug
           path: |
             UniRevLab-Security-v0.25.9-automod-navigation-debug.apk
             UniRevLab-Security-v0.25.9-automod-navigation-debug.apk.sha256
+          if-no-files-found: error
+
+      - name: Upload TestTarget APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: UniRevLab-TestTarget-v1.0-debug
+          path: |
+            UniRevLab-TestTarget-v1.0-debug.apk
+            UniRevLab-TestTarget-v1.0-debug.apk.sha256
           if-no-files-found: error
