@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -57,7 +58,7 @@ fun CustomerFindingsPanel(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
     ) {
         Column(
-            modifier = Modifier.fillMaxWidth().paddingCompat(15.dp),
+            modifier = Modifier.fillMaxWidth().padding(15.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text("Security Findings", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -134,7 +135,7 @@ fun CustomerFindingsPanel(
                 } else {
                     "По выбранным фильтрам результатов нет."
                 },
-                modifier = Modifier.paddingCompat(14.dp),
+                modifier = Modifier.padding(14.dp),
             )
         }
         return
@@ -152,7 +153,7 @@ private fun CustomerFindingCard(
 ) {
     Card(shape = RoundedCornerShape(18.dp)) {
         Column(
-            modifier = Modifier.fillMaxWidth().paddingCompat(14.dp),
+            modifier = Modifier.fillMaxWidth().padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(7.dp),
         ) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -224,7 +225,3 @@ private fun severityLabel(severity: Severity): String = when (severity) {
     Severity.LOW -> "LOW"
     Severity.INFORMATIONAL -> "INFO"
 }
-
-/** Keeps this file independent of the parent screen's import set. */
-private fun Modifier.paddingCompat(all: androidx.compose.ui.unit.Dp): Modifier =
-    this.then(androidx.compose.foundation.layout.padding(all))
