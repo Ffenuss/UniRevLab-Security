@@ -5,6 +5,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.unirevlab.security.model.ArtifactSummary
 import org.unirevlab.security.model.AssessmentScope
+import org.unirevlab.security.model.Il2CppFieldDefinitionSummary
 import org.unirevlab.security.model.Il2CppMetadataSummary
 import org.unirevlab.security.model.Il2CppMethodDefinitionSummary
 import org.unirevlab.security.model.Il2CppSummary
@@ -21,6 +22,10 @@ class Il2CppMonetizationRiskEngineTest {
         assertTrue(result.clientStateCandidates >= 1)
         assertTrue(result.validationCandidates >= 1)
         assertTrue(result.candidates.any {
+            it.kind == "FIELD" && it.managedIdentity.contains("_isPremium") &&
+                it.category == Il2CppMonetizationRiskEngine.Category.PREMIUM
+        })
+        assertTrue(result.candidates.any {
             it.managedIdentity.contains("get_IsPremium") &&
                 it.category == Il2CppMonetizationRiskEngine.Category.PREMIUM
         })
@@ -36,6 +41,7 @@ class Il2CppMonetizationRiskEngineTest {
         val dump = Il2CppManagedDumpExporter.export(report())
 
         assertTrue(dump.contains("Game.Payments.PaymentEntitlement"))
+        assertTrue(dump.contains("FIELD _isPremium"))
         assertTrue(dump.contains("get_IsPremium"))
         assertTrue(dump.contains("token=0x6000001"))
         assertTrue(dump.contains("no patch offsets", ignoreCase = true))
@@ -49,7 +55,7 @@ class Il2CppMonetizationRiskEngineTest {
             metadataVersion = 29,
             headerPairsScanned = 20,
             assemblyNameCandidates = listOf("Assembly-CSharp"),
-            managedNameCandidates = listOf("PaymentEntitlement", "ValidateReceipt"),
+            managedNameCandidates = listOf("PaymentEntitlement", "ValidateReceipt", "_isPremium"),
             unityVersionCandidates = listOf("2022.3"),
             layoutProfile = "v29",
             typeDefinitions = listOf(
@@ -83,6 +89,16 @@ class Il2CppMonetizationRiskEngineTest {
                     parameterCount = 1,
                     token = 0x06000002,
                     flags = 0,
+                ),
+            ),
+            fieldDefinitions = listOf(
+                Il2CppFieldDefinitionSummary(
+                    index = 0,
+                    declaringTypeIndex = 0,
+                    declaringType = "Game.Payments.PaymentEntitlement",
+                    name = "_isPremium",
+                    typeIndex = 2,
+                    token = 0x04000001,
                 ),
             ),
         )
