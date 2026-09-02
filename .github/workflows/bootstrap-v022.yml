@@ -1,4 +1,4 @@
-name: Build UniRevLab v0.33.0 IL2CPP Pair Preview APK
+name: Build UniRevLab v0.34.0 IL2CPP Semantic Preview APK
 
 on:
   push:
@@ -20,7 +20,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: v0330-${{ github.ref }}
+  group: v0340-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -40,7 +40,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit --allow-empty -m "Start v0.33.0 CI run ${{ github.run_id }} [skip ci]"
+          git commit --allow-empty -m "Start v0.34.0 CI run ${{ github.run_id }} [skip ci]"
           git push origin HEAD:fix-analysis-progress-v0221
 
       - name: Apply v0.30.0 full reconstructed mapping
@@ -60,6 +60,9 @@ jobs:
 
       - name: Normalize v0.33.0 IL2CPP workspace compile state
         run: python tools/apply_v0332_il2cpp_compile_guard.py
+
+      - name: Apply v0.34.0 IL2CPP semantic analyst mapping
+        run: python tools/apply_v0340_il2cpp_semantic_mapping.py
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -141,12 +144,12 @@ jobs:
           unzip -t "${TARGET_APK}" >/dev/null
           "${ANDROID_HOME}/build-tools/36.0.0/zipalign" -c -P 16 -v 4 "${APK}" >/dev/null
           "${ANDROID_HOME}/build-tools/36.0.0/zipalign" -c -P 16 -v 4 "${TARGET_APK}" >/dev/null
-          cp "${APK}" UniRevLab-Security-v0.33.0-il2cpp-pair-preview-debug.apk
+          cp "${APK}" UniRevLab-Security-v0.34.0-il2cpp-semantic-preview-debug.apk
           cp "${TARGET_APK}" UniRevLab-TestTarget-v1.0-debug.apk
-          sha256sum UniRevLab-Security-v0.33.0-il2cpp-pair-preview-debug.apk | tee UniRevLab-Security-v0.33.0-il2cpp-pair-preview-debug.apk.sha256
+          sha256sum UniRevLab-Security-v0.34.0-il2cpp-semantic-preview-debug.apk | tee UniRevLab-Security-v0.34.0-il2cpp-semantic-preview-debug.apk.sha256
           sha256sum UniRevLab-TestTarget-v1.0-debug.apk | tee UniRevLab-TestTarget-v1.0-debug.apk.sha256
 
-      - name: Commit verified v0.33.0 sources
+      - name: Commit verified v0.34.0 sources
         if: github.ref_name == 'fix-analysis-progress-v0221'
         shell: bash
         run: |
@@ -166,6 +169,7 @@ jobs:
             app/src/main/java/org/unirevlab/security/analysis/LocalArtifactInspector.kt \
             app/src/main/java/org/unirevlab/security/analysis/Il2CppScanner.kt \
             app/src/main/java/org/unirevlab/security/analysis/Il2CppMonetizationRiskEngine.kt \
+            app/src/main/java/org/unirevlab/security/analysis/Il2CppSemanticMappingEngine.kt \
             app/src/main/java/org/unirevlab/security/analysis/Il2CppManagedDumpExporter.kt \
             app/src/main/java/org/unirevlab/security/analysis/Il2CppPairAssessmentEngine.kt \
             app/src/main/java/org/unirevlab/security/data/AssessmentHistoryStore.kt \
@@ -177,21 +181,22 @@ jobs:
             app/src/test/java/org/unirevlab/security/analysis/FullMappingEngineTest.kt \
             app/src/test/java/org/unirevlab/security/analysis/SemanticRecoveryEngineTest.kt \
             app/src/test/java/org/unirevlab/security/analysis/Il2CppMonetizationRiskEngineTest.kt \
+            app/src/test/java/org/unirevlab/security/analysis/Il2CppSemanticMappingEngineTest.kt \
             app/src/test/java/org/unirevlab/security/data/ReportSnapshotCodecTest.kt
           if ! git diff --cached --quiet; then
-            git commit -m "Apply v0.33.0 IL2CPP pair and durable history (run ${{ github.run_id }}) [skip ci]"
+            git commit -m "Apply v0.34.0 IL2CPP semantic mapping (run ${{ github.run_id }}) [skip ci]"
           else
-            git commit --allow-empty -m "Verify v0.33.0 sources (run ${{ github.run_id }}) [skip ci]"
+            git commit --allow-empty -m "Verify v0.34.0 sources (run ${{ github.run_id }}) [skip ci]"
           fi
           git push origin HEAD:fix-analysis-progress-v0221
 
       - name: Upload UniRevLab APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: UniRevLab-Security-v0.33.0-il2cpp-pair-preview-debug
+          name: UniRevLab-Security-v0.34.0-il2cpp-semantic-preview-debug
           path: |
-            UniRevLab-Security-v0.33.0-il2cpp-pair-preview-debug.apk
-            UniRevLab-Security-v0.33.0-il2cpp-pair-preview-debug.apk.sha256
+            UniRevLab-Security-v0.34.0-il2cpp-semantic-preview-debug.apk
+            UniRevLab-Security-v0.34.0-il2cpp-semantic-preview-debug.apk.sha256
           if-no-files-found: error
 
       - name: Upload TestTarget APK artifact
