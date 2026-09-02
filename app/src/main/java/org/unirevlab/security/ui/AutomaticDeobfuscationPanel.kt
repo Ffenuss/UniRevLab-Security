@@ -37,6 +37,7 @@ import org.unirevlab.security.analysis.AnalystMappingEngine
 import org.unirevlab.security.analysis.DeobfuscationEngine
 import org.unirevlab.security.analysis.FullMappingEngine
 import org.unirevlab.security.analysis.MappingDeobfuscator
+import org.unirevlab.security.analysis.SemanticRecoveryEngine
 import org.unirevlab.security.model.StaticAnalysisReport
 
 @Composable
@@ -54,6 +55,14 @@ fun AutomaticDeobfuscationPanel(report: StaticAnalysisReport) {
         key2 = report.dex?.methodsIndexed,
     ) {
         value = withContext(Dispatchers.Default) { AnalystMappingEngine.generate(report) }
+    }
+
+    val semanticRecovery by produceState<SemanticRecoveryEngine.Result?>(
+        initialValue = null,
+        key1 = report.artifact.sha256,
+        key2 = report.dex?.methodsIndexed,
+    ) {
+        value = withContext(Dispatchers.Default) { SemanticRecoveryEngine.generate(report) }
     }
 
     val fullMapping by produceState<FullMappingEngine.Result?>(
@@ -199,6 +208,13 @@ fun AutomaticDeobfuscationPanel(report: StaticAnalysisReport) {
                         "DEX coverage: ${if (result.dexCoverageComplete) "complete" else "partial / bounded"} · field inventory: ${if (result.fieldInventoryComplete) "complete" else "referenced fields only"}",
                         style = MaterialTheme.typography.bodySmall,
                     )
+                    semanticRecovery?.let { recovery ->
+                        Text(
+                            "Semantic recovery: HIGH ${recovery.highConfidence} · MEDIUM ${recovery.mediumConfidence} · source ${recovery.sourceMetadataHits} · inheritance ${recovery.inheritanceHits} · resources ${recovery.resourceHits} · graph ${recovery.callGraphHits} · JNI/runtime ${recovery.jniHits + recovery.crossRuntimeHits}",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
                     Button(
                         onClick = { exportOriginalStylePicker.launch("unirevlab-full-mapping-${report.artifact.sha256.take(8)}.mapping.txt") },
                         enabled = result.symbols.isNotEmpty(),

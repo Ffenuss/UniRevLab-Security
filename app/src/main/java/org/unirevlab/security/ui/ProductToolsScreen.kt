@@ -23,7 +23,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
@@ -81,6 +80,7 @@ fun ToolsHomeScreen(
     onOpenPatchLab: () -> Unit,
     onOpenHelp: () -> Unit,
     onOpenProjects: () -> Unit,
+    onOpenIl2CppPair: () -> Unit,
     onCancelAnalysis: () -> Unit,
     onNewAssessment: () -> Unit,
 ) {
@@ -99,6 +99,22 @@ fun ToolsHomeScreen(
                 onAnalyzeInstalled = onAnalyzeInstalled,
                 onCancel = onCancelAnalysis,
             )
+
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+            ) {
+                Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Text("IL2CPP Dump / Metadata", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(
+                        "Есть отдельно global-metadata.dat + libil2cpp.so? Откройте pair workspace без предварительного APK-аудита: managed dump, types/methods/fields и monetization attack surface.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    OutlinedButton(onClick = onOpenIl2CppPair, enabled = !isInspecting, modifier = Modifier.fillMaxWidth()) {
+                        Text("Открыть IL2CPP pair workspace")
+                    }
+                }
+            }
 
             error?.let {
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
@@ -551,7 +567,27 @@ private fun RuntimeToolPanel(report: StaticAnalysisReport) {
     val profiles = report.runtimes?.profiles.orEmpty()
     MetricCard("Runtime profiles", profiles.size.toString())
     profiles.forEach { InfoCard("${it.kind} · ${it.confidence}\n${it.indicators.take(8).joinToString()}") }
-    report.il2cpp?.let { MetricCard("IL2CPP", "detected=${it.detected} · confidence=${it.confidence} · libs=${it.libil2cppLibraries.size}") }
+    report.il2cpp?.let { il2cpp ->
+        MetricCard("IL2CPP", "detected=${il2cpp.detected} · confidence=${il2cpp.confidence} · libs=${il2cpp.libil2cppLibraries.size}")
+        il2cpp.metadata?.let { metadata ->
+            MetricCard("IL2CPP managed metadata", "v${metadata.metadataVersion ?: "?"} · types ${metadata.typeDefinitions.size} · methods ${metadata.methodDefinitions.size} · fields ${metadata.fieldDefinitions.size}")
+        }
+        val risk = remember(report.artifact.sha256, report.correlations?.il2cppMethods?.size) {
+            org.unirevlab.security.analysis.Il2CppMonetizationRiskEngine.analyze(report)
+        }
+        MetricCard(
+            "Monetization attack surface",
+            "${risk.posture} · candidates ${risk.candidates.size} · client-state ${risk.clientStateCandidates} · validation ${risk.validationCandidates}",
+        )
+        risk.candidates.take(40).forEach { candidate ->
+            InfoCard(
+                "${candidate.category} · ${candidate.kind} · ${candidate.confidence}\n${candidate.managedIdentity}" +
+                    (candidate.nativeFunctionName?.let { "\nNative correlation: $it" } ?: "") +
+                    (candidate.metadataToken?.let { "\nmetadata token 0x${it.toString(16)}" } ?: ""),
+            )
+        }
+        risk.recommendations.take(5).forEach { InfoCard("Hardening: $it") }
+    }
     report.runtimeArtifacts?.flutter?.let { MetricCard("Flutter", "detected=${it.detected} · confidence=${it.confidence}") }
     report.runtimeArtifacts?.hermes?.let { MetricCard("Hermes", "detected=${it.detected} · confidence=${it.confidence} · bytecode=${it.bytecodeFiles.size}") }
     report.runtimeArtifacts?.unityMono?.let { MetricCard("Unity Mono", "detected=${it.detected} · confidence=${it.confidence} · assemblies=${it.assemblies.size}") }

@@ -53,6 +53,7 @@ import org.unirevlab.security.ui.AnalysisProgressDialog
 import org.unirevlab.security.ui.AssessmentScreen
 import org.unirevlab.security.ui.DashboardScreen
 import org.unirevlab.security.ui.InstalledAppsScreen
+import org.unirevlab.security.ui.Il2CppPairWorkspaceScreen
 import org.unirevlab.security.ui.HelpScreen
 import org.unirevlab.security.ui.PatchLabScreen
 import org.unirevlab.security.ui.ProductTool
@@ -72,7 +73,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Route { AGREEMENT, SCOPE, HOME, TOOL, DASHBOARD, PROJECTS, INSTALLED_APPS, HELP, PATCH_LAB }
+private enum class Route { AGREEMENT, SCOPE, HOME, TOOL, DASHBOARD, PROJECTS, IL2CPP_PAIR, INSTALLED_APPS, HELP, PATCH_LAB }
 
 @Composable
 private fun UniRevLabApp() {
@@ -80,15 +81,24 @@ private fun UniRevLabApp() {
     val agreementStore = remember { AgreementStore(context.applicationContext) }
     val installedRepository = remember { InstalledAppRepository(context.applicationContext) }
     val historyStore = remember { AssessmentHistoryStore(context.applicationContext) }
+    val initialHistory = remember { historyStore.list() }
     remember(context.applicationContext) { AnalysisManager.apply { initialize(context.applicationContext) } }
     val analysisState by AnalysisManager.state.collectAsState()
     val analysisActive = analysisState is AnalysisRunState.Running || analysisState is AnalysisRunState.Cancelling
-    var route by remember { mutableStateOf(if (agreementStore.isAccepted()) Route.SCOPE else Route.AGREEMENT) }
+    var route by remember {
+        mutableStateOf(
+            when {
+                !agreementStore.isAccepted() -> Route.AGREEMENT
+                initialHistory.isNotEmpty() -> Route.PROJECTS
+                else -> Route.SCOPE
+            },
+        )
+    }
     var scope by remember { mutableStateOf<AssessmentScope?>(null) }
     var report by remember { mutableStateOf<StaticAnalysisReport?>(null) }
     var previousReport by remember { mutableStateOf<StaticAnalysisReport?>(null) }
     var comparison by remember { mutableStateOf<AssessmentDiff?>(null) }
-    var historyEntries by remember { mutableStateOf(historyStore.list()) }
+    var historyEntries by remember { mutableStateOf(initialHistory) }
     var baselineEntryIds by remember { mutableStateOf(historyStore.baselineEntryIds()) }
     var baselineComparison by remember { mutableStateOf<BaselineComparison?>(null) }
     var isInspecting by remember { mutableStateOf(false) }
@@ -125,7 +135,6 @@ private fun UniRevLabApp() {
                 } else null
                 scope = next.assessment
                 val savedHistory = withContext(Dispatchers.IO) {
-                    historyStore.record(next)
                     Triple(historyStore.list(), historyStore.baselineEntryIds(), historyStore.compare(next))
                 }
                 historyEntries = savedHistory.first
@@ -135,7 +144,7 @@ private fun UniRevLabApp() {
                 preparedReportExport = null
                 reportExportStatus = null
                 report = next
-                error = null
+                error = state.historyPersistError?.let { "Анализ завершён, но полный отчёт не удалось сохранить в историю: $it" }
                 route = Route.HOME
                 AnalysisManager.clearTerminalState()
             }
@@ -298,9 +307,9 @@ private fun UniRevLabApp() {
     }
 
     BackHandler(
-        enabled = route in setOf(Route.TOOL, Route.DASHBOARD, Route.PROJECTS, Route.INSTALLED_APPS, Route.HELP, Route.PATCH_LAB),
+        enabled = route in setOf(Route.TOOL, Route.DASHBOARD, Route.PROJECTS, Route.IL2CPP_PAIR, Route.INSTALLED_APPS, Route.HELP, Route.PATCH_LAB),
     ) {
-        route = Route.HOME
+        route = if (route == Route.PROJECTS && scope == null) Route.SCOPE else Route.HOME
     }
 
     when (route) {
@@ -347,6 +356,7 @@ private fun UniRevLabApp() {
             },
             onOpenHelp = { route = Route.HELP },
             onOpenProjects = { route = Route.PROJECTS },
+            onOpenIl2CppPair = { route = Route.IL2CPP_PAIR },
             onCancelAnalysis = { AnalysisManager.cancel() },
             onNewAssessment = {
                 if (!analysisActive) {
@@ -498,7 +508,41 @@ private fun UniRevLabApp() {
             baselineEntryIds = baselineEntryIds,
             currentReport = report,
             currentComparison = baselineComparison,
-            onBack = { route = Route.HOME },
+            isLoadingReport = isInspecting,
+            onBack = { route = if (scope == null) Route.SCOPE else Route.HOME },
+            onOpen = { entryId ->
+                if (!isInspecting) {
+                    coroutineScope.launch {
+                        isInspecting = true
+                        error = null
+                        val result = runCatching {
+                            withContext(Dispatchers.IO) {
+                                val loaded = historyStore.loadReport(entryId)
+                                loaded to historyStore.compare(loaded)
+                            }
+                        }
+                        result.getOrNull()?.let { (loaded, loadedBaseline) ->
+                            scope = loaded.assessment
+                            report = loaded
+                            previousReport = null
+                            comparison = null
+                            baselineComparison = loadedBaseline
+                            selectedTool = null
+                            patchFinding = null
+                            lastArtifactUri = null
+                            lastInstalledApp = null
+                            preparedReportExport?.file?.let { runCatching { it.delete() } }
+                            preparedReportExport = null
+                            reportExportStatus = null
+                            route = Route.HOME
+                        }
+                        result.exceptionOrNull()?.let { failure ->
+                            error = "Не удалось открыть сохранённый анализ: ${failure.message ?: failure.javaClass.simpleName}"
+                        }
+                        isInspecting = false
+                    }
+                }
+            },
             onSetBaseline = { entryId ->
                 val result = runCatching { historyStore.setBaseline(entryId) }
                 error = result.exceptionOrNull()?.message
@@ -514,6 +558,15 @@ private fun UniRevLabApp() {
                 error = result.exceptionOrNull()?.message
                 if (result.isSuccess) refreshHistoryState()
             },
+        )
+        Route.IL2CPP_PAIR -> Il2CppPairWorkspaceScreen(
+            scope = scope ?: AssessmentScope(
+                projectName = "IL2CPP dump review",
+                organization = "Local authorized assessment",
+                purpose = "Defensive IL2CPP dump analysis",
+                confirmsAuthority = true,
+            ),
+            onBack = { route = if (scope == null) Route.SCOPE else Route.HOME },
         )
         Route.HELP -> HelpScreen(onBack = { route = Route.HOME })
         Route.PATCH_LAB -> {

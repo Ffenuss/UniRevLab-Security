@@ -224,7 +224,7 @@ private fun Il2CppPairResultPanel(current: Il2CppPairAssessmentEngine.Result) {
             Text("Pair SHA-256 ${current.aggregateSha256.take(24)}…", style = MaterialTheme.typography.bodySmall)
         }
     }
-    current.warnings.forEach { InfoCard("⚠ $it") }
+    current.warnings.forEach { PairInfoCard("⚠ $it") }
     if (risk.recommendations.isNotEmpty()) {
         Card(shape = RoundedCornerShape(18.dp)) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -234,7 +234,7 @@ private fun Il2CppPairResultPanel(current: Il2CppPairAssessmentEngine.Result) {
         }
     }
     if (risk.candidates.isEmpty()) {
-        InfoCard(
+        PairInfoCard(
             if (risk.coverageComplete) {
                 "В восстановленной metadata очевидные premium/IAP/entitlement identifiers не обнаружены. Это не доказывает отсутствие монетизации."
             } else {
@@ -254,6 +254,13 @@ private fun CandidateCard(candidate: Il2CppMonetizationRiskEngine.Candidate) {
             candidate.nativeFunctionName?.let { Text("Native correlation: $it", style = MaterialTheme.typography.bodySmall) }
             candidate.evidence.take(4).forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
         }
+    }
+}
+
+@Composable
+private fun PairInfoCard(text: String) {
+    Card(shape = RoundedCornerShape(16.dp)) {
+        Text(text, modifier = Modifier.padding(13.dp), style = MaterialTheme.typography.bodySmall)
     }
 }
 

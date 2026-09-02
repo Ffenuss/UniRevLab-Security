@@ -200,6 +200,8 @@ object DexStringScanner {
                 val classIdx = readU32(raf, base).toIntChecked("class_idx")
                 val accessFlags = readU32(raf, base + 4)
                 val superIdxLong = readU32(raf, base + 8)
+                val interfacesOff = readU32(raf, base + 12)
+                val sourceFileIdxLong = readU32(raf, base + 16)
                 val classDataOff = readU32(raf, base + 24)
                 if (classIdx !in 0 until h.typeIdsSize) throw DexFormatException("class_idx outside type_ids")
                 val descriptor = typeDescriptor(raf, h, classIdx, limits.maxStringBytes)
@@ -208,7 +210,37 @@ object DexStringScanner {
                     if (superIdx !in 0 until h.typeIdsSize) throw DexFormatException("superclass_idx outside type_ids")
                     typeDescriptor(raf, h, superIdx, limits.maxStringBytes)
                 }
-                val classRef = DexClassReference(dexEntry, classDefIndex, descriptor, superDescriptor, accessFlags)
+                val interfaces = if (interfacesOff == 0L) {
+                    emptyList()
+                } else {
+                    ensureRange(interfacesOff, 4, h.fileSize, "class interfaces type_list")
+                    val countLong = readU32(raf, interfacesOff)
+                    if (countLong > limits.maxProtoParameters) throw DexFormatException("class interface count exceeds limit")
+                    ensureRange(interfacesOff + 4, countLong.checkedMul(2), h.fileSize, "class interfaces")
+                    buildList {
+                        repeat(countLong.toInt()) { interfaceIndex ->
+                            val typeIdx = readU16(raf, interfacesOff + 4 + interfaceIndex.toLong() * 2L)
+                            if (typeIdx !in 0 until h.typeIdsSize) throw DexFormatException("interface type_idx outside type_ids")
+                            add(typeDescriptor(raf, h, typeIdx, limits.maxStringBytes))
+                        }
+                    }
+                }
+                val sourceFile = if (sourceFileIdxLong == NO_INDEX) {
+                    null
+                } else {
+                    val sourceFileIdx = sourceFileIdxLong.toIntChecked("source_file_idx")
+                    if (sourceFileIdx !in 0 until h.stringIdsSize) throw DexFormatException("source_file_idx outside string_ids")
+                    readStringByIndex(raf, h, sourceFileIdx, limits.maxStringBytes).value.take(512)
+                }
+                val classRef = DexClassReference(
+                    dexEntry = dexEntry,
+                    classIndex = classDefIndex,
+                    descriptor = descriptor,
+                    superDescriptor = superDescriptor,
+                    accessFlags = accessFlags,
+                    interfaces = interfaces,
+                    sourceFile = sourceFile,
+                )
                 if (classes.size < limits.maxReportedClasses) classes += classRef else truncated = true
 
                 if (classDataOff != 0L) {

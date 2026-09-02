@@ -118,6 +118,10 @@ data class DexClassReference(
     val descriptor: String,
     val superDescriptor: String?,
     val accessFlags: Long,
+    /** DEX class_def interfaces, retained for semantic deobfuscation/recovery. */
+    val interfaces: List<String> = emptyList(),
+    /** Surviving class_def source_file string when present; not treated as an exact class name. */
+    val sourceFile: String? = null,
 ) : java.io.Serializable
 
 data class DexFieldReference(
@@ -382,6 +386,15 @@ data class Il2CppMethodDefinitionSummary(
     val flags: Int,
 ) : java.io.Serializable
 
+data class Il2CppFieldDefinitionSummary(
+    val index: Int,
+    val declaringTypeIndex: Int,
+    val declaringType: String,
+    val name: String,
+    val typeIndex: Int,
+    val token: Long,
+) : java.io.Serializable
+
 data class Il2CppMetadataSummary(
     val entryName: String,
     val sizeBytes: Long,
@@ -395,6 +408,7 @@ data class Il2CppMetadataSummary(
     val tableRanges: List<Il2CppTableRange> = emptyList(),
     val typeDefinitions: List<Il2CppTypeDefinitionSummary> = emptyList(),
     val methodDefinitions: List<Il2CppMethodDefinitionSummary> = emptyList(),
+    val fieldDefinitions: List<Il2CppFieldDefinitionSummary> = emptyList(),
     val reconstructionTruncated: Boolean = false,
     val parseError: String? = null,
     val truncated: Boolean = false,

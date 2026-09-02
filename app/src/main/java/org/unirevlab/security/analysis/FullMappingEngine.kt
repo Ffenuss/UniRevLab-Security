@@ -49,7 +49,23 @@ object FullMappingEngine {
         if (maxSymbols <= 0) return emptyResult(report)
 
         val automatic = AnalystMappingEngine.generate(report, maxEntries = maxSymbols)
-        val automaticBySymbol = automatic.entries.associateBy { it.obfuscatedSymbol }
+        val semanticRecovery = SemanticRecoveryEngine.generate(report, maxEntries = maxSymbols)
+        val automaticBySymbol = automatic.entries.associateBy { it.obfuscatedSymbol }.toMutableMap().apply {
+            semanticRecovery.entries.forEach { recovered ->
+                val candidate = AnalystMappingEngine.Entry(
+                    kind = recovered.kind,
+                    obfuscatedSymbol = recovered.obfuscatedSymbol,
+                    alias = recovered.alias,
+                    confidence = recovered.confidence,
+                    basis = AnalystMappingEngine.Basis.SEMANTIC,
+                    evidence = recovered.evidence,
+                )
+                val current = get(recovered.obfuscatedSymbol)
+                if (current == null || candidate.confidence.ordinal <= current.confidence.ordinal) {
+                    put(recovered.obfuscatedSymbol, candidate)
+                }
+            }
+        }
         val exact = officialMapping?.let { MappingDeobfuscator.resolve(report, it, limit = maxSymbols) }.orEmpty()
         val exactBySymbol = exact.associateBy { it.obfuscatedSymbol }
 
@@ -265,7 +281,7 @@ object FullMappingEngine {
         symbols: List<Symbol>,
         dexCoverageComplete: Boolean,
     ): String = buildString {
-        appendLine("# UniRevLab Security full analyst mapping v2")
+        appendLine("# UniRevLab Security full analyst mapping v3")
         appendLine("# artifact_sha256=${report.artifact.sha256}")
         appendLine("# dex_coverage_complete=$dexCoverageComplete")
         appendLine("# field_inventory_complete=false")
@@ -294,7 +310,7 @@ object FullMappingEngine {
         fieldInventoryComplete = false,
         symbols = emptyList(),
         originalStyleMappingText = "# UniRevLab Security reconstructed mapping\n# artifact_sha256=${report.artifact.sha256}\n",
-        provenanceMappingText = "# UniRevLab Security full analyst mapping v2\n# artifact_sha256=${report.artifact.sha256}\n",
+        provenanceMappingText = "# UniRevLab Security full analyst mapping v3\n# artifact_sha256=${report.artifact.sha256}\n",
     )
 
     private fun recoveredClassName(descriptor: String, alias: String): String {

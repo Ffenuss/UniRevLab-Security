@@ -1741,7 +1741,7 @@ class LocalArtifactInspector(
     )
 
     companion object {
-        const val ENGINE_VERSION = "0.25.8-dev-apkset-sources"
+        const val ENGINE_VERSION = "0.33.0-il2cpp-fields"
 
         private fun checkCancelled() {
             if (Thread.currentThread().isInterrupted) throw InterruptedIOException("Analysis cancelled")

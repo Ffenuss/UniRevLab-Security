@@ -1,6 +1,7 @@
 package org.unirevlab.security.analysis
 
 import org.unirevlab.security.model.Il2CppMetadataSummary
+import org.unirevlab.security.model.Il2CppFieldDefinitionSummary
 import org.unirevlab.security.model.Il2CppMethodDefinitionSummary
 import org.unirevlab.security.model.Il2CppRegistrationCandidate
 import org.unirevlab.security.model.Il2CppSummary
@@ -30,7 +31,13 @@ object Il2CppScanner {
         val maxHeaderPairs: Int = 128,
         val maxTypeDefinitions: Int = 20_000,
         val maxMethodDefinitions: Int = 50_000,
+        val maxFieldDefinitions: Int = 50_000,
         val maxMetadataStringBytes: Int = 16 * 1024,
+    )
+
+    data class PairAnalysis(
+        val native: NativeSummary,
+        val il2cpp: Il2CppSummary,
     )
 
     fun scanApk(
@@ -160,6 +167,97 @@ object Il2CppScanner {
         }
     }
 
+    /** Analyze a dumped global-metadata.dat + matching libil2cpp.so as inert files. */
+    fun scanPair(
+        metadataFile: File,
+        libraryFile: File,
+        limits: Limits = Limits(),
+    ): PairAnalysis {
+        require(metadataFile.isFile && metadataFile.canRead()) { "global-metadata.dat is not readable" }
+        require(libraryFile.isFile && libraryFile.canRead()) { "libil2cpp.so is not readable" }
+        require(metadataFile.length() in 1..limits.maxMetadataBytes) {
+            "global-metadata.dat exceeds bounded local-analysis limit"
+        }
+
+        val library = ElfNativeScanner.scan("libil2cpp.so", libraryFile)
+        val native = NativeSummary(
+            librariesDiscovered = 1,
+            librariesScanned = 1,
+            libraries = listOf(library),
+            parseErrors = if (library.parseError == null) 0 else 1,
+            truncated = library.truncated,
+        )
+
+        var metadataParseErrors = 0
+        val metadata = runCatching {
+            val bytes = metadataFile.inputStream().buffered().use { readBounded(it, limits.maxMetadataBytes) }
+            parseMetadata(metadataFile.name, bytes, emptyList(), limits)
+        }.getOrElse { failure ->
+            metadataParseErrors++
+            emptyMetadata(
+                metadataFile.name,
+                metadataFile.length(),
+                failure.message?.take(240) ?: failure::class.java.simpleName,
+            )
+        }
+
+        val apiSet = java.util.TreeSet<String>()
+        val registrationMap = LinkedHashMap<Triple<String, String, String>, Il2CppRegistrationCandidate>()
+        fun consumeSymbol(symbol: org.unirevlab.security.model.NativeSymbolReference) {
+            if (symbol.name.startsWith("il2cpp_") && apiSet.size < limits.maxApiSymbols + 1) apiSet += symbol.name
+            if (registrationMap.size >= 128) return
+            val normalized = symbol.name.lowercase()
+            val kind = when {
+                normalized.contains("coderegistration") || normalized == "g_code_registration" -> "CODE_REGISTRATION_SYMBOL"
+                normalized.contains("metadataregistration") || normalized == "g_metadata_registration" -> "METADATA_REGISTRATION_SYMBOL"
+                normalized.contains("il2cpp_codegen_register") -> "CODEGEN_REGISTER_SYMBOL"
+                else -> null
+            } ?: return
+            val candidate = Il2CppRegistrationCandidate(
+                kind = kind,
+                libraryEntry = symbol.libraryEntry,
+                symbolName = symbol.name,
+                virtualAddress = symbol.virtualAddress,
+                sizeBytes = symbol.sizeBytes,
+                validatedDefinedSymbol = symbol.defined && symbol.virtualAddress != null,
+            )
+            registrationMap.putIfAbsent(Triple(candidate.kind, candidate.libraryEntry, candidate.symbolName), candidate)
+        }
+        library.exportedSymbols.forEach(::consumeSymbol)
+        library.importedSymbols.forEach(::consumeSymbol)
+        val apiSymbols = apiSet.take(limits.maxApiSymbols)
+        val registrations = registrationMap.values.toList()
+
+        val indicators = buildList {
+            add("STANDALONE_IL2CPP_PAIR")
+            add("LIBIL2CPP_PRESENT")
+            if (metadata.magicValid) add("METADATA_MAGIC_VALID")
+            if (metadata.typeDefinitions.isNotEmpty()) add("TYPE_DEFINITIONS_RECONSTRUCTED")
+            if (metadata.methodDefinitions.isNotEmpty()) add("METHOD_DEFINITIONS_RECONSTRUCTED")
+            if (metadata.fieldDefinitions.isNotEmpty()) add("FIELD_DEFINITIONS_RECONSTRUCTED")
+            if (apiSymbols.isNotEmpty()) add("IL2CPP_API_SYMBOLS_PRESENT")
+            if (registrations.isNotEmpty()) add("REGISTRATION_SYMBOL_CANDIDATES_PRESENT")
+        }
+        val detected = metadata.magicValid
+        val confidence = when {
+            metadata.magicValid && metadata.typeDefinitions.isNotEmpty() -> "HIGH"
+            metadata.magicValid -> "MEDIUM"
+            else -> "LOW"
+        }
+        val il2cpp = Il2CppSummary(
+            detected = detected,
+            confidence = confidence,
+            metadata = metadata,
+            libil2cppLibraries = listOf("libil2cpp.so"),
+            il2cppApiSymbols = apiSymbols,
+            registrationIndicators = indicators,
+            registrationCandidates = registrations,
+            parseErrors = metadataParseErrors + native.parseErrors,
+            truncated = metadata.truncated || metadata.reconstructionTruncated || native.truncated,
+        )
+        return PairAnalysis(native, il2cpp)
+    }
+
     private fun emptyMetadata(
         entryName: String,
         size: Long,
@@ -231,6 +329,7 @@ object Il2CppScanner {
             tableRanges = structured.tableRanges,
             typeDefinitions = structured.types,
             methodDefinitions = structured.methods,
+            fieldDefinitions = structured.fields,
             reconstructionTruncated = structured.truncated,
             parseError = when {
                 !magicValid -> "unexpected IL2CPP metadata magic 0x${magic.toString(16)}"
@@ -246,11 +345,12 @@ object Il2CppScanner {
         val tableRanges: List<Il2CppTableRange>,
         val types: List<Il2CppTypeDefinitionSummary>,
         val methods: List<Il2CppMethodDefinitionSummary>,
+        val fields: List<Il2CppFieldDefinitionSummary>,
         val truncated: Boolean,
         val error: String?,
     ) {
         companion object {
-            fun unsupported(error: String?) = StructuredResult(null, emptyList(), emptyList(), emptyList(), false, error)
+            fun unsupported(error: String?) = StructuredResult(null, emptyList(), emptyList(), emptyList(), emptyList(), false, error)
         }
     }
 
@@ -285,9 +385,10 @@ object Il2CppScanner {
         val ranges = namedPairs.mapNotNull { (i, n) -> pair(i, n) }
         val strings = ranges.firstOrNull { it.name == "strings" }
         val methodsRange = ranges.firstOrNull { it.name == "methods" }
+        val fieldsRange = ranges.firstOrNull { it.name == "fields" }
         val typesRange = ranges.firstOrNull { it.name == "typeDefinitions" }
         if (strings == null || methodsRange == null || typesRange == null || strings.sizeBytes == 0L) {
-            return StructuredResult(layout, ranges, emptyList(), emptyList(), false, "required IL2CPP metadata tables are absent")
+            return StructuredResult(layout, ranges, emptyList(), emptyList(), emptyList(), false, "required IL2CPP metadata tables are absent")
         }
 
         fun metadataString(relativeOffset: Long): String? {
@@ -304,12 +405,16 @@ object Il2CppScanner {
 
         val typeRecordSize = 88
         val methodRecordSize = if (version == 31) 36 else 32
+        val fieldRecordSize = 12
         val declaredTypes = (typesRange.sizeBytes / typeRecordSize).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
         val declaredMethods = (methodsRange.sizeBytes / methodRecordSize).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-        var truncated = typesRange.sizeBytes % typeRecordSize != 0L || methodsRange.sizeBytes % methodRecordSize != 0L
+        val declaredFields = ((fieldsRange?.sizeBytes ?: 0L) / fieldRecordSize).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        var truncated = typesRange.sizeBytes % typeRecordSize != 0L || methodsRange.sizeBytes % methodRecordSize != 0L ||
+            ((fieldsRange?.sizeBytes ?: 0L) % fieldRecordSize != 0L)
         val typeCount = minOf(declaredTypes, limits.maxTypeDefinitions)
         val methodCount = minOf(declaredMethods, limits.maxMethodDefinitions)
-        if (typeCount < declaredTypes || methodCount < declaredMethods) truncated = true
+        val fieldCount = minOf(declaredFields, limits.maxFieldDefinitions)
+        if (typeCount < declaredTypes || methodCount < declaredMethods || fieldCount < declaredFields) truncated = true
 
         val types = mutableListOf<Il2CppTypeDefinitionSummary>()
         repeat(typeCount) { index ->
@@ -337,6 +442,34 @@ object Il2CppScanner {
         }
         val typeByIndex = types.associateBy { it.index }
 
+        val fieldOwner = HashMap<Int, Il2CppTypeDefinitionSummary>()
+        types.forEach { type ->
+            if (type.fieldStart >= 0 && type.fieldCount > 0) {
+                repeat(type.fieldCount) { relative ->
+                    fieldOwner.putIfAbsent(type.fieldStart + relative, type)
+                }
+            }
+        }
+        val fields = mutableListOf<Il2CppFieldDefinitionSummary>()
+        val fieldTable = fieldsRange
+        if (fieldTable != null) {
+            repeat(fieldCount) { index ->
+                val baseLong = fieldTable.offset + index.toLong() * fieldRecordSize
+                if (baseLong < 0 || baseLong + fieldRecordSize > bytes.size) return@repeat
+                val base = baseLong.toInt()
+                val name = metadataString(u32le(bytes, base)) ?: return@repeat
+                val owner = fieldOwner[index]
+                fields += Il2CppFieldDefinitionSummary(
+                    index = index,
+                    declaringTypeIndex = owner?.index ?: -1,
+                    declaringType = owner?.fullName ?: "<unresolved-field-owner>",
+                    name = name,
+                    typeIndex = i32le(bytes, base + 4),
+                    token = u32le(bytes, base + 8),
+                )
+            }
+        }
+
         val methods = mutableListOf<Il2CppMethodDefinitionSummary>()
         repeat(methodCount) { index ->
             val baseLong = methodsRange.offset + index.toLong() * methodRecordSize
@@ -358,7 +491,7 @@ object Il2CppScanner {
             )
         }
 
-        return StructuredResult(layout, ranges, types, methods, truncated, null)
+        return StructuredResult(layout, ranges, types, methods, fields, truncated, null)
     }
 
     private fun extractPrintableStrings(bytes: ByteArray, max: Int): List<String> {
