@@ -1,6 +1,6 @@
 package org.unirevlab.security.analysis
 
-import org.unirevlab.security.model.DexFieldXref
+import org.unirevlab.security.model.DexFieldReference
 import org.unirevlab.security.model.DexMethodReference
 import org.unirevlab.security.model.StaticAnalysisReport
 
@@ -148,7 +148,20 @@ object FullMappingEngine {
                 )
             }
 
-        dex.fieldXrefs.asSequence()
+        val fieldInventory = if (dex.fields.isNotEmpty()) {
+            dex.fields.asSequence()
+        } else {
+            dex.fieldXrefs.asSequence().map { xref ->
+                DexFieldReference(
+                    dexEntry = xref.dexEntry,
+                    fieldIndex = xref.fieldIndex,
+                    declaringClass = xref.declaringClass,
+                    name = xref.fieldName,
+                    type = xref.fieldType,
+                )
+            }
+        }
+        fieldInventory
             .filter { it.declaringClass in classDescriptors }
             .distinctBy { Triple(it.dexEntry, it.fieldIndex, it.declaringClass) }
             .forEach { field ->
@@ -156,11 +169,11 @@ object FullMappingEngine {
                 val key = fieldSymbol(field)
                 val exactAlias = exactBySymbol[key]
                 val automaticAlias = automaticBySymbol[key]
-                val readable = !looksObfuscatedSimpleName(field.fieldName)
+                val readable = !looksObfuscatedSimpleName(field.name)
                 val reconstructedName = when {
-                    exactAlias != null -> extractExactFieldName(exactAlias.originalSymbol, field.fieldName)
+                    exactAlias != null -> extractExactFieldName(exactAlias.originalSymbol, field.name)
                     automaticAlias != null -> automaticAlias.alias
-                    readable -> field.fieldName
+                    readable -> field.name
                     else -> "field_f${field.fieldIndex}"
                 }
                 add(
@@ -207,9 +220,7 @@ object FullMappingEngine {
             structuralSymbols = ordered.count { it.origin == Origin.STRUCTURAL },
             preservedSymbols = ordered.count { it.origin == Origin.PRESERVED },
             dexCoverageComplete = dexCoverageComplete,
-            // Current report model exposes field references, not the entire field_ids declaration table.
-            // This flag deliberately remains false until the structural DEX inventory is extended.
-            fieldInventoryComplete = false,
+            fieldInventoryComplete = dex.parseErrors == 0 && dex.fieldsIndexed >= dex.fieldsDeclared,
             symbols = ordered,
             originalStyleMappingText = renderOriginalStyle(report, ordered, classNames),
             provenanceMappingText = renderProvenance(report, ordered, dexCoverageComplete),
@@ -302,8 +313,8 @@ object FullMappingEngine {
     private fun methodSymbol(method: DexMethodReference): String =
         "${method.declaringClass}->${method.name}${method.prototype}"
 
-    private fun fieldSymbol(field: DexFieldXref): String =
-        "${field.declaringClass}->${field.fieldName}:${field.fieldType}"
+    private fun fieldSymbol(field: DexFieldReference): String =
+        "${field.declaringClass}->${field.name}:${field.type}"
 
     private fun extractExactMemberName(original: String, fallback: String): String {
         val beforeProto = original.substringBefore('(')

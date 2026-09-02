@@ -22,6 +22,7 @@ import org.unirevlab.security.model.DexStringXref
 import org.unirevlab.security.model.DexMethodCallXref
 import org.unirevlab.security.model.DexMethodCodeReference
 import org.unirevlab.security.model.DexFieldXref
+import org.unirevlab.security.model.DexFieldReference
 import org.unirevlab.security.model.DexBasicBlock
 import org.unirevlab.security.model.DexConstantReference
 import org.unirevlab.security.model.ManifestSummary
@@ -453,6 +454,7 @@ class LocalArtifactInspector(
 
         val classes = BoundedCollector<DexClassReference>(MAX_REPORTED_DEX_CLASSES)
         val methods = BoundedCollector<DexMethodReference>(MAX_REPORTED_DEX_METHODS)
+        val fields = BoundedCollector<DexFieldReference>(MAX_REPORTED_DEX_FIELDS)
         val nativeMethods = BoundedCollector<DexNativeMethodDeclaration>(MAX_REPORTED_NATIVE_METHODS)
         val codeMethods = BoundedCollector<DexMethodCodeReference>(MAX_REPORTED_CODE_METHODS)
         val callXrefs = BoundedCollector<DexMethodCallXref>(MAX_REPORTED_CALL_XREFS)
@@ -469,6 +471,7 @@ class LocalArtifactInspector(
         for (value in values) {
             classes.addAll(value.classes)
             methods.addAll(value.methods)
+            fields.addAll(value.fields)
             nativeMethods.addAll(value.nativeMethods)
             codeMethods.addAll(value.codeMethods)
             callXrefs.addAll(value.callXrefs)
@@ -483,7 +486,7 @@ class LocalArtifactInspector(
             secrets.addAll(value.secretCandidates)
         }
         truncated = truncated || listOf(
-            classes.overflowed, methods.overflowed, nativeMethods.overflowed, codeMethods.overflowed,
+            classes.overflowed, methods.overflowed, fields.overflowed, nativeMethods.overflowed, codeMethods.overflowed,
             callXrefs.overflowed, stringXrefs.overflowed, typeXrefs.overflowed, fieldXrefs.overflowed,
             basicBlocks.overflowed, constants.overflowed, invokeObservations.overflowed,
             httpUrls.overflowed, httpsUrls.overflowed, secrets.overflowed,
@@ -500,6 +503,9 @@ class LocalArtifactInspector(
             classesIndexed = values.sumOf { it.classesIndexed },
             methodsDeclared = values.sumOf { it.methodsDeclared },
             methodsIndexed = values.sumOf { it.methodsIndexed },
+            fieldsDeclared = values.sumOf { it.fieldsDeclared },
+            fieldsIndexed = values.sumOf { it.fieldsIndexed },
+            fields = fields.toList(),
             classes = classes.toList(),
             methods = methods.toList(),
             nativeMethods = nativeMethods.toList(),
@@ -900,6 +906,7 @@ class LocalArtifactInspector(
     private fun rebaseDexInventory(value: DexStringScanner.FileResult, dexEntry: String): DexStringScanner.FileResult = value.copy(
         classes = value.classes.map { it.copy(dexEntry = dexEntry) },
         methods = value.methods.map { it.copy(dexEntry = dexEntry) },
+        fields = value.fields.map { it.copy(dexEntry = dexEntry) },
         nativeMethods = value.nativeMethods.map { it.copy(dexEntry = dexEntry) },
         httpUrls = value.httpUrls.map { it.copy(dexEntry = dexEntry) },
         httpsUrls = value.httpsUrls.map { it.copy(dexEntry = dexEntry) },
@@ -992,12 +999,15 @@ class LocalArtifactInspector(
         var classesIndexed = 0L
         var methodsDeclared = 0L
         var methodsIndexed = 0L
+        var fieldsDeclared = 0L
+        var fieldsIndexed = 0L
         var totalDexBytes = 0L
         val httpUrls = BoundedDistinctCollector<org.unirevlab.security.model.DexStringReference, Triple<String, Int, String>>(MAX_REPORTED_URLS) { Triple(it.dexEntry, it.stringIndex, it.value) }
         val httpsUrls = BoundedDistinctCollector<org.unirevlab.security.model.DexStringReference, Triple<String, Int, String>>(MAX_REPORTED_URLS) { Triple(it.dexEntry, it.stringIndex, it.value) }
         val secretCandidates = BoundedDistinctCollector<org.unirevlab.security.model.SecretCandidate, Triple<String, String, Int>>(MAX_REPORTED_SECRET_CANDIDATES) { Triple(it.kind, it.dexEntry, it.stringIndex) }
         val classes = BoundedDistinctCollector<DexClassReference, Triple<String, Int, String>>(MAX_REPORTED_DEX_CLASSES) { Triple(it.dexEntry, it.classIndex, it.descriptor) }
         val methods = BoundedDistinctCollector<DexMethodReference, Triple<String, Int, String>>(MAX_REPORTED_DEX_METHODS) { Triple(it.dexEntry, it.methodIndex, it.declaringClass) }
+        val fields = BoundedDistinctCollector<DexFieldReference, Triple<String, Int, String>>(MAX_REPORTED_DEX_FIELDS) { Triple(it.dexEntry, it.fieldIndex, it.declaringClass) }
         val nativeMethods = BoundedDistinctCollector<DexNativeMethodDeclaration, Triple<String, Int, String>>(MAX_REPORTED_NATIVE_METHODS) { Triple(it.dexEntry, it.methodIndex, it.declaringClass) }
         val codeMethods = BoundedDistinctCollector<DexMethodCodeReference, Triple<String, Int, Long>>(MAX_REPORTED_CODE_METHODS) { Triple(it.dexEntry, it.methodIndex, it.codeOffset) }
         val callXrefs = BoundedDistinctCollector<DexMethodCallXref, DexCallKey>(MAX_REPORTED_CALL_XREFS) { DexCallKey(it.dexEntry, it.callerMethodIndex, it.calleeMethodIndex, it.instructionOffsetCodeUnits) }
@@ -1134,8 +1144,11 @@ class LocalArtifactInspector(
                                 classesIndexed += scan.classesIndexed.toLong()
                                 methodsDeclared += scan.methodsDeclared.toLong()
                                 methodsIndexed += scan.methodsIndexed.toLong()
+                                fieldsDeclared += scan.fieldsDeclared.toLong()
+                                fieldsIndexed += scan.fieldsIndexed.toLong()
                                 classes.addAll(scan.classes)
                                 methods.addAll(scan.methods)
+                                fields.addAll(scan.fields)
                                 nativeMethods.addAll(scan.nativeMethods)
                                 if (scan.truncated) truncated = true
                                 httpUrls.addAll(scan.httpUrls)
@@ -1192,6 +1205,9 @@ class LocalArtifactInspector(
             classesIndexed = classesIndexed,
             methodsDeclared = methodsDeclared,
             methodsIndexed = methodsIndexed,
+            fieldsDeclared = fieldsDeclared,
+            fieldsIndexed = fieldsIndexed,
+            fields = fields.toList(),
             classes = classes.toList(),
             methods = methods.toList(),
             nativeMethods = nativeMethods.toList(),
@@ -1208,7 +1224,7 @@ class LocalArtifactInspector(
             secretCandidates = secretCandidates.toList(),
             parseErrors = parseErrors,
             truncated = truncated || filesScanned < minOf(discovered, MAX_DEX_FILES) || listOf(
-                classes.overflowed, methods.overflowed, nativeMethods.overflowed, codeMethods.overflowed,
+                classes.overflowed, methods.overflowed, fields.overflowed, nativeMethods.overflowed, codeMethods.overflowed,
                 callXrefs.overflowed, stringXrefs.overflowed, typeXrefs.overflowed, fieldXrefs.overflowed,
                 basicBlocks.overflowed, constants.overflowed, invokeObservations.overflowed,
                 httpUrls.overflowed, httpsUrls.overflowed, secretCandidates.overflowed,
@@ -1737,6 +1753,7 @@ class LocalArtifactInspector(
         private const val MAX_REPORTED_SECRET_CANDIDATES = 200
         private const val MAX_REPORTED_DEX_CLASSES = 8_000
         private const val MAX_REPORTED_DEX_METHODS = 16_000
+        private const val MAX_REPORTED_DEX_FIELDS = 48_000
         private const val MAX_REPORTED_NATIVE_METHODS = 4_000
         private const val MAX_REPORTED_CODE_METHODS = 20_000
         private const val MAX_REPORTED_CALL_XREFS = 100_000

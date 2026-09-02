@@ -120,6 +120,14 @@ data class DexClassReference(
     val accessFlags: Long,
 ) : java.io.Serializable
 
+data class DexFieldReference(
+    val dexEntry: String,
+    val fieldIndex: Int,
+    val declaringClass: String,
+    val name: String,
+    val type: String,
+) : java.io.Serializable
+
 data class DexMethodReference(
     val dexEntry: String,
     val methodIndex: Int,
@@ -255,6 +263,9 @@ data class DexSummary(
     val classesIndexed: Long = 0,
     val methodsDeclared: Long = 0,
     val methodsIndexed: Long = 0,
+    val fieldsDeclared: Long = 0,
+    val fieldsIndexed: Long = 0,
+    val fields: List<DexFieldReference> = emptyList(),
     val classes: List<DexClassReference> = emptyList(),
     val methods: List<DexMethodReference> = emptyList(),
     val nativeMethods: List<DexNativeMethodDeclaration> = emptyList(),

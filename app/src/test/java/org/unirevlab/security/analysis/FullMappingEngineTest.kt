@@ -1,13 +1,12 @@
 package org.unirevlab.security.analysis
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.unirevlab.security.model.ArtifactSummary
 import org.unirevlab.security.model.AssessmentScope
 import org.unirevlab.security.model.DexClassReference
-import org.unirevlab.security.model.DexFieldXref
+import org.unirevlab.security.model.DexFieldReference
 import org.unirevlab.security.model.DexMethodCallXref
 import org.unirevlab.security.model.DexMethodReference
 import org.unirevlab.security.model.DexSummary
@@ -25,6 +24,11 @@ class FullMappingEngineTest {
             classesIndexed = 2,
             methodsDeclared = 3,
             methodsIndexed = 3,
+            fieldsDeclared = 1,
+            fieldsIndexed = 1,
+            fields = listOf(
+                DexFieldReference("classes.dex", 7, "La/b;", "d", "I"),
+            ),
             classes = listOf(
                 DexClassReference("classes.dex", 1, "La/b;", "Ljava/lang/Object;", 1),
                 DexClassReference("classes.dex", 2, "Lcom/acme/Readable;", "Ljava/lang/Object;", 1),
@@ -47,20 +51,6 @@ class FullMappingEngineTest {
                     instructionOffsetCodeUnits = 1,
                 ),
             ),
-            fieldXrefs = listOf(
-                DexFieldXref(
-                    dexEntry = "classes.dex",
-                    callerMethodIndex = 11,
-                    callerClass = "La/b;",
-                    callerName = "c",
-                    fieldIndex = 7,
-                    declaringClass = "La/b;",
-                    fieldName = "d",
-                    fieldType = "I",
-                    kind = "IGET",
-                    instructionOffsetCodeUnits = 1,
-                ),
-            ),
             httpUrls = emptyList(),
             httpsUrls = emptyList(),
             secretCandidates = emptyList(),
@@ -74,7 +64,7 @@ class FullMappingEngineTest {
         assertEquals(3, result.methodsMapped)
         assertEquals(1, result.fieldsMapped)
         assertTrue(result.dexCoverageComplete)
-        assertFalse(result.fieldInventoryComplete)
+        assertTrue(result.fieldInventoryComplete)
         assertTrue(result.semanticSymbols >= 1)
         assertTrue(result.structuralSymbols >= 1)
         assertTrue(result.preservedSymbols >= 1)

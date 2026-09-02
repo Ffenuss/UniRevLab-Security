@@ -1,6 +1,7 @@
 package org.unirevlab.security.analysis
 
 import org.unirevlab.security.model.DexClassReference
+import org.unirevlab.security.model.DexFieldReference
 import org.unirevlab.security.model.DexMethodReference
 import org.unirevlab.security.model.DexNativeMethodDeclaration
 import org.unirevlab.security.model.DexStringReference
@@ -21,8 +22,10 @@ object DexStringScanner {
         val maxTypes: Int = 100_000,
         val maxClasses: Int = 50_000,
         val maxMethods: Int = 150_000,
+        val maxFields: Int = 150_000,
         val maxReportedClasses: Int = 4_000,
         val maxReportedMethods: Int = 8_000,
+        val maxReportedFields: Int = 24_000,
         val maxNativeMethods: Int = 4_000,
         val maxEncodedMembersPerClass: Int = 100_000,
         val maxProtoParameters: Int = 512,
@@ -54,6 +57,9 @@ object DexStringScanner {
         val classesIndexed: Int,
         val methodsDeclared: Int,
         val methodsIndexed: Int,
+        val fieldsDeclared: Int = 0,
+        val fieldsIndexed: Int = 0,
+        val fields: List<DexFieldReference> = emptyList(),
         val classes: List<DexClassReference>,
         val methods: List<DexMethodReference>,
         val nativeMethods: List<DexNativeMethodDeclaration>,
@@ -74,6 +80,8 @@ object DexStringScanner {
         val typeIdsOff: Long,
         val protoIdsSize: Int,
         val protoIdsOff: Long,
+        val fieldIdsSize: Int,
+        val fieldIdsOff: Long,
         val methodIdsSize: Int,
         val methodIdsOff: Long,
         val classDefsSize: Int,
@@ -148,6 +156,19 @@ object DexStringScanner {
             }
             onProgress?.invoke(45, "Типы DEX готовы", toIndexTypes, toIndexTypes)
 
+            val fields = mutableListOf<DexFieldReference>()
+            val toIndexFields = minOf(h.fieldIdsSize, limits.maxFields)
+            if (h.fieldIdsSize > toIndexFields) truncated = true
+            repeat(toIndexFields) { fieldIndex ->
+                if ((fieldIndex and 0xff) == 0) {
+                    checkCancelled()
+                    onProgress?.invoke(scaleProgress(45, 53, fieldIndex, toIndexFields), "Поля DEX", fieldIndex, toIndexFields)
+                }
+                val field = readField(raf, h, dexEntry, fieldIndex, limits)
+                if (fields.size < limits.maxReportedFields) fields += field else truncated = true
+            }
+            onProgress?.invoke(53, "Поля DEX готовы", toIndexFields, toIndexFields)
+
             val methods = mutableListOf<DexMethodReference>()
             val methodLookup = HashMap<Int, DexMethodReference>()
             val toIndexMethods = minOf(h.methodIdsSize, limits.maxMethods)
@@ -157,7 +178,7 @@ object DexStringScanner {
             repeat(toIndexMethods) { methodIndex ->
                 if ((methodIndex and 0xff) == 0) {
                     checkCancelled()
-                    onProgress?.invoke(scaleProgress(45, 65, methodIndex, toIndexMethods), "Методы DEX", methodIndex, toIndexMethods)
+                    onProgress?.invoke(scaleProgress(53, 68, methodIndex, toIndexMethods), "Методы DEX", methodIndex, toIndexMethods)
                 }
                 val method = readMethod(raf, h, dexEntry, methodIndex, limits)
                 methodLookup[methodIndex] = method
@@ -165,7 +186,7 @@ object DexStringScanner {
                 if (methods.size < limits.maxReportedMethods) methods += method else truncated = true
             }
 
-            onProgress?.invoke(65, "Методы DEX готовы", toIndexMethods, toIndexMethods)
+            onProgress?.invoke(68, "Методы DEX готовы", toIndexMethods, toIndexMethods)
             val classes = mutableListOf<DexClassReference>()
             val nativeMethods = mutableListOf<DexNativeMethodDeclaration>()
             val toIndexClasses = minOf(h.classDefsSize, limits.maxClasses)
@@ -173,7 +194,7 @@ object DexStringScanner {
             repeat(toIndexClasses) { classDefIndex ->
                 if ((classDefIndex and 0x7f) == 0) {
                     checkCancelled()
-                    onProgress?.invoke(scaleProgress(65, 100, classDefIndex, toIndexClasses), "Классы и class_data", classDefIndex, toIndexClasses)
+                    onProgress?.invoke(scaleProgress(68, 100, classDefIndex, toIndexClasses), "Классы и class_data", classDefIndex, toIndexClasses)
                 }
                 val base = h.classDefsOff + classDefIndex.toLong() * 32L
                 val classIdx = readU32(raf, base).toIntChecked("class_idx")
@@ -218,6 +239,9 @@ object DexStringScanner {
                 classesIndexed = toIndexClasses,
                 methodsDeclared = h.methodIdsSize,
                 methodsIndexed = toIndexMethods,
+                fieldsDeclared = h.fieldIdsSize,
+                fieldsIndexed = toIndexFields,
+                fields = fields,
                 classes = classes,
                 methods = methods,
                 // These collections are produced from a single monotonic DEX traversal; avoid
@@ -263,10 +287,10 @@ object DexStringScanner {
         val strings = table(0x38, 0x3c, 4, "string_ids")
         val types = table(0x40, 0x44, 4, "type_ids")
         val protos = table(0x48, 0x4c, 12, "proto_ids")
-        table(0x50, 0x54, 8, "field_ids")
+        val fields = table(0x50, 0x54, 8, "field_ids")
         val methods = table(0x58, 0x5c, 8, "method_ids")
         val classes = table(0x60, 0x64, 32, "class_defs")
-        return Header(fileSize, strings.first, strings.second, types.first, types.second, protos.first, protos.second, methods.first, methods.second, classes.first, classes.second)
+        return Header(fileSize, strings.first, strings.second, types.first, types.second, protos.first, protos.second, fields.first, fields.second, methods.first, methods.second, classes.first, classes.second)
     }
 
     private data class DecodedString(val value: String, val truncated: Boolean)
@@ -403,6 +427,23 @@ object DexStringScanner {
         val value = readStringByIndex(raf, h, stringIndex, maxStringBytes).value
         if (value.length <= 2_048) cache.types[typeIndex] = value
         return value
+    }
+
+    private fun readField(raf: RandomAccessFile, h: Header, dexEntry: String, fieldIndex: Int, limits: Limits): DexFieldReference {
+        if (fieldIndex !in 0 until h.fieldIdsSize) throw DexFormatException("field_idx outside field_ids")
+        val base = h.fieldIdsOff + fieldIndex.toLong() * 8L
+        val classIdx = readU16(raf, base)
+        val typeIdx = readU16(raf, base + 2)
+        val nameIdx = readU32(raf, base + 4).toIntChecked("field name_idx")
+        if (classIdx !in 0 until h.typeIdsSize) throw DexFormatException("field class_idx outside type_ids")
+        if (typeIdx !in 0 until h.typeIdsSize) throw DexFormatException("field type_idx outside type_ids")
+        return DexFieldReference(
+            dexEntry = dexEntry,
+            fieldIndex = fieldIndex,
+            declaringClass = typeDescriptor(raf, h, classIdx, limits.maxStringBytes),
+            name = readStringByIndex(raf, h, nameIdx, limits.maxStringBytes).value,
+            type = typeDescriptor(raf, h, typeIdx, limits.maxStringBytes),
+        )
     }
 
     private fun readMethod(raf: RandomAccessFile, h: Header, dexEntry: String, methodIndex: Int, limits: Limits): DexMethodReference {
