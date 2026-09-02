@@ -52,6 +52,9 @@ jobs:
       - name: Apply product suite UI and AutoMod precision
         run: python tools/apply_v0262_product_suite.py
 
+      - name: Require exact AutoMod semantic tokens
+        run: python tools/apply_v0263_automod_token_precision.py
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
