@@ -237,6 +237,17 @@ object TamperAssessmentEngine {
                 ),
             )
         }
+        if (categories.containsKey("COMPONENT_TRUST")) {
+            out += HardeningSuggestion(
+                "HIGH", "Не доверять наличию локального security-компонента как границе доступа",
+                "Обнаружены provider/service точки, связанные с лицензированием, billing или integrity; локальный APK и его manifest находятся под контролем атакующего.",
+                listOf(
+                    "Считать provider/service/receiver в клиенте изменяемыми и не делать их единственным источником решения о доступе.",
+                    "На backend независимо проверять entitlement/receipt/attestation и привязывать результат к session/nonce.",
+                    "После изменений защиты повторно проверять сценарии удаления, отключения или переподписания компонентов как негативные тесты.",
+                ),
+            )
+        }
         val highRiskSecrets = assessment.secrets.filterNot { it.kind == "GOOGLE_API_KEY_LIKE" || it.kind == "PRIVATE_KEY_MARKER" }
         if (highRiskSecrets.isNotEmpty()) {
             out += HardeningSuggestion(
@@ -354,6 +365,27 @@ object TamperAssessmentEngine {
                 )
             }
         }
+        dex?.callXrefs.orEmpty().forEach { xref ->
+            val method = methodsByKey[xref.dexEntry to xref.callerMethodIndex] ?: return@forEach
+            if (!isEditableProjectMethod(method)) return@forEach
+            val callee = "${xref.calleeClass} ${xref.calleeName} ${xref.calleePrototype}"
+            categoriesFor(callee).forEach { (category, score) ->
+                hit(
+                    SurfaceHit(
+                        category = category,
+                        kind = "DEX_CALL",
+                        location = "${xref.dexEntry}:${method.declaringClass}->${method.name}${method.prototype}",
+                        preview = safePreview("calls ${xref.calleeClass}->${xref.calleeName}${xref.calleePrototype}"),
+                        score = score,
+                        dexEntry = method.dexEntry,
+                        classDescriptor = method.declaringClass,
+                        methodName = method.name,
+                        prototype = method.prototype,
+                    ),
+                )
+            }
+        }
+
         var genericConstants = 0
         dex?.constants.orEmpty().forEach { constant ->
             val method = methodsByKey[constant.dexEntry to constant.methodIndex] ?: return@forEach
@@ -545,6 +577,7 @@ object TamperAssessmentEngine {
     private fun evidenceWeight(kind: String): Double = when (kind) {
         "DEX_METHOD" -> 1.00
         "DEX_FIELD" -> 0.95
+        "DEX_CALL" -> 0.98
         "NATIVE_SYMBOL" -> 0.90
         "IL2CPP_METHOD", "MANAGED_METHOD" -> 0.85
         "DEX_STRING" -> 0.80
@@ -662,6 +695,7 @@ object TamperAssessmentEngine {
         "FEATURE_CONFIG" -> "feature/configuration surface"
         "INTEGRITY" -> "integrity/attestation surface"
         "AUTH_SESSION" -> "auth/session material"
+        "COMPONENT_TRUST" -> "security-sensitive Android component dependency"
         "CLIENT_DECISION" -> "client-side boolean/decision method"
         "APP_CONSTANT" -> "application-owned scalar constant"
         "CONFIG_FILE" -> "editable configuration asset"
@@ -670,14 +704,15 @@ object TamperAssessmentEngine {
     private fun priorityOrdinal(value: String): Int = when (value) { "CRITICAL" -> 0; "HIGH" -> 1; "MEDIUM" -> 2; else -> 3 }
 
     private val CATEGORY_TERMS = linkedMapOf(
-        "ENTITLEMENT_TRUST" to listOf("premium", "subscription", "entitlement", "purchase", "isowned", "owned", "unlock", "license", "licence", "trial", "ispro", "hasaccess", "accesslevel", "vip", "paid"),
+        "ENTITLEMENT_TRUST" to listOf("premium", "subscription", "entitlement", "purchase", "isowned", "owned", "unlock", "license", "licence", "trial", "ispro", "hasaccess", "accesslevel", "vip", "paid", "billingclient", "billingresult", "purchased", "purchasehistory", "querypurchases", "querypurchasesasync", "queryproductdetails", "licensechecker", "checkaccess", "licensecontentprovider", "pairip"),
         "LOCAL_STATE" to listOf("health", "hp", "lives", "life", "damage", "armor", "energy", "stamina", "speed", "cooldown", "score", "rank", "balance", "coins", "coin", "gems", "gem", "currency", "wallet", "credits", "money", "cash", "gold", "diamond", "diamonds", "xp", "experience", "level", "mana", "ammo", "attack", "defense", "defence", "power", "fuel", "ticket", "tickets", "points", "stars"),
         "FEATURE_CONFIG" to listOf("featureflag", "feature_flag", "remoteconfig", "remote_config", "experiment", "variant", "toggle", "feature", "config", "setting"),
-        "INTEGRITY" to listOf("integrity", "tamper", "signature", "checksum", "attestation", "playintegrity", "rootcheck", "emulatorcheck"),
+        "INTEGRITY" to listOf("integrity", "tamper", "signature", "checksum", "attestation", "playintegrity", "rootcheck", "emulatorcheck", "signinginfo", "apkcontentssigners", "signingcertificatehistory", "checksignature", "checksignatures", "certdigest", "appintegrity", "packageintegrity", "meetsdeviceintegrity", "meetsbasicintegrity"),
         "AUTH_SESSION" to listOf("apikey", "api_key", "clientsecret", "client_secret", "bearer", "sessiontoken", "auth_token", "accesstoken", "access_token"),
+        "COMPONENT_TRUST" to listOf("licensecontentprovider", "integrityprovider", "attestationprovider", "licensingservice", "billingservice"),
     )
-    private val CATEGORY_SCORES = mapOf("ENTITLEMENT_TRUST" to 70, "LOCAL_STATE" to 60, "FEATURE_CONFIG" to 48, "INTEGRITY" to 56, "AUTH_SESSION" to 68)
-    private val COMPOUND_TERMS = setOf("isowned", "ispro", "hasaccess", "accesslevel", "featureflag", "remoteconfig", "playintegrity", "rootcheck", "emulatorcheck", "apikey", "clientsecret", "sessiontoken", "authtoken", "accesstoken")
+    private val CATEGORY_SCORES = mapOf("ENTITLEMENT_TRUST" to 70, "LOCAL_STATE" to 60, "FEATURE_CONFIG" to 48, "INTEGRITY" to 56, "AUTH_SESSION" to 68, "COMPONENT_TRUST" to 58)
+    private val COMPOUND_TERMS = setOf("isowned", "ispro", "hasaccess", "accesslevel", "featureflag", "remoteconfig", "playintegrity", "rootcheck", "emulatorcheck", "apikey", "clientsecret", "sessiontoken", "authtoken", "accesstoken", "billingclient", "billingresult", "purchasehistory", "querypurchases", "querypurchasesasync", "queryproductdetails", "licensechecker", "checkaccess", "licensecontentprovider", "signinginfo", "apkcontentssigners", "signingcertificatehistory", "checksignature", "checksignatures", "certdigest", "appintegrity", "packageintegrity", "meetsdeviceintegrity", "meetsbasicintegrity", "integrityprovider", "attestationprovider", "licensingservice", "billingservice")
     private val NATIVE_SDK_MARKERS = listOf(
         "firebase", "sentry", "applovin", "facebook", "fban", "crashlytics", "flutter",
         "mediakit", "mpv", "datastore", "sqlite", "boringssl", "ssl", "crypto", "protobuf",

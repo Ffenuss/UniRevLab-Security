@@ -36,6 +36,27 @@ class TamperAssessmentClassifierTest {
     }
 
     @Test
+    fun billingAndLicensingSdkSurfacesClassifyAsEntitlementTrust() {
+        assertTrue("ENTITLEMENT_TRUST" in TamperAssessmentEngine.categoriesForTesting("BillingClient queryPurchasesAsync"))
+        assertTrue("ENTITLEMENT_TRUST" in TamperAssessmentEngine.categoriesForTesting("LicenseChecker checkAccess"))
+        assertTrue("ENTITLEMENT_TRUST" in TamperAssessmentEngine.categoriesForTesting("com.pairip.licensecheck.LicenseContentProvider"))
+    }
+
+    @Test
+    fun signingAndIntegrityApisClassifyAsIntegrityTrust() {
+        assertTrue("INTEGRITY" in TamperAssessmentEngine.categoriesForTesting("SigningInfo getApkContentsSigners"))
+        assertTrue("INTEGRITY" in TamperAssessmentEngine.categoriesForTesting("PackageManager checkSignatures"))
+        assertTrue("INTEGRITY" in TamperAssessmentEngine.categoriesForTesting("appIntegrity meetsDeviceIntegrity"))
+    }
+
+    @Test
+    fun securitySensitiveComponentsReceiveDedicatedCoverage() {
+        assertTrue("COMPONENT_TRUST" in TamperAssessmentEngine.categoriesForTesting("LicenseContentProvider"))
+        assertTrue("COMPONENT_TRUST" in TamperAssessmentEngine.categoriesForTesting("IntegrityProvider"))
+        assertFalse("COMPONENT_TRUST" in TamperAssessmentEngine.categoriesForTesting("ordinary ContentProvider"))
+    }
+
+    @Test
     fun repeatedWeakArchiveSignalsDoNotExplodeOverallScore() {
         val weak = (1..30).map { index ->
             TamperAssessmentEngine.SurfaceHit(
