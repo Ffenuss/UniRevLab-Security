@@ -21,6 +21,24 @@ def replace_regex_once(text: str, pattern: str, repl, label: str) -> str:
 
 
 text = ENGINE.read_text(encoding="utf-8")
+existing_test = TEST.read_text(encoding="utf-8")
+
+# CI commits the generated coverage back to the working branch after a verified run.
+# Treat that state as success so later unrelated commits do not fail while trying to
+# apply the same source transformation a second time.
+already_applied = all(
+    marker in text
+    for marker in (
+        '"COMPONENT_TRUST" to 58',
+        '"DEX_CALL" -> 0.98',
+        '"billingclient"',
+        '"signinginfo"',
+        '"COMPONENT_TRUST" -> "security-sensitive Android component dependency"',
+    )
+) and "billingAndLicensingSdkSurfacesClassifyAsEntitlementTrust" in existing_test
+if already_applied:
+    print("v0.26.0 defensive patch-technique coverage already applied")
+    raise SystemExit(0)
 
 # Patchers commonly pivot through client-side billing/license decisions. Extend the
 # classifier with SDK/API names while keeping detection observation-only here.
