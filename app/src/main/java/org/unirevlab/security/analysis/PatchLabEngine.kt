@@ -477,9 +477,12 @@ object PatchLabEngine {
                     if (isSignatureEntry(name)) continue
                     val displayName = displayEntry(workspace.sourcePrefix, name)
                     val replacement = rebuiltDex[displayName] ?: workspace.replacements[displayName]
-                    val isStoredNative = name.lowercase(Locale.ROOT).endsWith(".so") && originalEntry.method == ZipEntry.STORED
+                    val storedAlignment = requiredStoredAlignment(name, originalEntry.method, originalEntry.isDirectory)
                     if (replacement != null) {
-                        val entry = if (isStoredNative) {
+                        // Preserve STORED vs DEFLATED semantics. In particular, resources.arsc for
+                        // targetSdk >= 30 must remain uncompressed and 4-byte aligned, while modern
+                        // uncompressed native libraries need 16 KiB zip alignment on 16 KiB devices.
+                        val entry = if (storedAlignment != null) {
                             val size = replacement.length()
                             ZipEntry(name).apply {
                                 time = originalEntry.time
@@ -487,7 +490,7 @@ object PatchLabEngine {
                                 this.size = size
                                 compressedSize = size
                                 crc = crc32(replacement)
-                                extra = alignedExtra(counting.count, name, originalEntry.extra, NATIVE_ALIGNMENT)
+                                extra = alignedExtra(counting.count, name, originalEntry.extra, storedAlignment)
                             }
                         } else {
                             ZipEntry(name).apply {
@@ -500,10 +503,11 @@ object PatchLabEngine {
                         out.closeEntry()
                     } else {
                         val copy = ZipEntry(originalEntry)
-                        if (isStoredNative) {
-                            // Modern APKs can load uncompressed native code directly from the APK. Repacking
-                            // changes every local-header offset, so preserve a 16 KiB-aligned data start.
-                            copy.extra = alignedExtra(counting.count, name, originalEntry.extra, NATIVE_ALIGNMENT)
+                        if (storedAlignment != null) {
+                            // ZipFile exposes the central-directory extra field, but Android build tools
+                            // may put alignment padding only in the local header. Recompute it from the
+                            // new local-header offset instead of assuming the old padding survived.
+                            copy.extra = alignedExtra(counting.count, name, originalEntry.extra, storedAlignment)
                         }
                         out.putNextEntry(copy)
                         if (!originalEntry.isDirectory) {
@@ -514,6 +518,11 @@ object PatchLabEngine {
                 }
             }
         }
+    }
+
+    internal fun requiredStoredAlignment(entryName: String, method: Int, isDirectory: Boolean = false): Int? {
+        if (isDirectory || method != ZipEntry.STORED) return null
+        return if (entryName.lowercase(Locale.ROOT).endsWith(".so")) NATIVE_ALIGNMENT else APK_ALIGNMENT
     }
 
     internal fun alignedExtra(currentOffset: Long, entryName: String, originalExtra: ByteArray?, alignment: Int = NATIVE_ALIGNMENT): ByteArray? {
@@ -676,6 +685,7 @@ object PatchLabEngine {
     }
 
     private const val COPY_BUFFER = 128 * 1024
+    internal const val APK_ALIGNMENT = 4
     internal const val NATIVE_ALIGNMENT = 16 * 1024
     private const val ZIP_LOCAL_HEADER_FIXED = 30L
     private const val ZIP_EXTRA_HEADER_SIZE = 4

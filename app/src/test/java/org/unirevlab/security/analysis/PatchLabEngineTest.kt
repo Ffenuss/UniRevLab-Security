@@ -45,6 +45,24 @@ class PatchLabEngineTest {
     }
 
     @Test
+    fun resourcesArscUsesFourByteStoredAlignment() {
+        val alignment = PatchLabEngine.requiredStoredAlignment("resources.arsc", java.util.zip.ZipEntry.STORED)
+        assertTrue(alignment == PatchLabEngine.APK_ALIGNMENT)
+
+        val offset = 1_001L
+        val name = "resources.arsc"
+        val extra = PatchLabEngine.alignedExtra(offset, name, null, requireNotNull(alignment))
+        val dataOffset = offset + 30L + name.toByteArray(Charsets.UTF_8).size + (extra?.size ?: 0)
+        assertTrue(dataOffset % PatchLabEngine.APK_ALIGNMENT == 0L)
+    }
+
+    @Test
+    fun compressedEntriesDoNotReceiveStoredAlignment() {
+        val alignment = PatchLabEngine.requiredStoredAlignment("classes.dex", java.util.zip.ZipEntry.DEFLATED)
+        assertTrue(alignment == null)
+    }
+
+    @Test
     fun nativeAlignmentPadsStoredSoTo16KiB() {
         val offset = 1_237L
         val name = "lib/arm64-v8a/libsample.so"

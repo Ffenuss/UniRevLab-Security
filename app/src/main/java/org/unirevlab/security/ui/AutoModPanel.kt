@@ -159,16 +159,21 @@ fun AutoModPanel(
                             autoBusy = true
                             built = null
                             onError(null)
-                            onStatus("AutoMod: применяем проверенный план → Smali → DEX → APK → тестовая подпись…")
+                            val startedAtMs = android.os.SystemClock.elapsedRealtime()
+                            onStatus("AutoMod: применяем проверенный план к подготовленному Smali…")
                             val result = runCatching {
                                 withContext(Dispatchers.IO) {
                                     AutoModEngine.apply(workspace, current, rightsConfirmed)
+                                }
+                                onStatus("AutoMod: план применён; собираем DEX → APK → ZIP alignment → тестовая подпись…")
+                                withContext(Dispatchers.IO) {
                                     PatchLabEngine.build(workspace)
                                 }
                             }
                             result.getOrNull()?.let {
                                 built = it
-                                onStatus("AutoMod Demo готов: ${current.actions.size} точечных изменений, APK собран и подписан тестовым ключом.")
+                                val elapsedMs = android.os.SystemClock.elapsedRealtime() - startedAtMs
+                                onStatus("AutoMod Demo готов за ${elapsedMs} мс: ${current.actions.size} точечных изменений, APK пересобран, выровнен и подписан тестовым ключом.")
                             }
                             result.exceptionOrNull()?.let { onError(it.message) }
                             autoBusy = false
@@ -200,13 +205,29 @@ fun AutoModPanel(
                 OutlinedButton(
                     onClick = {
                         runCatching {
+                            if (!context.packageManager.canRequestPackageInstalls()) {
+                                val settings = Intent(
+                                    android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                    android.net.Uri.parse("package:${context.packageName}"),
+                                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                context.startActivity(settings)
+                                onStatus("Разрешите установку приложений из UniRevLab, затем нажмите кнопку установки ещё раз.")
+                                return@runCatching
+                            }
+                            val parsed = context.packageManager.getPackageArchiveInfo(result.signedApk.absolutePath, 0)
+                            requireNotNull(parsed) { "Android PackageManager не распознаёт собранный APK" }
+                            report.manifest?.packageName?.takeIf { it.isNotBlank() }?.let { expected ->
+                                require(parsed.packageName == expected) {
+                                    "Package после пересборки изменился: ${parsed.packageName} вместо $expected"
+                                }
+                            }
                             val uri = FileProvider.getUriForFile(
                                 context,
                                 "${context.packageName}.fileprovider",
                                 result.signedApk,
                             )
-                            val intent = Intent(Intent.ACTION_VIEW)
-                                .setDataAndType(uri, "application/vnd.android.package-archive")
+                            val intent = Intent(Intent.ACTION_INSTALL_PACKAGE)
+                                .setData(uri)
                                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
                             context.startActivity(intent)
                         }.onFailure { onError(it.message) }
