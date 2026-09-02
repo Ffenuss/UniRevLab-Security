@@ -3,6 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 RISK = ROOT / "app/src/main/java/org/unirevlab/security/analysis/Il2CppMonetizationRiskEngine.kt"
+SEMANTIC = ROOT / "app/src/main/java/org/unirevlab/security/analysis/Il2CppSemanticMappingEngine.kt"
 PAIR = ROOT / "app/src/main/java/org/unirevlab/security/analysis/Il2CppPairAssessmentEngine.kt"
 DUMP = ROOT / "app/src/main/java/org/unirevlab/security/analysis/Il2CppManagedDumpExporter.kt"
 UI = ROOT / "app/src/main/java/org/unirevlab/security/ui/Il2CppPairWorkspaceScreen.kt"
@@ -17,8 +18,69 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+def patch_semantic() -> None:
+    text = SEMANTIC.read_text(encoding="utf-8")
+
+    # A member gets EXACT semantic evidence only from its own managed name. The declaring type is
+    # intentionally kept as contextual evidence; otherwise `PaymentEntitlement.a` would incorrectly
+    # turn opaque field `a` into an exact entitlement match merely because of its owner type.
+    text = replace_once(
+        text,
+        '''            methodsByType[type.index].orEmpty().forEach { method ->\n                val identity = "${method.declaringType}.${method.name}"\n                semanticCategories(identity).forEach { category ->\n''',
+        '''            methodsByType[type.index].orEmpty().forEach { method ->\n                val identity = "${method.declaringType}.${method.name}"\n                semanticCategories(method.name).forEach { category ->\n''',
+        "method context uses member name",
+    )
+    text = replace_once(
+        text,
+        '''            fieldsByType[type.index].orEmpty().forEach { field ->\n                val identity = "${field.declaringType}.${field.name}"\n                semanticCategories(identity).forEach { category ->\n''',
+        '''            fieldsByType[type.index].orEmpty().forEach { field ->\n                val identity = "${field.declaringType}.${field.name}"\n                semanticCategories(field.name).forEach { category ->\n''',
+        "field context uses member name",
+    )
+    text = replace_once(
+        text,
+        '''            val identity = "${field.declaringType}.${field.name}"\n            val obfuscated = account("FIELD", field.name)\n            val direct = semanticCategories(identity)\n''',
+        '''            val identity = "${field.declaringType}.${field.name}"\n            val obfuscated = account("FIELD", field.name)\n            val direct = semanticCategories(field.name)\n''',
+        "field direct semantic evidence",
+    )
+    text = replace_once(
+        text,
+        '''            val identity = "${method.declaringType}.${method.name}"\n            val obfuscated = account("METHOD", method.name)\n            val direct = semanticCategories(identity)\n''',
+        '''            val identity = "${method.declaringType}.${method.name}"\n            val obfuscated = account("METHOD", method.name)\n            val direct = semanticCategories(method.name)\n''',
+        "method direct semantic evidence",
+    )
+    SEMANTIC.write_text(text, encoding="utf-8")
+
+
 def patch_risk() -> None:
     text = RISK.read_text(encoding="utf-8")
+
+    # Keep exact field/method risk evidence bound to the member name itself. Semantic owner-type
+    # evidence is introduced below only through CONTEXT_* candidates with lower confidence.
+    text = replace_once(
+        text,
+        '''        metadata.fieldDefinitions.forEach { field ->\n            val identity = "${field.declaringType}.${field.name}"\n            classify(identity).forEach { category ->\n''',
+        '''        metadata.fieldDefinitions.forEach { field ->\n            val identity = "${field.declaringType}.${field.name}"\n            classify(field.name).forEach { category ->\n''',
+        "risk field exact classification",
+    )
+    text = replace_once(
+        text,
+        '''                            "Semantic marker: ${markerFor(identity, category)}",\n                            "Metadata field index=${field.index}, typeIndex=${field.typeIndex}, token=0x${field.token.toString(16)}",\n''',
+        '''                            "Semantic marker in field name: ${markerFor(field.name, category)}",\n                            "Metadata field index=${field.index}, typeIndex=${field.typeIndex}, token=0x${field.token.toString(16)}",\n''',
+        "risk field marker evidence",
+    )
+    text = replace_once(
+        text,
+        '''        metadata.methodDefinitions.forEach { method ->\n            val identity = "${method.declaringType}.${method.name}"\n            classify(identity).forEach { category ->\n''',
+        '''        metadata.methodDefinitions.forEach { method ->\n            val identity = "${method.declaringType}.${method.name}"\n            classify(method.name).forEach { category ->\n''',
+        "risk method exact classification",
+    )
+    text = replace_once(
+        text,
+        '''                    add("Semantic marker: ${markerFor(identity, category)}")\n''',
+        '''                    add("Semantic marker in method name: ${markerFor(method.name, category)}")\n''',
+        "risk method marker evidence",
+    )
+
     anchor = '''        val ordered = candidates.values.sortedWith(\n'''
     contextual = '''        val semanticMapping = Il2CppSemanticMappingEngine.analyze(\n            report = report,\n            maxEntries = maxCandidates.coerceAtLeast(0) * 4,\n        )\n        semanticMapping.entries.asSequence()\n            .filter { it.basis == Il2CppSemanticMappingEngine.Basis.CONTEXTUAL && it.semanticCategory != null }\n            .forEach { mapping ->\n                val category = runCatching { Category.valueOf(mapping.semanticCategory!!) }.getOrNull() ?: return@forEach\n                val method = if (mapping.kind == "METHOD") metadata.methodDefinitions.firstOrNull { it.index == mapping.symbolIndex } else null\n                val field = if (mapping.kind == "FIELD") metadata.fieldDefinitions.firstOrNull { it.index == mapping.symbolIndex } else null\n                val type = if (mapping.kind == "TYPE") metadata.typeDefinitions.firstOrNull { it.index == mapping.symbolIndex } else null\n                val native = method?.let { current ->\n                    nativeByMethod[current.index].orEmpty().firstOrNull { it.functionName.isNotBlank() }\n                }\n                add(\n                    Candidate(\n                        kind = "CONTEXT_${mapping.kind}",\n                        managedIdentity = mapping.originalIdentity,\n                        category = category,\n                        confidence = when (mapping.confidence) {\n                            Il2CppSemanticMappingEngine.Confidence.HIGH -> Confidence.HIGH\n                            Il2CppSemanticMappingEngine.Confidence.MEDIUM -> Confidence.MEDIUM\n                            Il2CppSemanticMappingEngine.Confidence.LOW -> Confidence.LOW\n                        },\n                        metadataToken = method?.token ?: field?.token ?: type?.token,\n                        methodIndex = method?.index,\n                        declaringType = method?.declaringType ?: field?.declaringType ?: type?.fullName,\n                        nativeFunctionName = native?.functionName,\n                        evidence = mapping.evidence + listOf(\n                            "Contextual analyst alias: ${mapping.alias}",\n                            "This candidate is inferred from enclosing metadata context and does not prove a live premium value or authorization result.",\n                        ),\n                    ),\n                )\n            }\n\n        val ordered = candidates.values.sortedWith(\n'''
     text = replace_once(text, anchor, contextual, "contextual IL2CPP candidates")
@@ -103,6 +165,7 @@ def patch_build() -> None:
 
 
 def main() -> None:
+    patch_semantic()
     patch_risk()
     patch_pair()
     patch_dump()
