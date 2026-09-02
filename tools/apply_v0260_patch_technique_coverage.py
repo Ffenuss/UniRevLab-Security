@@ -13,7 +13,7 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
-def replace_regex_once(text: str, pattern: str, repl: str, label: str) -> str:
+def replace_regex_once(text: str, pattern: str, repl, label: str) -> str:
     updated, count = re.subn(pattern, repl, text, count=1, flags=re.MULTILINE)
     if count != 1:
         raise SystemExit(f"{label}: expected exactly one match, got {count}")
@@ -27,13 +27,13 @@ text = ENGINE.read_text(encoding="utf-8")
 text = replace_regex_once(
     text,
     r'("ENTITLEMENT_TRUST" to listOf\()([^\n]+)(\),)',
-    lambda m: m.group(1) + m.group(2).rstrip()[:-1] + ', "billingclient", "billingresult", "purchased", "purchasehistory", "querypurchases", "querypurchasesasync", "queryproductdetails", "licensechecker", "checkaccess", "licensecontentprovider", "pairip")' + m.group(3),
+    lambda m: m.group(1) + m.group(2) + ', "billingclient", "billingresult", "purchased", "purchasehistory", "querypurchases", "querypurchasesasync", "queryproductdetails", "licensechecker", "checkaccess", "licensecontentprovider", "pairip"' + m.group(3),
     "entitlement terms",
 )
 text = replace_regex_once(
     text,
     r'("INTEGRITY" to listOf\()([^\n]+)(\),)',
-    lambda m: m.group(1) + m.group(2).rstrip()[:-1] + ', "signinginfo", "apkcontentssigners", "signingcertificatehistory", "checksignature", "checksignatures", "certdigest", "appintegrity", "packageintegrity", "meetsdeviceintegrity", "meetsbasicintegrity")' + m.group(3),
+    lambda m: m.group(1) + m.group(2) + ', "signinginfo", "apkcontentssigners", "signingcertificatehistory", "checksignature", "checksignatures", "certdigest", "appintegrity", "packageintegrity", "meetsdeviceintegrity", "meetsbasicintegrity"' + m.group(3),
     "integrity terms",
 )
 
