@@ -43,24 +43,6 @@ jobs:
           git commit --allow-empty -m "Start v0.34.0 CI run ${{ github.run_id }} [skip ci]"
           git push origin HEAD:fix-analysis-progress-v0221
 
-      - name: Apply v0.30.0 full reconstructed mapping
-        run: python tools/apply_v0300_full_mapping.py
-
-      - name: Apply v0.31.0 semantic recovery quality layer
-        run: python tools/apply_v0310_semantic_recovery.py
-
-      - name: Apply v0.32.0 durable history UI
-        run: python tools/apply_v0320_durable_history_ui.py
-
-      - name: Apply v0.33.0 IL2CPP pair reconstruction
-        run: python tools/apply_v0330_il2cpp_pair.py
-
-      - name: Apply v0.33.0 IL2CPP pair workspace UI
-        run: python tools/apply_v0331_il2cpp_ui.py
-
-      - name: Normalize v0.33.0 IL2CPP workspace compile state
-        run: python tools/apply_v0332_il2cpp_compile_guard.py
-
       - name: Apply v0.34.0 IL2CPP semantic analyst mapping
         run: python tools/apply_v0340_il2cpp_semantic_mapping.py
 
@@ -158,31 +140,12 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add \
             app/build.gradle.kts \
-            app/src/main/java/org/unirevlab/security/MainActivity.kt \
-            app/src/main/java/org/unirevlab/security/model/StaticAnalysisModels.kt \
-            app/src/main/java/org/unirevlab/security/model/ProjectHistoryModels.kt \
-            app/src/main/java/org/unirevlab/security/analysis/DexStringScanner.kt \
-            app/src/main/java/org/unirevlab/security/analysis/FullMappingEngine.kt \
-            app/src/main/java/org/unirevlab/security/analysis/SemanticRecoveryEngine.kt \
-            app/src/main/java/org/unirevlab/security/analysis/AnalysisManager.kt \
-            app/src/main/java/org/unirevlab/security/analysis/AnalysisRunState.kt \
-            app/src/main/java/org/unirevlab/security/analysis/LocalArtifactInspector.kt \
-            app/src/main/java/org/unirevlab/security/analysis/Il2CppScanner.kt \
             app/src/main/java/org/unirevlab/security/analysis/Il2CppMonetizationRiskEngine.kt \
             app/src/main/java/org/unirevlab/security/analysis/Il2CppSemanticMappingEngine.kt \
             app/src/main/java/org/unirevlab/security/analysis/Il2CppManagedDumpExporter.kt \
             app/src/main/java/org/unirevlab/security/analysis/Il2CppPairAssessmentEngine.kt \
-            app/src/main/java/org/unirevlab/security/data/AssessmentHistoryStore.kt \
-            app/src/main/java/org/unirevlab/security/data/ReportSnapshotCodec.kt \
-            app/src/main/java/org/unirevlab/security/ui/AutomaticDeobfuscationPanel.kt \
-            app/src/main/java/org/unirevlab/security/ui/ProjectHistoryScreen.kt \
-            app/src/main/java/org/unirevlab/security/ui/ProductToolsScreen.kt \
             app/src/main/java/org/unirevlab/security/ui/Il2CppPairWorkspaceScreen.kt \
-            app/src/test/java/org/unirevlab/security/analysis/FullMappingEngineTest.kt \
-            app/src/test/java/org/unirevlab/security/analysis/SemanticRecoveryEngineTest.kt \
-            app/src/test/java/org/unirevlab/security/analysis/Il2CppMonetizationRiskEngineTest.kt \
-            app/src/test/java/org/unirevlab/security/analysis/Il2CppSemanticMappingEngineTest.kt \
-            app/src/test/java/org/unirevlab/security/data/ReportSnapshotCodecTest.kt
+            app/src/test/java/org/unirevlab/security/analysis/Il2CppSemanticMappingEngineTest.kt
           if ! git diff --cached --quiet; then
             git commit -m "Apply v0.34.0 IL2CPP semantic mapping (run ${{ github.run_id }}) [skip ci]"
           else
