@@ -311,13 +311,15 @@ object AutoModEngine {
         val methodCompact = methodTokens.joinToString("")
         val decisionPrefix = methodTokens.firstOrNull() in DECISION_PREFIXES
         val evidenceBacked = evidenceTokens.isNotEmpty() && baseScore >= 42
+        val genericMethod = methodName.lowercase(Locale.ROOT) in GENERIC_METHOD_NAMES || methodName.length <= 2
+        if (genericMethod && category in BEHAVIOR_MUTATION_CATEGORIES) return null
 
         if (prototype.endsWith(")Z")) {
             val negative = NEGATIVE_BOOLEAN_MARKERS.any { marker -> marker in tokens || compact.contains(marker) }
             return when (category) {
                 "ENTITLEMENT_TRUST" -> {
                     if (PENDING_MARKERS.any { it in tokens }) return null
-                    val signal = ENTITLEMENT_BOOLEAN_MARKERS.any { marker -> marker in tokens || compact.contains(marker) }
+                    val signal = ENTITLEMENT_BOOLEAN_MARKERS.any { marker -> marker in methodTokens }
                     if (!signal || (!decisionPrefix && !evidenceBacked)) null
                     else if (negative) {
                         Suggestion(
@@ -332,7 +334,7 @@ object AutoModEngine {
                     }
                 }
                 "FEATURE_CONFIG" -> {
-                    val signal = FEATURE_BOOLEAN_MARKERS.any { marker -> marker in tokens || compact.contains(marker) }
+                    val signal = FEATURE_BOOLEAN_MARKERS.any { marker -> marker in methodTokens }
                     if (!signal || (!decisionPrefix && !evidenceBacked)) null
                     else if (negative) {
                         Suggestion(Mode.RETURN_FALSE, null, (baseScore + 2).coerceIn(0, 100), "Демонстрация: локальный disabled/blocked feature-флаг принудительно возвращает false.")
@@ -341,7 +343,7 @@ object AutoModEngine {
                     }
                 }
                 "INTEGRITY" -> {
-                    val signal = INTEGRITY_BOOLEAN_MARKERS.any { marker -> marker in tokens || compact.contains(marker) }
+                    val signal = INTEGRITY_BOOLEAN_MARKERS.any { marker -> marker in methodTokens }
                     if (!signal || (!decisionPrefix && !evidenceBacked)) null
                     else if (negative) {
                         Suggestion(Mode.RETURN_FALSE, null, (baseScore + 6).coerceIn(0, 100), "Демонстрация: client-side tamper/root/emulator/debugger сигнал принудительно возвращает false.")
@@ -350,7 +352,7 @@ object AutoModEngine {
                     }
                 }
                 "LOCAL_STATE" -> {
-                    val signal = LOCAL_BOOLEAN_MARKERS.any { marker -> marker in tokens || compact.contains(marker) }
+                    val signal = LOCAL_BOOLEAN_MARKERS.any { marker -> marker in methodTokens }
                     if (!signal || (!decisionPrefix && !evidenceBacked)) null
                     else if ("dead" in tokens || "empty" in tokens || "depleted" in tokens) {
                         Suggestion(Mode.RETURN_FALSE, null, baseScore.coerceIn(0, 100), "Демонстрация: локальное отрицательное state-решение принудительно возвращает false.")
@@ -364,7 +366,6 @@ object AutoModEngine {
 
         if (category == "LOCAL_STATE" && prototype.lastReturnType() in setOf('I', 'S', 'B', 'C')) {
             val selected = LOCAL_INT_VALUES.entries.firstOrNull { (term, _) -> term in methodTokens }
-                ?: LOCAL_INT_VALUES.entries.firstOrNull { (term, _) -> term in evidenceTokens }
                 ?: return null
             val confidence = (baseScore + if (termInMethod(selected.key, methodTokens, methodCompact)) 4 else 0).coerceIn(0, 100)
             return Suggestion(
@@ -438,7 +439,7 @@ object AutoModEngine {
     )
     private val FEATURE_BOOLEAN_MARKERS = setOf("feature", "flag", "enabled", "available", "variant", "experiment", "config")
     private val INTEGRITY_BOOLEAN_MARKERS = setOf(
-        "integrity", "tamper", "signature", "checksum", "attestation", "attest", "root", "rooted",
+        "integrity", "tamper", "tampered", "signature", "checksum", "attestation", "attest", "root", "rooted",
         "emulator", "debug", "debugger", "hook", "hooked", "modified", "trusted", "valid", "verified", "secure",
     )
     private val LOCAL_BOOLEAN_MARKERS = setOf("alive", "dead", "lives", "energy", "stamina", "ammo", "currency", "coins", "gems", "money", "cash", "gold", "mana")
@@ -482,6 +483,11 @@ object AutoModEngine {
         "points" to 9999,
         "stars" to 999,
     )
+    private val GENERIC_METHOD_NAMES = setOf(
+        "equals", "hashcode", "tostring", "compareto", "clone", "invoke", "apply", "accept",
+        "get", "set", "run", "call", "test", "create", "newinstance",
+    )
+    private val BEHAVIOR_MUTATION_CATEGORIES = setOf("ENTITLEMENT_TRUST", "LOCAL_STATE", "FEATURE_CONFIG", "INTEGRITY")
     private val CATEGORY_PRIORITY = listOf("ENTITLEMENT_TRUST", "LOCAL_STATE", "FEATURE_CONFIG", "INTEGRITY")
     private const val MAX_ACTIONS = 4
 }

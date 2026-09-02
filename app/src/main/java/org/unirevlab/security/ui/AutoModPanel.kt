@@ -110,11 +110,11 @@ fun AutoModPanel(
                         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f))) {
                             Column(Modifier.padding(9.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                                 Text(
-                                    "${action.category} · confidence ${action.confidence}",
+                                    "${autoModCategoryLabel(action.category)} · уверенность ${action.confidence}%",
                                     fontWeight = FontWeight.SemiBold,
                                     style = MaterialTheme.typography.bodySmall,
                                 )
-                                Text(action.target, style = MaterialTheme.typography.bodySmall)
+                                Text("Метод: ${action.target}", style = MaterialTheme.typography.bodySmall)
                                 Text(
                                     when (action.mode) {
                                         AutoModEngine.Mode.RETURN_TRUE -> "Патч: return true"
@@ -241,4 +241,13 @@ fun AutoModPanel(
             }
         }
     }
+}
+
+private fun autoModCategoryLabel(category: String): String = when (category) {
+    "ENTITLEMENT_TRUST" -> "Premium / entitlement gate"
+    "FEATURE_CONFIG" -> "Feature flag / config gate"
+    "INTEGRITY" -> "Integrity / environment check"
+    "LOCAL_STATE" -> "Local state"
+    "AUTH_SESSION" -> "Authentication / session"
+    else -> category.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }
 }

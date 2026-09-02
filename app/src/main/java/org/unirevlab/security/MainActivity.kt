@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.os.ParcelFileDescriptor
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
@@ -52,6 +53,9 @@ import org.unirevlab.security.ui.DashboardScreen
 import org.unirevlab.security.ui.InstalledAppsScreen
 import org.unirevlab.security.ui.HelpScreen
 import org.unirevlab.security.ui.PatchLabScreen
+import org.unirevlab.security.ui.ProductTool
+import org.unirevlab.security.ui.ProductToolScreen
+import org.unirevlab.security.ui.ToolsHomeScreen
 import org.unirevlab.security.ui.UniRevLabTheme
 
 class MainActivity : ComponentActivity() {
@@ -65,7 +69,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Route { AGREEMENT, SCOPE, DASHBOARD, INSTALLED_APPS, HELP, PATCH_LAB }
+private enum class Route { AGREEMENT, SCOPE, HOME, TOOL, DASHBOARD, INSTALLED_APPS, HELP, PATCH_LAB }
 
 @Composable
 private fun UniRevLabApp() {
@@ -88,6 +92,7 @@ private fun UniRevLabApp() {
     var installedAppsError by remember { mutableStateOf<String?>(null) }
     var coordinatorSyncStatus by remember { mutableStateOf<String?>(null) }
     var patchFinding by remember { mutableStateOf<Finding?>(null) }
+    var selectedTool by remember { mutableStateOf<ProductTool?>(null) }
     var lastArtifactUri by remember { mutableStateOf<android.net.Uri?>(null) }
     var lastInstalledApp by remember { mutableStateOf<InstalledAppDescriptor?>(null) }
     var preparedReportExport by remember { mutableStateOf<PreparedReportFile?>(null) }
@@ -98,11 +103,11 @@ private fun UniRevLabApp() {
         when (val state = analysisState) {
             is AnalysisRunState.Running -> {
                 scope = state.assessmentScope
-                route = Route.DASHBOARD
+                route = Route.HOME
             }
             is AnalysisRunState.Cancelling -> {
                 scope = state.assessmentScope
-                route = Route.DASHBOARD
+                route = Route.HOME
             }
             is AnalysisRunState.Completed -> {
                 val next = state.report
@@ -117,7 +122,7 @@ private fun UniRevLabApp() {
                 reportExportStatus = null
                 report = next
                 error = null
-                route = Route.DASHBOARD
+                route = Route.HOME
                 AnalysisManager.clearTerminalState()
             }
             else -> Unit
@@ -272,6 +277,12 @@ private fun UniRevLabApp() {
         }
     }
 
+    BackHandler(
+        enabled = route in setOf(Route.TOOL, Route.DASHBOARD, Route.INSTALLED_APPS, Route.HELP, Route.PATCH_LAB),
+    ) {
+        route = Route.HOME
+    }
+
     when (route) {
         Route.AGREEMENT -> AgreementScreen(error = agreementError) { signerName ->
             val result = runCatching { agreementStore.accept(signerName) }
@@ -283,7 +294,69 @@ private fun UniRevLabApp() {
             report = null
             previousReport = null
             comparison = null
-            route = Route.DASHBOARD
+            selectedTool = null
+            route = Route.HOME
+        }
+        Route.HOME -> ToolsHomeScreen(
+            scope = requireNotNull(scope),
+            report = report,
+            analysisState = analysisState,
+            isInspecting = isInspecting || analysisActive,
+            error = error,
+            onAnalyzeFile = {
+                picker.launch(arrayOf(
+                    "application/vnd.android.package-archive",
+                    "application/zip",
+                    "application/octet-stream",
+                ))
+            },
+            onAnalyzeInstalled = {
+                route = Route.INSTALLED_APPS
+                if (installedApps.isEmpty()) reloadInstalledApps()
+            },
+            onOpenTool = { tool ->
+                selectedTool = tool
+                route = Route.TOOL
+            },
+            onOpenFullReport = { route = Route.DASHBOARD },
+            onOpenPatchLab = {
+                patchFinding = null
+                route = Route.PATCH_LAB
+            },
+            onOpenHelp = { route = Route.HELP },
+            onCancelAnalysis = { AnalysisManager.cancel() },
+            onNewAssessment = {
+                if (!analysisActive) {
+                    scope = null
+                    report = null
+                    previousReport = null
+                    comparison = null
+                    selectedTool = null
+                    coordinatorSyncStatus = null
+                    preparedReportExport?.file?.let { runCatching { it.delete() } }
+                    preparedReportExport = null
+                    reportExportStatus = null
+                    route = Route.SCOPE
+                }
+            },
+        )
+        Route.TOOL -> {
+            val current = report
+            val tool = selectedTool
+            if (current != null && tool != null) {
+                ProductToolScreen(
+                    report = current,
+                    tool = tool,
+                    onBack = { route = Route.HOME },
+                    onOpenPatchLab = {
+                        patchFinding = null
+                        route = Route.PATCH_LAB
+                    },
+                    onOpenFullReport = { route = Route.DASHBOARD },
+                )
+            } else {
+                LaunchedEffect(Unit) { route = Route.HOME }
+            }
         }
         Route.DASHBOARD -> DashboardScreen(
             scope = requireNotNull(scope),
@@ -395,22 +468,22 @@ private fun UniRevLabApp() {
                 }
             },
         )
-        Route.HELP -> HelpScreen(onBack = { route = Route.DASHBOARD })
+        Route.HELP -> HelpScreen(onBack = { route = Route.HOME })
         Route.PATCH_LAB -> {
             val currentReport = report
             if (currentReport == null) {
-                route = Route.DASHBOARD
+                route = Route.HOME
             } else {
                 PatchLabScreen(
                     report = currentReport,
                     initialFinding = patchFinding,
                     initialSourceUri = lastArtifactUri,
                     initialInstalledApp = lastInstalledApp,
-                    onBack = { route = Route.DASHBOARD },
+                    onBack = { route = Route.HOME },
                     onAnalyzeBuilt = { file ->
                         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
                         patchFinding = null
-                        route = Route.DASHBOARD
+                        route = Route.HOME
                         requestAnalysisNotificationPermission()
                         AnalysisManager.startFile(uri, requireNotNull(scope))
                     },
@@ -421,10 +494,10 @@ private fun UniRevLabApp() {
             apps = installedApps,
             isLoading = installedAppsLoading,
             error = installedAppsError,
-            onBack = { route = Route.DASHBOARD },
+            onBack = { route = Route.HOME },
             onReload = { reloadInstalledApps() },
             onSelect = { app ->
-                route = Route.DASHBOARD
+                route = Route.HOME
                 lastArtifactUri = null
                 lastInstalledApp = app
                 requestAnalysisNotificationPermission()
