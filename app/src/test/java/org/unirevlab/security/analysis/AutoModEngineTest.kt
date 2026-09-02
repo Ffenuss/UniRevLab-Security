@@ -29,25 +29,34 @@ class AutoModEngineTest {
     }
 
     @Test
-    fun evidenceBackedObfuscatedMethodsCanStillBecomeDemoTargets() {
-        assertEquals(
-            AutoModEngine.Mode.RETURN_TRUE,
-            AutoModEngine.suggestForTesting("ENTITLEMENT_TRUST", "a", "()Z", 68, "premium entitlement access")?.mode,
+    fun evidenceOnlyObfuscatedMethodsAreNotBehaviorMutationTargets() {
+        assertNull(
+            AutoModEngine.suggestForTesting("ENTITLEMENT_TRUST", "a", "()Z", 68, "premium entitlement access"),
         )
-        val money = AutoModEngine.suggestForTesting("LOCAL_STATE", "b", "()I", 58, "player money balance")
-        assertEquals(AutoModEngine.Mode.RETURN_INT, money?.mode)
-        assertEquals(9999, money?.intValue)
+        assertNull(
+            AutoModEngine.suggestForTesting("LOCAL_STATE", "b", "()I", 58, "player money balance"),
+        )
     }
 
     @Test
-    fun lowerBoundExactEvidenceStillSupportsObfuscatedTargets() {
-        assertEquals(
-            AutoModEngine.Mode.RETURN_TRUE,
-            AutoModEngine.suggestForTesting("ENTITLEMENT_TRUST", "a", "()Z", 42, "premium access entitlement")?.mode,
+    fun genericEqualsAndAndroidBitmapConfigDoNotBecomeFeaturePatches() {
+        assertNull(
+            AutoModEngine.suggestForTesting(
+                "FEATURE_CONFIG",
+                "equals",
+                "(Ljava/lang/Object;)Z",
+                70,
+                "Landroid/graphics/Bitmap${'$'}Config; config",
+            ),
         )
-        assertEquals(
-            AutoModEngine.Mode.RETURN_INT,
-            AutoModEngine.suggestForTesting("LOCAL_STATE", "b", "()I", 42, "player score")?.mode,
+        assertNull(
+            AutoModEngine.suggestForTesting(
+                "FEATURE_CONFIG",
+                "c",
+                "(Landroid/graphics/Bitmap${'$'}Config;)Z",
+                70,
+                "bitmap config",
+            ),
         )
     }
 
