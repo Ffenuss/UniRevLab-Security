@@ -12,6 +12,7 @@ object Il2CppPairAssessmentEngine {
     data class Result(
         val report: StaticAnalysisReport,
         val risk: Il2CppMonetizationRiskEngine.Result,
+        val mapping: Il2CppSemanticMappingEngine.Result,
         val managedDump: String,
         val aggregateSha256: String,
         val warnings: List<String>,
@@ -50,17 +51,21 @@ object Il2CppPairAssessmentEngine {
             il2cpp = pair.il2cpp,
             findings = emptyList(),
         )
+        val mapping = Il2CppSemanticMappingEngine.analyze(report)
         val risk = Il2CppMonetizationRiskEngine.analyze(report)
         val warnings = buildList {
             if (pair.il2cpp.metadata?.magicValid != true) add("global-metadata.dat magic/version could not be validated.")
             if (pair.il2cpp.metadata?.reconstructionTruncated == true || pair.il2cpp.truncated) add("IL2CPP reconstruction is partial; absence of a candidate is not proof of absence.")
             if (pair.native.libraries.firstOrNull()?.stripped == true) add("libil2cpp.so is stripped; exact native symbol correlation is limited without an external symbol/Ghidra result.")
             if (pair.il2cpp.metadata?.metadataVersion !in 27..31) add("Structured type/method/field reconstruction is currently optimized for metadata versions 27-31.")
+            if (mapping.likelyObfuscated) add("Managed metadata appears obfuscated (score ${mapping.obfuscationScore}/100); contextual aliases are analyst hypotheses, not recovered source names.")
+            if (mapping.contextualMappings > 0) add("${mapping.contextualMappings} obfuscated symbols received contextual semantic aliases for review.")
             add("Pair matching is assumed from the supplied files unless independent build/provenance evidence is available.")
         }
         return Result(
             report = report,
             risk = risk,
+            mapping = mapping,
             managedDump = Il2CppManagedDumpExporter.export(report),
             aggregateSha256 = aggregateSha,
             warnings = warnings,

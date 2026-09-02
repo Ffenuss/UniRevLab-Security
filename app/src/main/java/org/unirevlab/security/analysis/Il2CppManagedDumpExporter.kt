@@ -21,6 +21,7 @@ object Il2CppManagedDumpExporter {
             }
         }
 
+        val analystMapping = Il2CppSemanticMappingEngine.analyze(report)
         val correlations = report.correlations?.il2cppMethods.orEmpty().groupBy { it.methodIndex }
         val methodsByType = metadata.methodDefinitions.groupBy { it.declaringTypeIndex }
         val fieldsByType = metadata.fieldDefinitions.groupBy { it.declaringTypeIndex }
@@ -93,6 +94,9 @@ object Il2CppManagedDumpExporter {
             if (emittedMethods < metadata.methodDefinitions.size) {
                 appendLine("# methods_truncated=true emitted=$emittedMethods")
             }
+            appendLine()
+            appendLine("# ---- IL2CPP ANALYST MAPPING ----")
+            append(analystMapping.mappingText)
         }
     }
 

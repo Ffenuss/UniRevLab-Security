@@ -110,7 +110,7 @@ object Il2CppMonetizationRiskEngine {
 
         metadata.fieldDefinitions.forEach { field ->
             val identity = "${field.declaringType}.${field.name}"
-            classify(identity).forEach { category ->
+            classify(field.name).forEach { category ->
                 add(
                     Candidate(
                         kind = "FIELD",
@@ -123,7 +123,7 @@ object Il2CppMonetizationRiskEngine {
                         nativeFunctionName = null,
                         evidence = listOf(
                             "Exact managed field identity recovered from global-metadata.dat",
-                            "Semantic marker: ${markerFor(identity, category)}",
+                            "Semantic marker in field name: ${markerFor(field.name, category)}",
                             "Metadata field index=${field.index}, typeIndex=${field.typeIndex}, token=0x${field.token.toString(16)}",
                         ),
                     ),
@@ -133,12 +133,12 @@ object Il2CppMonetizationRiskEngine {
 
         metadata.methodDefinitions.forEach { method ->
             val identity = "${method.declaringType}.${method.name}"
-            classify(identity).forEach { category ->
+            classify(method.name).forEach { category ->
                 val native = nativeByMethod[method.index].orEmpty()
                     .firstOrNull { it.functionName.isNotBlank() }
                 val evidence = buildList {
                     add("Exact managed method identity recovered from global-metadata.dat")
-                    add("Semantic marker: ${markerFor(identity, category)}")
+                    add("Semantic marker in method name: ${markerFor(method.name, category)}")
                     add("Metadata method index=${method.index}, token=0x${method.token.toString(16)}")
                     native?.let {
                         add("Correlated to recovered native function identity: ${it.functionName} (${it.confidence})")
@@ -180,6 +180,42 @@ object Il2CppMonetizationRiskEngine {
                 )
             }
         }
+
+        val semanticMapping = Il2CppSemanticMappingEngine.analyze(
+            report = report,
+            maxEntries = maxCandidates.coerceAtLeast(0) * 4,
+        )
+        semanticMapping.entries.asSequence()
+            .filter { it.basis == Il2CppSemanticMappingEngine.Basis.CONTEXTUAL && it.semanticCategory != null }
+            .forEach { mapping ->
+                val category = runCatching { Category.valueOf(mapping.semanticCategory!!) }.getOrNull() ?: return@forEach
+                val method = if (mapping.kind == "METHOD") metadata.methodDefinitions.firstOrNull { it.index == mapping.symbolIndex } else null
+                val field = if (mapping.kind == "FIELD") metadata.fieldDefinitions.firstOrNull { it.index == mapping.symbolIndex } else null
+                val type = if (mapping.kind == "TYPE") metadata.typeDefinitions.firstOrNull { it.index == mapping.symbolIndex } else null
+                val native = method?.let { current ->
+                    nativeByMethod[current.index].orEmpty().firstOrNull { it.functionName.isNotBlank() }
+                }
+                add(
+                    Candidate(
+                        kind = "CONTEXT_${mapping.kind}",
+                        managedIdentity = mapping.originalIdentity,
+                        category = category,
+                        confidence = when (mapping.confidence) {
+                            Il2CppSemanticMappingEngine.Confidence.HIGH -> Confidence.HIGH
+                            Il2CppSemanticMappingEngine.Confidence.MEDIUM -> Confidence.MEDIUM
+                            Il2CppSemanticMappingEngine.Confidence.LOW -> Confidence.LOW
+                        },
+                        metadataToken = method?.token ?: field?.token ?: type?.token,
+                        methodIndex = method?.index,
+                        declaringType = method?.declaringType ?: field?.declaringType ?: type?.fullName,
+                        nativeFunctionName = native?.functionName,
+                        evidence = mapping.evidence + listOf(
+                            "Contextual analyst alias: ${mapping.alias}",
+                            "This candidate is inferred from enclosing metadata context and does not prove a live premium value or authorization result.",
+                        ),
+                    ),
+                )
+            }
 
         val ordered = candidates.values.sortedWith(
             compareBy<Candidate>({ categoryOrder(it.category) }, { confidenceOrder(it.confidence) }, { it.managedIdentity }),

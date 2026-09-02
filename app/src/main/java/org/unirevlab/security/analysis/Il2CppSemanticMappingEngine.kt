@@ -60,14 +60,14 @@ object Il2CppSemanticMappingEngine {
             }
             methodsByType[type.index].orEmpty().forEach { method ->
                 val identity = "${method.declaringType}.${method.name}"
-                semanticCategories(identity).forEach { category ->
+                semanticCategories(method.name).forEach { category ->
                     evidence.getOrPut(category) { mutableListOf() }
                         .add("method $identity")
                 }
             }
             fieldsByType[type.index].orEmpty().forEach { field ->
                 val identity = "${field.declaringType}.${field.name}"
-                semanticCategories(identity).forEach { category ->
+                semanticCategories(field.name).forEach { category ->
                     evidence.getOrPut(category) { mutableListOf() }
                         .add("field $identity")
                 }
@@ -131,7 +131,7 @@ object Il2CppSemanticMappingEngine {
         metadata.fieldDefinitions.sortedBy { it.index }.forEach { field ->
             val identity = "${field.declaringType}.${field.name}"
             val obfuscated = account("FIELD", field.name)
-            val direct = semanticCategories(identity)
+            val direct = semanticCategories(field.name)
             val context = contexts[field.declaringTypeIndex]
             when {
                 direct.isNotEmpty() -> direct.forEach { category ->
@@ -158,7 +158,7 @@ object Il2CppSemanticMappingEngine {
         metadata.methodDefinitions.sortedBy { it.index }.forEach { method ->
             val identity = "${method.declaringType}.${method.name}"
             val obfuscated = account("METHOD", method.name)
-            val direct = semanticCategories(identity)
+            val direct = semanticCategories(method.name)
             val context = contexts[method.declaringTypeIndex]
             when {
                 direct.isNotEmpty() -> direct.forEach { category ->

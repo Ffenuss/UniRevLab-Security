@@ -101,7 +101,7 @@ fun Il2CppPairWorkspaceScreen(
             OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("← Инструменты") }
             Text("IL2CPP Dump / Metadata", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Text(
-                "Импортируйте matching global-metadata.dat и libil2cpp.so. UniRevLab восстанавливает managed types/methods/fields, строит безопасный dump и выделяет premium / entitlement / subscription / IAP / receipt-validation attack surface.",
+                "Импортируйте matching global-metadata.dat и libil2cpp.so. UniRevLab восстанавливает managed types/methods/fields, оценивает обфускацию, строит analyst mapping и выделяет premium / entitlement / subscription / IAP / receipt-validation attack surface.",
                 style = MaterialTheme.typography.bodyMedium,
             )
             Card(
@@ -206,6 +206,28 @@ fun Il2CppPairWorkspaceScreen(
                 if (filtered.size > 150) {
                     Text("На экране показаны первые 150; полный managed dump сохраняется отдельно.", style = MaterialTheme.typography.bodySmall)
                 }
+
+                HorizontalDivider()
+                Text("IL2CPP analyst mapping", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(
+                    "Aliases помогают навигации по обфусцированной metadata. CONTEXTUAL — гипотеза по контексту типа; STRUCTURAL — нейтральное имя без семантического утверждения.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                val mapped = current.mapping.entries.filter { entry ->
+                    query.isBlank() || entry.originalIdentity.contains(query, ignoreCase = true) ||
+                        entry.alias.contains(query, ignoreCase = true) ||
+                        entry.semanticCategory?.contains(query, ignoreCase = true) == true ||
+                        entry.basis.name.contains(query, ignoreCase = true)
+                }
+                Text("Mapping entries: ${mapped.size}/${current.mapping.entries.size}", fontWeight = FontWeight.SemiBold)
+                mapped.take(120).forEach { entry ->
+                    PairInfoCard(
+                        "${entry.basis} · ${entry.confidence} · ${entry.kind} #${entry.symbolIndex}\n${entry.originalIdentity}\n→ ${entry.alias}${entry.semanticCategory?.let { " · $it" } ?: ""}",
+                    )
+                }
+                if (mapped.size > 120) {
+                    Text("Показаны первые 120 mapping entries; полный mapping включён в сохранённый managed dump.", style = MaterialTheme.typography.bodySmall)
+                }
             }
         }
     }
@@ -221,6 +243,8 @@ private fun Il2CppPairResultPanel(current: Il2CppPairAssessmentEngine.Result) {
             Text("Metadata v${risk.metadataVersion ?: "?"} · types ${risk.typeCount} · methods ${risk.methodCount} · fields ${risk.fieldCount}")
             Text("Monetization ${risk.monetizationCandidates} · validation ${risk.validationCandidates} · client-state ${risk.clientStateCandidates}")
             Text("Native correlations ${risk.nativeCorrelations} · coverage ${if (risk.coverageComplete) "COMPLETE" else "PARTIAL"}")
+            Text("Obfuscation ${current.mapping.obfuscationScore}/100 · suspected ${current.mapping.suspectedSymbols} · mapped ${current.mapping.mappedSymbols}")
+            Text("Semantic ${current.mapping.semanticMappings} · contextual ${current.mapping.contextualMappings} · structural ${current.mapping.structuralMappings}", style = MaterialTheme.typography.bodySmall)
             Text("Pair SHA-256 ${current.aggregateSha256.take(24)}…", style = MaterialTheme.typography.bodySmall)
         }
     }
