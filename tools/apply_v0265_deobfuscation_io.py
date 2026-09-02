@@ -13,6 +13,15 @@ def insert_after(text: str, anchor: str, addition: str, label: str) -> str:
     return text.replace(anchor, anchor + addition, 1)
 
 
+def ensure_import(text: str, import_line: str, anchor: str, label: str) -> str:
+    line = import_line.rstrip("\n")
+    if any(existing.strip() == line for existing in text.splitlines()):
+        return text
+    if anchor not in text:
+        raise RuntimeError(f"{label}: import anchor not found")
+    return text.replace(anchor, anchor + import_line, 1)
+
+
 def main() -> None:
     text = UI.read_text(encoding="utf-8")
     original = text
@@ -20,20 +29,26 @@ def main() -> None:
     if "private fun DeobfuscationToolPanel" not in text:
         raise RuntimeError("deobfuscation UI must be applied before IO migration")
 
-    text = insert_after(
+    text = ensure_import(
         text,
-        "import androidx.compose.runtime.remember\n",
         "import androidx.compose.runtime.rememberCoroutineScope\n",
+        "import androidx.compose.runtime.remember\n",
         "rememberCoroutineScope import",
     )
-    text = insert_after(
-        text,
-        "import org.unirevlab.security.model.StaticAnalysisReport\n",
-        "import kotlinx.coroutines.Dispatchers\n"
-        "import kotlinx.coroutines.launch\n"
+    # Add coroutine imports one-by-one. Older product screens already contain
+    # Dispatchers/withContext, so inserting the whole block is not idempotent.
+    for import_line in (
+        "import kotlinx.coroutines.Dispatchers\n",
+        "import kotlinx.coroutines.launch\n",
         "import kotlinx.coroutines.withContext\n",
-        "coroutine imports",
-    )
+    ):
+        text = ensure_import(
+            text,
+            import_line,
+            "import org.unirevlab.security.model.StaticAnalysisReport\n",
+            f"{import_line.strip()} import",
+        )
+
     text = insert_after(
         text,
         "private fun DeobfuscationToolPanel(report: StaticAnalysisReport) {\n    val context = LocalContext.current\n",
