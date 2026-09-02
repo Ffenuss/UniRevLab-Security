@@ -47,7 +47,12 @@ class AssessmentHistoryStore(context: Context) {
         )
         val updated = buildList {
             add(entry)
-            addAll(list().filterNot { it.assessmentId == entry.assessmentId })
+            addAll(
+                list().filterNot {
+                    it.assessmentId == entry.assessmentId &&
+                        it.artifactSha256.equals(entry.artifactSha256, ignoreCase = true)
+                },
+            )
         }.take(MAX_ENTRIES)
         persistEntries(updated)
         pruneBaselines(updated)
