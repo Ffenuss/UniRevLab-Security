@@ -10,7 +10,7 @@ import org.unirevlab.security.model.StaticAnalysisReport
  * instructions.
  */
 object Il2CppManagedDumpExporter {
-    fun export(report: StaticAnalysisReport, maxMethods: Int = 100_000): String {
+    fun export(report: StaticAnalysisReport, maxMethods: Int = 100_000, maxFields: Int = 100_000): String {
         val il2cpp = report.il2cpp
         val metadata = il2cpp?.metadata
         if (il2cpp?.detected != true || metadata == null) {
@@ -23,19 +23,24 @@ object Il2CppManagedDumpExporter {
 
         val correlations = report.correlations?.il2cppMethods.orEmpty().groupBy { it.methodIndex }
         val methodsByType = metadata.methodDefinitions.groupBy { it.declaringTypeIndex }
+        val fieldsByType = metadata.fieldDefinitions.groupBy { it.declaringTypeIndex }
         val methodLimit = maxMethods.coerceAtLeast(0)
+        val fieldLimit = maxFields.coerceAtLeast(0)
         var emittedMethods = 0
+        var emittedFields = 0
 
         return buildString {
-            appendLine("# UniRevLab IL2CPP managed dump v1")
+            appendLine("# UniRevLab IL2CPP managed dump v2")
             appendLine("# artifact_sha256=${report.artifact.sha256}")
             appendLine("# metadata_entry=${metadata.entryName}")
             appendLine("# metadata_version=${metadata.metadataVersion ?: "unknown"}")
             appendLine("# layout_profile=${metadata.layoutProfile ?: "unknown"}")
             appendLine("# types=${metadata.typeDefinitions.size}")
             appendLine("# methods=${metadata.methodDefinitions.size}")
+            appendLine("# fields=${metadata.fieldDefinitions.size}")
             appendLine("# coverage=${if (!metadata.truncated && !metadata.reconstructionTruncated && metadata.parseError == null) "COMPLETE" else "PARTIAL"}")
             appendLine("# NOTE: managed names are exact identities present in the supplied metadata; they may already have been obfuscated before IL2CPP conversion.")
+            appendLine("# FIELD typeIndex is metadata type identity, not a runtime address or live value.")
             appendLine("# Native correlations list names only; no patch offsets are emitted.")
             appendLine()
 
@@ -48,23 +53,42 @@ object Il2CppManagedDumpExporter {
                     .append(type.index)
                     .appendLine()
 
-                methodsByType[type.index].orEmpty().sortedBy { it.index }.forEach { method ->
-                    if (emittedMethods >= methodLimit) return@forEach
-                    append("  METHOD ")
-                        .append(method.name)
-                        .append(" params=")
-                        .append(method.parameterCount)
-                        .append(" token=0x")
-                        .append(method.token.toString(16))
-                        .append(" index=")
-                        .append(method.index)
-                    correlations[method.index].orEmpty().firstOrNull { it.functionName.isNotBlank() }?.let { correlation ->
-                        append(" native=").append(sanitize(correlation.functionName))
-                        append(" confidence=").append(sanitize(correlation.confidence))
+                fieldsByType[type.index].orEmpty().sortedBy { it.index }.forEach { field ->
+                    if (emittedFields < fieldLimit) {
+                        append("  FIELD ")
+                            .append(field.name)
+                            .append(" typeIndex=")
+                            .append(field.typeIndex)
+                            .append(" token=0x")
+                            .append(field.token.toString(16))
+                            .append(" index=")
+                            .append(field.index)
+                            .appendLine()
+                        emittedFields++
                     }
-                    appendLine()
-                    emittedMethods++
                 }
+
+                methodsByType[type.index].orEmpty().sortedBy { it.index }.forEach { method ->
+                    if (emittedMethods < methodLimit) {
+                        append("  METHOD ")
+                            .append(method.name)
+                            .append(" params=")
+                            .append(method.parameterCount)
+                            .append(" token=0x")
+                            .append(method.token.toString(16))
+                            .append(" index=")
+                            .append(method.index)
+                        correlations[method.index].orEmpty().firstOrNull { it.functionName.isNotBlank() }?.let { correlation ->
+                            append(" native=").append(sanitize(correlation.functionName))
+                            append(" confidence=").append(sanitize(correlation.confidence))
+                        }
+                        appendLine()
+                        emittedMethods++
+                    }
+                }
+            }
+            if (emittedFields < metadata.fieldDefinitions.size) {
+                appendLine("# fields_truncated=true emitted=$emittedFields")
             }
             if (emittedMethods < metadata.methodDefinitions.size) {
                 appendLine("# methods_truncated=true emitted=$emittedMethods")
