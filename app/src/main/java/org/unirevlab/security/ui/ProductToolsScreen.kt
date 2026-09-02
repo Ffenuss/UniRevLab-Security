@@ -1,5 +1,7 @@
 package org.unirevlab.security.ui
 
+import android.content.ContentResolver
+import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -12,6 +14,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -22,18 +26,28 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import org.unirevlab.security.R
 import org.unirevlab.security.analysis.AnalysisRunState
+import org.unirevlab.security.analysis.DeobfuscationEngine
+import org.unirevlab.security.analysis.MappingDeobfuscator
 import org.unirevlab.security.analysis.ProtectionPostureEngine
 import org.unirevlab.security.analysis.SerializationInspector
 import org.unirevlab.security.model.AssessmentScope
 import org.unirevlab.security.model.StaticAnalysisReport
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class ProductTool(
     val title: String,
@@ -43,6 +57,7 @@ enum class ProductTool(
     PROTECTION("Protection Matrix", "Root, emulator, debug, hook, signature, integrity", "SHIELD"),
     MANIFEST("Manifest / IPC", "Permissions, exported components, providers, deep links", "APK"),
     DEX("DEX / Logic", "Methods, strings, xrefs, call graph and code index", "DEX"),
+    DEOBFUSCATION("Deobfuscation", "Obfuscation score, semantic aliases and R8 mapping", "DEOB"),
     SERIALIZATION("Serialization", "Serializable, Parcelable, JSON, Protobuf and object decoders", "DATA"),
     SIGNING("Signatures / Integrity", "APK signing schemes, certificates and self-check signals", "SIG"),
     NETWORK("Network Security", "Cleartext policy, Network Security Config and TLS pinning", "TLS"),
@@ -175,7 +190,7 @@ private fun FullAuditHero(
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Full Automatic APK Audit", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Text(
-                "Один прогон: archive + Manifest + permissions/IPC + DEX/xrefs + protection matrix + serialization + Native/JNI + runtimes + IL2CPP + network security + signatures + SBOM/CVE + findings.",
+                "Один прогон: archive + Manifest + permissions/IPC + DEX/xrefs + deobfuscation + protection matrix + serialization + Native/JNI + runtimes + IL2CPP + network security + signatures + SBOM/CVE + findings.",
                 style = MaterialTheme.typography.bodyMedium,
             )
 
@@ -288,6 +303,7 @@ fun ProductToolScreen(
                 ProductTool.SERIALIZATION -> SerializationInspectorPanel(report)
                 ProductTool.MANIFEST -> ManifestToolPanel(report)
                 ProductTool.DEX -> DexToolPanel(report)
+                ProductTool.DEOBFUSCATION -> DeobfuscationToolPanel(report)
                 ProductTool.SIGNING -> SigningToolPanel(report)
                 ProductTool.NETWORK -> NetworkToolPanel(report)
                 ProductTool.NATIVE -> NativeToolPanel(report)
@@ -399,6 +415,129 @@ private fun DexToolPanel(report: StaticAnalysisReport) {
     MetricCard("Basic blocks", dex.basicBlocks.size.toString())
     InfoCard("HTTP URLs: ${dex.httpUrls.size} · HTTPS URLs: ${dex.httpsUrls.size} · secret candidates: ${dex.secretCandidates.size}\nParse errors: ${dex.parseErrors} · truncated=${dex.truncated}")
 }
+
+
+@Composable
+private fun DeobfuscationToolPanel(report: StaticAnalysisReport) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val heuristic = remember(report.artifact.sha256) { DeobfuscationEngine.analyze(report) }
+    var mapping by remember(report.artifact.sha256) { mutableStateOf<DeobfuscationEngine.MappingSummary?>(null) }
+    var mappingError by remember(report.artifact.sha256) { mutableStateOf<String?>(null) }
+    val mappingPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val result = runCatching {
+                    withContext(Dispatchers.IO) {
+                        val text = readMappingTextBounded(context.contentResolver, uri)
+                        DeobfuscationEngine.parseMapping(text)
+                    }
+                }
+                result.onSuccess {
+                    mapping = it
+                    mappingError = null
+                }.onFailure {
+                    mapping = null
+                    mappingError = it.message ?: it.javaClass.simpleName
+                }
+            }
+        }
+    }
+    val exactAliases = remember(report.artifact.sha256, mapping) {
+        mapping?.let { MappingDeobfuscator.resolve(report, it) }.orEmpty()
+    }
+
+    Card(
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+    ) {
+        Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Text("Static Deobfuscation", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(
+                "Сначала оцениваем степень обфускации, затем строим неразрушающие semantic aliases по DEX xrefs/API/строкам. Это рабочие имена для анализа, а не утверждение о восстановлении исходных названий.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                "Obfuscation score: ${heuristic.score}/100 · ${if (heuristic.likelyObfuscated) "вероятно обфусцировано" else "сильная обфускация не подтверждена"}",
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                "Classes: ${heuristic.obfuscatedClasses}/${heuristic.classesAnalyzed} · methods: ${heuristic.obfuscatedMethods}/${heuristic.methodsAnalyzed} · opaque strings: ${heuristic.opaqueStringIndicators}",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                "DEX coverage: ${if (heuristic.coverageComplete) "полный индекс" else "ограниченный/неполный"}",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+
+    Card(shape = RoundedCornerShape(20.dp)) {
+        Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("R8 / ProGuard mapping.txt", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(
+                "Если заказчик предоставляет mapping.txt своей релизной сборки, UniRevLab сопоставляет его с DEX и показывает точные исходные имена классов/методов/полей.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Button(
+                onClick = { mappingPicker.launch(arrayOf("text/plain", "application/octet-stream", "*/*")) },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Импортировать mapping.txt") }
+            mappingError?.let { Text("Ошибка mapping.txt: $it", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+            mapping?.let { parsed ->
+                Text(
+                    "Parsed: classes ${parsed.classes.size} · members ${parsed.members.size} · exact DEX matches ${exactAliases.size} · errors ${parsed.parseErrors}${if (parsed.truncated) " · truncated" else ""}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                exactAliases.take(80).forEach { alias ->
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                        Column(Modifier.padding(11.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text("${alias.kind} · EXACT", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                            Text(alias.obfuscatedSymbol, style = MaterialTheme.typography.bodySmall)
+                            Text("→ ${alias.originalSymbol}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Text("Semantic aliases", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+    if (heuristic.aliases.isEmpty()) {
+        InfoCard("Надёжные semantic aliases по текущему DEX-индексу не выведены. Это лучше, чем придумывать названия без достаточного evidence.")
+    } else {
+        heuristic.aliases.forEach { alias ->
+            Card(shape = RoundedCornerShape(16.dp)) {
+                Column(Modifier.padding(13.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("${alias.kind} · ${alias.confidence}", fontWeight = FontWeight.SemiBold)
+                    Text(alias.original, style = MaterialTheme.typography.bodySmall)
+                    Text("→ ${alias.suggestedAlias}", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                    alias.reasons.take(3).forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+                }
+            }
+        }
+    }
+}
+
+private fun readMappingTextBounded(resolver: ContentResolver, uri: Uri): String {
+    val reader = resolver.openInputStream(uri)?.bufferedReader()
+        ?: error("Не удалось открыть mapping.txt")
+    reader.use {
+        val out = StringBuilder()
+        val buffer = CharArray(8192)
+        while (true) {
+            val read = it.read(buffer)
+            if (read < 0) break
+            require(out.length + read <= MAX_MAPPING_TEXT_CHARS) {
+                "mapping.txt слишком большой: лимит ${MAX_MAPPING_TEXT_CHARS / 1_000_000} MB текста"
+            }
+            out.append(buffer, 0, read)
+        }
+        return out.toString()
+    }
+}
+
+private const val MAX_MAPPING_TEXT_CHARS = 4_000_000
 
 @Composable
 private fun SigningToolPanel(report: StaticAnalysisReport) {
