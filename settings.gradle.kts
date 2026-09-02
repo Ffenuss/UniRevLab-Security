@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "UniRevLabSecurity"
 include(":app")
+include(":testtarget")
