@@ -59,6 +59,8 @@ sealed interface AnalysisRunState {
         val targetLabel: String,
         val report: StaticAnalysisReport,
         val finishedAtEpochMs: Long = System.currentTimeMillis(),
+        /** Null only when the complete report snapshot was durably stored before completion. */
+        val historyPersistError: String? = null,
     ) : AnalysisRunState
 
     data class Cancelled(
