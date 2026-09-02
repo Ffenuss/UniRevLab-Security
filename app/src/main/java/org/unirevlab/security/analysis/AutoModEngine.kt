@@ -12,7 +12,7 @@ import org.unirevlab.security.model.StaticAnalysisReport
  * original APK in place.
  */
 object AutoModEngine {
-    enum class Mode { RETURN_TRUE, RETURN_FALSE, RETURN_INT }
+    enum class Mode { RETURN_TRUE, RETURN_FALSE, RETURN_INT, TRACE_ONLY }
 
     data class Action(
         val id: String,
@@ -66,8 +66,8 @@ object AutoModEngine {
             "${method.dexEntry}|${method.declaringClass}|${method.name}|${method.prototype}"
         }
         val codeKeys = dex?.codeMethods.orEmpty().map { "${it.dexEntry}|${it.declaringClass}|${it.name}|${it.prototype}" }.toSet()
-        fun editableProject(method: org.unirevlab.security.model.DexMethodReference): Boolean =
-            "${method.dexEntry}|${method.declaringClass}|${method.name}|${method.prototype}" in codeKeys &&
+        fun projectMethod(method: org.unirevlab.security.model.DexMethodReference): Boolean =
+            method.dexEntry in workspace.dexEntries &&
                 TamperAssessmentEngine.isProjectCodeForAutomation(method.declaringClass, packagePrefix)
 
         data class Evidence(
@@ -78,7 +78,7 @@ object AutoModEngine {
         )
         val evidence = mutableListOf<Evidence>()
         fun collect(method: org.unirevlab.security.model.DexMethodReference, text: String, scorePenalty: Int = 0) {
-            if (!editableProject(method)) return
+            if (!projectMethod(method)) return
             TamperAssessmentEngine.categoriesForAutomation(text).forEach { (category, score) ->
                 evidence += Evidence(category, method, (score - scorePenalty).coerceAtLeast(1), text)
             }
@@ -91,7 +91,7 @@ object AutoModEngine {
             val methodName = hit.methodName ?: return@forEach
             val prototype = hit.prototype ?: return@forEach
             val method = methodsBySignature["$dexEntry|$classDescriptor|$methodName|$prototype"] ?: return@forEach
-            if (!editableProject(method)) return@forEach
+            if (!projectMethod(method)) return@forEach
             evidence += Evidence(
                 category = hit.category,
                 method = method,
@@ -113,21 +113,21 @@ object AutoModEngine {
             val method = methodsByKey[xref.dexEntry to xref.callerMethodIndex] ?: return@forEach
             collect(method, "${xref.declaringClass} ${xref.fieldName} ${xref.fieldType} ${xref.callerClass} ${xref.callerName}", 1)
         }
+        // External SDK/framework callees are not editable, but their app-owned callers are.
+        dex?.callXrefs.orEmpty().forEach { xref ->
+            val method = methodsByKey[xref.dexEntry to xref.callerMethodIndex] ?: return@forEach
+            collect(method, "${xref.calleeClass} ${xref.calleeName} ${xref.calleePrototype}", 3)
+        }
         dex?.constants.orEmpty().forEach { constant ->
             val method = methodsByKey[constant.dexEntry to constant.methodIndex] ?: return@forEach
             collect(method, "${method.declaringClass} ${method.name} ${constant.kind} ${constant.value}", 5)
         }
 
-        val candidates = evidence.asSequence()
+        val semanticCandidates = evidence.asSequence()
             .mapNotNull { item ->
                 val method = item.method
-                val suggestion = suggest(
-                    category = item.category,
-                    methodName = method.name,
-                    prototype = method.prototype,
-                    baseScore = item.score,
-                    evidence = item.text,
-                ) ?: return@mapNotNull null
+                val suggestion = suggest(item.category, method.name, method.prototype, item.score, item.text)
+                    ?: return@mapNotNull null
                 Action(
                     id = "automod-${item.category.lowercase(Locale.ROOT)}-${method.methodIndex}",
                     category = item.category,
@@ -145,16 +145,62 @@ object AutoModEngine {
             .mapNotNull { (_, values) -> values.maxByOrNull { it.confidence } }
             .sortedWith(compareByDescending<Action> { it.confidence }.thenBy { it.target })
 
+        // If semantic mutation is not yet safe, still produce a useful evidence build by tracing
+        // exact app-owned callers. This never guesses an entitlement value.
+        val traceCandidates = if (semanticCandidates.isEmpty()) {
+            evidence.asSequence()
+                .sortedByDescending { it.score }
+                .distinctBy { "${it.method.dexEntry}|${it.method.declaringClass}|${it.method.name}|${it.method.prototype}" }
+                .map { item ->
+                    val method = item.method
+                    Action(
+                        id = "automod-trace-${method.methodIndex}",
+                        category = item.category,
+                        dexEntry = method.dexEntry,
+                        classDescriptor = method.declaringClass,
+                        methodName = method.name,
+                        prototype = method.prototype,
+                        mode = Mode.TRACE_ONLY,
+                        confidence = item.score.coerceIn(1, 100),
+                        reason = "Диагностический fallback: точный app-owned caller будет трассироваться; значение не подменяется.",
+                    )
+                }
+                .toList()
+        } else emptyList()
+
+        val smaliCache = mutableMapOf<String, String?>()
+        var verificationFailures = 0
+        fun verifiedBody(action: Action): Boolean {
+            val classKey = "${action.dexEntry}|${action.classDescriptor}"
+            val text = if (smaliCache.containsKey(classKey)) {
+                smaliCache[classKey]
+            } else {
+                val loaded = runCatching {
+                    PatchLabEngine.disassembleDex(workspace, action.dexEntry)
+                    PatchLabEngine.loadClass(workspace, action.dexEntry, action.classDescriptor)
+                }.getOrElse {
+                    verificationFailures++
+                    null
+                }
+                smaliCache[classKey] = loaded
+                loaded
+            } ?: return false
+            return hasEditableMethodBody(text, action.methodName, action.prototype)
+        }
+
+        val candidates = (semanticCandidates + traceCandidates).filter(::verifiedBody)
         val selected = selectDiverse(candidates)
-        val editableMethodCount = dex?.methods.orEmpty().count(::editableProject)
+        val indexedEditableCount = dex?.methods.orEmpty().count { method ->
+            projectMethod(method) && "${method.dexEntry}|${method.declaringClass}|${method.name}|${method.prototype}" in codeKeys
+        }
+        val verifiedEditableCount = candidates.map { it.methodKey }.distinct().size
         val exactTamperMethodHits = assessment.hits.count {
             it.dexEntry != null && it.classDescriptor != null && it.methodName != null && it.prototype != null
         }
         val diagnostics = when {
-            candidates.isNotEmpty() -> "editable methods: $editableMethodCount; exact tamper method hits: $exactTamperMethodHits; eligible: ${candidates.size}"
-            editableMethodCount == 0 -> "Нет редактируемых DEX method bodies: возможно логика находится в native/IL2CPP/managed runtime."
-            exactTamperMethodHits == 0 -> "Tamper Assessment не связал поверхности с точными DEX method bodies; используйте scoped search/Runtime State Lab."
-            else -> "Найдены редактируемые методы и tamper hits, но сигнатуры return/type не подходят для безопасного AutoMod-шаблона."
+            candidates.isNotEmpty() -> "Smali-verified methods: $verifiedEditableCount; indexed bodies: $indexedEditableCount; exact tamper hits: $exactTamperMethodHits; eligible: ${candidates.size}; verification failures: $verificationFailures"
+            evidence.isEmpty() -> "DEX callers не связаны с surface. Следующий маршрут: Runtime State, Native/managed или Backend Validation."
+            else -> "Surface связаны с app-owned callers, но их Smali bodies недоступны. Следующий маршрут: Native/managed или Backend Validation; verification failures: $verificationFailures."
         }
         return Plan(
             artifactSha256 = workspace.artifactSha256,
@@ -192,6 +238,9 @@ object AutoModEngine {
                     action.prototype,
                     requireNotNull(action.intValue),
                 )
+                Mode.TRACE_ONLY -> PatchLabEngine.addEntryLogHook(
+                    before, action.methodName, action.prototype, "automod:${action.category}",
+                )
             }
             edited[key] = after
         }
@@ -218,6 +267,21 @@ object AutoModEngine {
         prototype: String,
         value: Int,
     ): String = forceIntReturn(classText, methodName, prototype, value)
+
+    internal fun hasEditableMethodBodyForTesting(
+        classText: String,
+        methodName: String,
+        prototype: String,
+    ): Boolean = hasEditableMethodBody(classText, methodName, prototype)
+
+    private fun hasEditableMethodBody(classText: String, methodName: String, prototype: String): Boolean {
+        val header = Regex("(?m)^\\.method[^\\n]*\\s${Regex.escape(methodName)}${Regex.escape(prototype)}\\s*$")
+            .find(classText) ?: return false
+        if (Regex("\\b(?:abstract|native)\\b", RegexOption.IGNORE_CASE).containsMatchIn(header.value)) return false
+        val end = Regex("(?m)^\\.end method\\s*$").find(classText, header.range.last + 1) ?: return false
+        val block = classText.substring(header.range.first, end.range.last + 1)
+        return Regex("(?m)^\\s*\\.locals\\s+\\d+\\s*$").containsMatchIn(block)
+    }
 
     private fun selectDiverse(candidates: List<Action>): List<Action> {
         if (candidates.size <= MAX_ACTIONS) return candidates
