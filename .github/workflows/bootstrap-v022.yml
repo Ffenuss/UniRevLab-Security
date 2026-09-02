@@ -49,6 +49,9 @@ jobs:
       - name: Apply Patch Lab installability fix
         run: python tools/apply_v0261_patchlab_installability_fix.py
 
+      - name: Apply product suite UI and AutoMod precision
+        run: python tools/apply_v0262_product_suite.py
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
@@ -146,9 +149,12 @@ jobs:
             app/src/test/java/org/unirevlab/security/analysis/TamperAssessmentClassifierTest.kt \
             app/src/main/java/org/unirevlab/security/analysis/PatchLabEngine.kt \
             app/src/test/java/org/unirevlab/security/analysis/PatchLabEngineTest.kt \
+            app/src/main/java/org/unirevlab/security/analysis/AutoModEngine.kt \
+            app/src/test/java/org/unirevlab/security/analysis/AutoModEngineTest.kt \
+            app/src/main/java/org/unirevlab/security/MainActivity.kt \
             app/src/main/java/org/unirevlab/security/ui/AutoModPanel.kt
           if ! git diff --cached --quiet; then
-            git commit -m "Fix Patch Lab APK installability (run ${{ github.run_id }}) [skip ci]"
+            git commit -m "Apply product security suite UI (run ${{ github.run_id }}) [skip ci]"
           else
             git commit --allow-empty -m "Verify v0.25.9 sources (run ${{ github.run_id }}) [skip ci]"
           fi
