@@ -86,7 +86,7 @@ class SemanticRecoveryEngineTest {
 
         assertTrue(cls.alias.startsWith("ViewModel_"))
         assertTrue(SemanticRecoveryEngine.EvidenceKind.INHERITANCE in cls.evidenceKinds)
-        assertTrue(recoveredMethod.alias.contains("IdLoginButtonFlow"))
+        assertTrue(recoveredMethod.alias.contains("idLoginButtonFlow"))
         assertTrue(SemanticRecoveryEngine.EvidenceKind.RESOURCE in recoveredMethod.evidenceKinds)
     }
 
