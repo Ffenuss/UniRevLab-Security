@@ -58,7 +58,7 @@ enum class ProductTool(
     FINDINGS("Security Findings", "Prioritized findings, evidence, remediation and references", "FIND"),
     MANIFEST("Manifest / IPC", "Permissions, exported components, providers, deep links", "APK"),
     DEX("DEX / Logic", "Methods, strings, xrefs, call graph and code index", "DEX"),
-    DEOBFUSCATION("Deobfuscation", "Obfuscation score, semantic aliases and R8 mapping", "DEOB"),
+    DEOBFUSCATION("Deobfuscation", "Automatic score, analyst mapping and optional exact R8 mapping", "DEOB"),
     SERIALIZATION("Serialization", "Serializable, Parcelable, JSON, Protobuf and object decoders", "DATA"),
     SIGNING("Signatures / Integrity", "APK signing schemes, certificates and self-check signals", "SIG"),
     NETWORK("Network Security", "Cleartext policy, Network Security Config and TLS pinning", "TLS"),
@@ -305,7 +305,7 @@ fun ProductToolScreen(
                 ProductTool.SERIALIZATION -> SerializationInspectorPanel(report)
                 ProductTool.MANIFEST -> ManifestToolPanel(report)
                 ProductTool.DEX -> DexToolPanel(report)
-                ProductTool.DEOBFUSCATION -> DeobfuscationToolPanel(report)
+                ProductTool.DEOBFUSCATION -> AutomaticDeobfuscationPanel(report)
                 ProductTool.SIGNING -> SigningToolPanel(report)
                 ProductTool.NETWORK -> NetworkToolPanel(report)
                 ProductTool.NATIVE -> NativeToolPanel(report)
