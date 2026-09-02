@@ -74,6 +74,12 @@ jobs:
       - name: Apply automatic analyst mapping UI
         run: python tools/apply_v0267_automatic_mapping_ui.py
 
+      - name: Apply Diagnostics / Self-Test UI
+        run: python tools/apply_v0268_diagnostics_ui.py
+
+      - name: Apply Call Graph workspace UI
+        run: python tools/apply_v0269_callgraph_workspace_ui.py
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
