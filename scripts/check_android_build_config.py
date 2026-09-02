@@ -18,8 +18,8 @@ workflow = workflow_path.read_text(encoding="utf-8")
 checks = [
     ("compileSdk 37.0", app, r"version\s*=\s*release\(37\)[\s\S]*minorApiLevel\s*=\s*0"),
     ("targetSdk 36", app, r"targetSdk\s*=\s*36"),
-    ("v0.32.0 preview versionCode", app, r"versionCode\s*=\s*43"),
-    ("v0.32.0 durable-history versionName", app, r'versionName\s*=\s*"0\.32\.0-preview-durable-history"'),
+    ("v0.33.0 preview versionCode", app, r"versionCode\s*=\s*44"),
+    ("v0.33.0 IL2CPP pair versionName", app, r'versionName\s*=\s*"0\.33\.0-preview-il2cpp-pair"'),
     ("release signing input gate", app, r'tasks\.register\("verifyReleaseSigningInputs"\)'),
     ("AGP 9.3.0", root_build, r'id\("com\.android\.application"\) version "9\.3\.0"'),
     ("Kotlin Compose 2.3.21", root_build, r'id\("org\.jetbrains\.kotlin\.plugin\.compose"\) version "2\.3\.21"'),
@@ -35,13 +35,16 @@ checks = [
     ("CI lint", workflow, r':app:lintDebug'),
     ("CI debug build", workflow, r':app:assembleDebug'),
     ("CI APK integrity verify", workflow, r'unzip -t .*APK'),
-    ("CI APK SHA-256", workflow, r'sha256sum .*UniRevLab-Security-v0\.32\.0-durable-history-preview'),
+    ("CI APK SHA-256", workflow, r'sha256sum .*UniRevLab-Security-v0\.33\.0-il2cpp-pair-preview'),
     ("CI artifact upload", workflow, r'actions/upload-artifact@v4'),
     ("CI full-mapping migration", workflow, r'apply_v0300_full_mapping\.py'),
     ("CI semantic-recovery migration", workflow, r'apply_v0310_semantic_recovery\.py'),
     ("CI durable-history migration", workflow, r'apply_v0320_durable_history_ui\.py'),
+    ("CI IL2CPP pair reconstruction migration", workflow, r'apply_v0330_il2cpp_pair\.py'),
+    ("CI IL2CPP pair UI migration", workflow, r'apply_v0331_il2cpp_ui\.py'),
     ("CI snapshot codec persisted", workflow, r'ReportSnapshotCodec\.kt'),
     ("CI snapshot tests persisted", workflow, r'ReportSnapshotCodecTest\.kt'),
+    ("CI IL2CPP risk tests persisted", workflow, r'Il2CppMonetizationRiskEngineTest\.kt'),
 ]
 
 failed = []
