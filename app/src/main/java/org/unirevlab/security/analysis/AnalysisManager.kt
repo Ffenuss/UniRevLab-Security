@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
+import org.unirevlab.security.data.AssessmentHistoryStore
 import org.unirevlab.security.model.AssessmentScope
 import org.unirevlab.security.model.InstalledAppDescriptor
 import org.unirevlab.security.model.StaticAnalysisReport
@@ -25,6 +26,8 @@ import org.unirevlab.security.model.StaticAnalysisReport
  *
  * The Activity only observes [state]. This keeps the job and its visible progress attached to the
  * process when Compose/Activity is recreated while the foreground service keeps the process alive.
+ * A completed report is persisted here, before [Completed] is published, so closing the Activity
+ * cannot race the history write.
  */
 object AnalysisManager {
     private val lock = Any()
@@ -37,6 +40,7 @@ object AnalysisManager {
     @Volatile private var appContext: Context? = null
     @Volatile private var inspector: LocalArtifactInspector? = null
     @Volatile private var store: AnalysisRunStore? = null
+    @Volatile private var historyStore: AssessmentHistoryStore? = null
     @Volatile private var activeJob: Job? = null
     private var lastPersistAtMs: Long = 0L
     private var lastPersistStage: AnalysisStage? = null
@@ -49,6 +53,7 @@ object AnalysisManager {
             appContext = application
             inspector = LocalArtifactInspector(application)
             store = AnalysisRunStore(application)
+            historyStore = AssessmentHistoryStore(application)
 
             val stale = store?.load()
             if (stale?.status == AnalysisRunStore.STATUS_RUNNING || stale?.status == AnalysisRunStore.STATUS_CANCELLING) {
@@ -150,10 +155,46 @@ object AnalysisManager {
                 val report = runInterruptible(Dispatchers.IO) {
                     block { progress -> publishProgress(runId, targetLabel, progress) }
                 }
+
+                synchronized(lock) {
+                    val current = mutableState.value
+                    if (current is AnalysisRunState.Running && current.runId == runId) {
+                        val saving = current.progress.copy(
+                            stage = AnalysisStage.SAVING,
+                            percent = 100,
+                            fractionComplete = 1.0,
+                            detail = "Сохраняем полный отчёт в историю…",
+                            updatedAtEpochMs = System.currentTimeMillis(),
+                            estimatedFinishAtEpochMs = null,
+                        )
+                        mutableState.value = current.copy(progress = saving)
+                        persistRunning(targetLabel, saving, force = true)
+                    }
+                }
+
+                // This is intentionally before Completed. The full report is fsync'd and its
+                // metadata is committed synchronously, so an Activity/process close after the UI
+                // sees "Готово" cannot lose the history entry.
+                val historyPersistError = runCatching {
+                    runInterruptible(Dispatchers.IO) {
+                        requireNotNull(historyStore) { "History store is not initialized" }.record(report)
+                    }
+                }.exceptionOrNull()?.let { it.message ?: it.javaClass.simpleName }
+
                 synchronized(lock) {
                     if (currentRunId() == runId) {
-                        mutableState.value = AnalysisRunState.Completed(runId, targetLabel, report)
-                        store?.writeTerminal(AnalysisRunStore.STATUS_COMPLETED, targetLabel, "100% · Готово")
+                        mutableState.value = AnalysisRunState.Completed(
+                            runId = runId,
+                            targetLabel = targetLabel,
+                            report = report,
+                            historyPersistError = historyPersistError,
+                        )
+                        val terminalDetail = if (historyPersistError == null) {
+                            "100% · Готово · полный отчёт сохранён в историю"
+                        } else {
+                            "100% · Готово · ошибка сохранения истории: ${historyPersistError.take(160)}"
+                        }
+                        store?.writeTerminal(AnalysisRunStore.STATUS_COMPLETED, targetLabel, terminalDetail)
                         activeJob = null
                     }
                 }
