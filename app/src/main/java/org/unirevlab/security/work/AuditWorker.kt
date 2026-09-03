@@ -357,7 +357,7 @@ class AuditWorker(
         if (temporary.exists()) check(temporary.delete()) { "Не удалось очистить временный файл отчёта" }
         try {
             temporary.bufferedWriter(Charsets.UTF_8, REPORT_STREAM_BUFFER_BYTES).use { output ->
-                block(output)
+                block(CancellationAwareAppendable(output) { isStopped })
             }
             if (destination.exists()) check(destination.delete()) { "Не удалось заменить предыдущий результат" }
             if (!temporary.renameTo(destination)) {
@@ -383,6 +383,38 @@ class AuditWorker(
         AnalysisStage.FINDINGS, AnalysisStage.SAVING, AnalysisStage.COMPLETE -> AuditStage.REPORT
     }
 
+    private class CancellationAwareAppendable(
+        private val delegate: Appendable,
+        private val cancelled: () -> Boolean,
+    ) : Appendable {
+        private var operations = 0
+
+        override fun append(value: CharSequence?): Appendable {
+            checkpoint()
+            delegate.append(value)
+            return this
+        }
+
+        override fun append(value: CharSequence?, startIndex: Int, endIndex: Int): Appendable {
+            checkpoint()
+            delegate.append(value, startIndex, endIndex)
+            return this
+        }
+
+        override fun append(value: Char): Appendable {
+            checkpoint()
+            delegate.append(value)
+            return this
+        }
+
+        private fun checkpoint() {
+            operations++
+            if (operations % STREAM_CANCELLATION_INTERVAL == 0 && cancelled()) {
+                throw CancellationException("Потоковая запись отменена")
+            }
+        }
+    }
+
     companion object {
         const val KEY_JOB_ID = "job_id"
         const val KEY_STAGE = "stage"
@@ -399,6 +431,7 @@ class AuditWorker(
         private const val MAX_METADATA_FOR_DUMP_BYTES = 128L * 1024L * 1024L
         private const val MAX_NESTED_APK_FOR_DUMP_BYTES = 256L * 1024L * 1024L
         private const val REPORT_STREAM_BUFFER_BYTES = 128 * 1024
+        private const val STREAM_CANCELLATION_INTERVAL = 256
     }
 }
 
