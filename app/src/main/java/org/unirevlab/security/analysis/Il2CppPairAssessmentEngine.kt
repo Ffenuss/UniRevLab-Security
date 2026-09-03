@@ -71,7 +71,7 @@ object Il2CppPairAssessmentEngine {
             risk = risk,
             mapping = mapping,
             nativeEvidence = nativeEvidence,
-            managedDump = Il2CppManagedDumpExporter.export(report),
+            managedDump = Il2CppManagedDumpExporter.export(report, metadataFile),
             aggregateSha256 = aggregateSha,
             warnings = warnings,
         )
