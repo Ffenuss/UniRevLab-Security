@@ -25,7 +25,7 @@ object Il2CppModdingResistanceEngine {
         val kind: String,
         val authority: Authority,
         val priority: ReviewPriority,
-        val confidence: String,
+        val confidence: Il2CppMonetizationRiskEngine.Confidence,
         val metadataToken: Long?,
         val nativeVerdict: Il2CppNativeEvidenceEngine.Verdict?,
         val nativeFunctionName: String?,
@@ -84,10 +84,10 @@ object Il2CppModdingResistanceEngine {
                 }
 
                 val priority = when (authority) {
-                    Authority.CLIENT_AUTHORITATIVE -> when (candidate.confidence.uppercase()) {
-                        "HIGH" -> ReviewPriority.CRITICAL
-                        "MEDIUM" -> ReviewPriority.HIGH
-                        else -> ReviewPriority.MEDIUM
+                    Authority.CLIENT_AUTHORITATIVE -> when (candidate.confidence) {
+                        Il2CppMonetizationRiskEngine.Confidence.HIGH -> ReviewPriority.CRITICAL
+                        Il2CppMonetizationRiskEngine.Confidence.MEDIUM -> ReviewPriority.HIGH
+                        Il2CppMonetizationRiskEngine.Confidence.LOW -> ReviewPriority.MEDIUM
                     }
                     Authority.MIXED -> if (clientState) ReviewPriority.HIGH else ReviewPriority.MEDIUM
                     Authority.SERVER_GATED -> ReviewPriority.LOW
