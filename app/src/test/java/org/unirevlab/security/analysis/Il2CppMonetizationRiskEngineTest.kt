@@ -1,6 +1,7 @@
 package org.unirevlab.security.analysis
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.unirevlab.security.model.ArtifactSummary
@@ -37,14 +38,17 @@ class Il2CppMonetizationRiskEngineTest {
     }
 
     @Test
-    fun managedDumpExportsMetadataIdentitiesAndTokensWithoutPatchOffsets() {
+    fun managedDumpExportsCSharpLikeMetadataIdentitiesAndTokensWithoutPatchPayloads() {
         val dump = Il2CppManagedDumpExporter.export(report())
 
-        assertTrue(dump.contains("Game.Payments.PaymentEntitlement"))
-        assertTrue(dump.contains("FIELD _isPremium"))
-        assertTrue(dump.contains("get_IsPremium"))
-        assertTrue(dump.contains("token=0x6000001"))
-        assertTrue(dump.contains("no patch offsets", ignoreCase = true))
+        assertTrue(dump.contains("namespace Game.Payments"))
+        assertTrue(dump.contains("class PaymentEntitlement"))
+        assertTrue(dump.contains("object _isPremium;"))
+        assertTrue(dump.contains("get_IsPremium("))
+        assertTrue(dump.contains("token: 0x6000001"))
+        assertTrue(dump.contains("patch offsets are not emitted", ignoreCase = true))
+        assertFalse(dump.contains("patchOffset="))
+        assertFalse(dump.contains("hexPayload="))
     }
 
     private fun report(): StaticAnalysisReport {
