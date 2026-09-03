@@ -18,8 +18,8 @@ workflow = workflow_path.read_text(encoding="utf-8")
 checks = [
     ("compileSdk 37.0", app, r"version\s*=\s*release\(37\)[\s\S]*minorApiLevel\s*=\s*0"),
     ("targetSdk 36", app, r"targetSdk\s*=\s*36"),
-    ("v0.34.0 preview versionCode", app, r"versionCode\s*=\s*45"),
-    ("v0.34.0 IL2CPP semantic versionName", app, r'versionName\s*=\s*"0\.34\.0-preview-il2cpp-semantic"'),
+    ("v0.35.0 preview versionCode", app, r"versionCode\s*=\s*46"),
+    ("v0.35.0 IL2CPP native evidence versionName", app, r'versionName\s*=\s*"0\.35\.0-preview-il2cpp-native-evidence"'),
     ("release signing input gate", app, r'tasks\.register\("verifyReleaseSigningInputs"\)'),
     ("AGP 9.3.0", root_build, r'id\("com\.android\.application"\) version "9\.3\.0"'),
     ("Kotlin Compose 2.3.21", root_build, r'id\("org\.jetbrains\.kotlin\.plugin\.compose"\) version "2\.3\.21"'),
@@ -35,10 +35,12 @@ checks = [
     ("CI lint", workflow, r':app:lintDebug'),
     ("CI debug build", workflow, r':app:assembleDebug'),
     ("CI APK integrity verify", workflow, r'unzip -t .*APK'),
-    ("CI APK SHA-256", workflow, r'sha256sum .*UniRevLab-Security-v0\.34\.0-il2cpp-semantic-preview'),
+    ("CI APK SHA-256", workflow, r'sha256sum .*UniRevLab-Security-v0\.35\.0-il2cpp-native-evidence-preview-debug\.apk'),
     ("CI artifact upload", workflow, r'actions/upload-artifact@v4'),
-    ("CI current IL2CPP semantic mapping migration", workflow, r'apply_v0340_il2cpp_semantic_mapping\.py'),
-    ("CI legacy migration replay disabled", workflow, r'(?s)Apply v0\.34\.0 IL2CPP semantic analyst mapping.*Set up Java 17'),
+    ("CI current IL2CPP native evidence migration", workflow, r'python tools/apply_v0350_il2cpp_native_evidence\.py'),
+    ("CI current migration runs before Java", workflow, r'(?s)Apply v0\.35\.0 IL2CPP native evidence integration.*Set up Java 17'),
+    ("CI IL2CPP native evidence tests persisted", workflow, r'Il2CppNativeEvidenceEngineTest\.kt'),
+    ("CI IL2CPP native evidence engine persisted", workflow, r'Il2CppNativeEvidenceEngine\.kt'),
     ("CI IL2CPP semantic tests persisted", workflow, r'Il2CppSemanticMappingEngineTest\.kt'),
     ("CI IL2CPP semantic engine persisted", workflow, r'Il2CppSemanticMappingEngine\.kt'),
 ]
@@ -49,6 +51,25 @@ for name, text, pattern in checks:
     print(f"{'PASS' if ok else 'FAIL'}: {name}")
     if not ok:
         failed.append(name)
+
+legacy_migrations = [
+    "apply_v0300_",
+    "apply_v0310_",
+    "apply_v0320_",
+    "apply_v0330_",
+    "apply_v0340_il2cpp_semantic_mapping.py",
+]
+legacy_found = [marker for marker in legacy_migrations if marker in workflow]
+legacy_ok = not legacy_found
+print(f"{'PASS' if legacy_ok else 'FAIL'}: CI legacy migration replay disabled")
+if not legacy_ok:
+    failed.append("CI legacy migration replay disabled (found: " + ", ".join(legacy_found) + ")")
+
+current_migration_count = workflow.count("python tools/apply_v0350_il2cpp_native_evidence.py")
+current_once = current_migration_count == 1
+print(f"{'PASS' if current_once else 'FAIL'}: CI current migration applied exactly once")
+if not current_once:
+    failed.append(f"CI current migration applied exactly once (count={current_migration_count})")
 
 if failed:
     raise SystemExit("Android build-config preflight failed: " + ", ".join(failed))
