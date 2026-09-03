@@ -13,6 +13,7 @@ import org.unirevlab.security.model.StaticAnalysisReport
  * native identity evidence. Runtime RVA/VA/patch offsets are deliberately not emitted.
  */
 object Il2CppManagedDumpExporter {
+    private fun Appendable.append(value: Any?): Appendable = append(value.toString())
     private data class ParameterSignature(
         val name: String,
         val typeIndex: Int,
@@ -40,15 +41,27 @@ object Il2CppManagedDumpExporter {
         metadataFile: File?,
         maxMethods: Int = 100_000,
         maxFields: Int = 100_000,
-    ): String {
+    ): String = buildString {
+        write(report, metadataFile, this, maxMethods, maxFields)
+    }
+
+    /** Streams the dump so large IL2CPP projects do not require a second in-memory copy. */
+    fun write(
+        report: StaticAnalysisReport,
+        metadataFile: File?,
+        out: Appendable,
+        maxMethods: Int = 100_000,
+        maxFields: Int = 100_000,
+    ) {
         val il2cpp = report.il2cpp
         val metadata = il2cpp?.metadata
         if (il2cpp?.detected != true || metadata == null) {
-            return buildString {
+            out.run {
                 appendLine("// UniRevLab IL2CPP reconstructed managed dump")
                 appendLine("// artifact_sha256=${report.artifact.sha256}")
                 appendLine("// status=IL2CPP_METADATA_NOT_AVAILABLE")
             }
+            return
         }
 
         val signatureIndex = metadataFile
@@ -67,7 +80,7 @@ object Il2CppManagedDumpExporter {
         var emittedMethods = 0
         var emittedFields = 0
 
-        return buildString {
+        out.run {
             appendLine("// UniRevLab IL2CPP reconstructed managed dump v3")
             appendLine("// artifact_sha256=${report.artifact.sha256}")
             appendLine("// metadata_entry=${metadata.entryName}")
