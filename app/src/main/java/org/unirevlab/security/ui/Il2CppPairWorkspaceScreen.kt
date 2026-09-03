@@ -39,6 +39,7 @@ import java.io.FileOutputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.unirevlab.security.analysis.Il2CppModdingResistanceEngine
 import org.unirevlab.security.analysis.Il2CppMonetizationRiskEngine
 import org.unirevlab.security.analysis.Il2CppPairAssessmentEngine
 import org.unirevlab.security.model.AssessmentScope
@@ -101,7 +102,7 @@ fun Il2CppPairWorkspaceScreen(
             OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("← Инструменты") }
             Text("IL2CPP Dump / Metadata", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Text(
-                "Импортируйте matching global-metadata.dat и libil2cpp.so. UniRevLab восстанавливает managed types/methods/fields, оценивает обфускацию, строит analyst mapping и выделяет premium / entitlement / subscription / IAP / receipt-validation attack surface.",
+                "Импортируйте matching global-metadata.dat и libil2cpp.so. UniRevLab восстанавливает managed types/methods/fields, строит C#-подобный dump, оценивает обфускацию и анализирует premium / entitlement / subscription / IAP trust boundary.",
                 style = MaterialTheme.typography.bodyMedium,
             )
             Card(
@@ -109,9 +110,9 @@ fun Il2CppPairWorkspaceScreen(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
             ) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Defensive mode", fontWeight = FontWeight.Bold)
+                    Text("Authorized defensive assessment", fontWeight = FontWeight.Bold)
                     Text(
-                        "Файлы анализируются как данные: libil2cpp.so не загружается и не исполняется. Workspace не генерирует patch offsets, premium=true или инструкции разблокировки — он показывает точную клиентскую поверхность риска и evidence для исправления.",
+                        "libil2cpp.so обрабатывается как данные и не исполняется. Workspace реконструирует managed/native evidence и показывает, какие sensitive decisions выглядят client-authoritative, mixed или validation-backed, чтобы их можно было исправить и воспроизвести на контролируемом TestTarget.",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
@@ -173,7 +174,7 @@ fun Il2CppPairWorkspaceScreen(
 
             if (busy) {
                 LinearProgressIndicator(Modifier.fillMaxWidth())
-                Text("Парсим metadata и ELF, восстанавливаем IL2CPP identities…", style = MaterialTheme.typography.bodySmall)
+                Text("Парсим metadata/ELF, восстанавливаем signatures и trust-boundary evidence…", style = MaterialTheme.typography.bodySmall)
             }
             error?.let {
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
@@ -184,10 +185,11 @@ fun Il2CppPairWorkspaceScreen(
             result?.let { current ->
                 HorizontalDivider()
                 Il2CppPairResultPanel(current)
+                ModdingResistancePanel(current.moddingResistance)
                 OutlinedButton(
-                    onClick = { dumpSaver.launch("unirevlab-il2cpp-managed-dump-${current.aggregateSha256.take(8)}.txt") },
+                    onClick = { dumpSaver.launch("unirevlab-il2cpp-dump-${current.aggregateSha256.take(8)}.cs") },
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text("Сохранить managed dump") }
+                ) { Text("Сохранить C#-подобный dump") }
 
                 OutlinedTextField(
                     value = query,
@@ -269,6 +271,43 @@ private fun Il2CppPairResultPanel(current: Il2CppPairAssessmentEngine.Result) {
                 "Metadata reconstruction неполный — отсутствие monetization-кандидатов не подтверждено."
             },
         )
+    }
+}
+
+@Composable
+private fun ModdingResistancePanel(result: Il2CppModdingResistanceEngine.Result) {
+    HorizontalDivider()
+    Text("Modding Resistance Assessment", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+    Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Text("Priority: ${result.overallPriority}", fontWeight = FontWeight.Bold)
+            Text(result.summary, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "Client-authoritative ${result.clientAuthoritative} · mixed ${result.mixed} · server-gated ${result.serverGated} · inconclusive ${result.inconclusive}",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                "Validation signals ${result.validationSignals} · native-correlated targets ${result.nativeCorrelatedTargets} · coverage ${if (result.coverageComplete) "COMPLETE" else "PARTIAL"}",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+    result.targets.take(40).forEach { target ->
+        Card(shape = RoundedCornerShape(16.dp)) {
+            Column(Modifier.padding(13.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("${target.priority} · ${target.authority} · ${target.category}", fontWeight = FontWeight.Bold)
+                Text(target.managedIdentity)
+                Text("${target.kind} · confidence ${target.confidence}${target.nativeVerdict?.let { " · native $it" } ?: ""}", style = MaterialTheme.typography.bodySmall)
+                target.evidence.take(4).forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+                if (target.hardeningActions.isNotEmpty()) {
+                    Text("Fix", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
+                    target.hardeningActions.take(3).forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+                }
+            }
+        }
+    }
+    if (result.targets.size > 40) {
+        Text("Показаны первые 40 trust-boundary targets из ${result.targets.size}.", style = MaterialTheme.typography.bodySmall)
     }
 }
 
