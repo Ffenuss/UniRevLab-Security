@@ -542,11 +542,7 @@ class LocalArtifactInspector(
         )
     }
 
-    private fun chooseIl2Cpp(values: List<Il2CppSummary>): Il2CppSummary? = values.maxByOrNull { summary ->
-        (if (summary.metadata?.magicValid == true) 1000 else 0) +
-            (if (summary.detected) 100 else 0) + confidenceRank(summary.confidence) * 10 +
-            summary.registrationCandidates.size.coerceAtMost(9)
-    }
+    private fun chooseIl2Cpp(values: List<Il2CppSummary>): Il2CppSummary? = Il2CppSummaryMerger.merge(values)
 
     private fun nativeProgressDetail(native: NativeSummary?): String {
         val libraries = native?.libraries.orEmpty()
@@ -1763,7 +1759,7 @@ class LocalArtifactInspector(
     )
 
     companion object {
-        const val ENGINE_VERSION = "0.38.1-auto-audit-memory-fix"
+        const val ENGINE_VERSION = "0.39.0-readable-offsets"
 
         private fun checkCancelled() {
             if (Thread.currentThread().isInterrupted) throw InterruptedIOException("Analysis cancelled")
