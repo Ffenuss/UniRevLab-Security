@@ -1,11 +1,15 @@
-# v0.38 Auto Audit
+# v0.38.1 Auto Audit
 
 ## Outcome
 
-v0.38 keeps the complete v0.37 analyzer/product backend and replaces the operator workflow with a
+v0.38.1 keeps the complete v0.37 analyzer/product backend and replaces the operator workflow with a
 persistent one-selection audit pipeline. The customer profile is saved once. For each engagement the
 operator confirms authority, selects an installed application or APK/APKS/XAPK archive, and waits for
 one signed evidence package.
+
+v0.38.1 writes the full JSON and IL2CPP managed dump directly to disk instead of constructing a
+second artifact-sized String in the Android heap. It also invalidates pre-v0.38.1 analysis cache
+entries and reports `libil2cpp.so` ELF coverage separately from metadata correlation.
 
 ## Automatic stages
 
