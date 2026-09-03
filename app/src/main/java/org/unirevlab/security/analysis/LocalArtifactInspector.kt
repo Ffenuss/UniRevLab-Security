@@ -1763,7 +1763,7 @@ class LocalArtifactInspector(
     )
 
     companion object {
-        const val ENGINE_VERSION = "0.33.0-il2cpp-fields"
+        const val ENGINE_VERSION = "0.38.1-auto-audit-memory-fix"
 
         private fun checkCancelled() {
             if (Thread.currentThread().isInterrupted) throw InterruptedIOException("Analysis cancelled")
