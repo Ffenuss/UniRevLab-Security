@@ -14,6 +14,7 @@ object Il2CppPairAssessmentEngine {
         val risk: Il2CppMonetizationRiskEngine.Result,
         val mapping: Il2CppSemanticMappingEngine.Result,
         val nativeEvidence: Il2CppNativeEvidenceEngine.Result,
+        val moddingResistance: Il2CppModdingResistanceEngine.Result,
         val managedDump: String,
         val aggregateSha256: String,
         val warnings: List<String>,
@@ -55,6 +56,7 @@ object Il2CppPairAssessmentEngine {
         val nativeEvidence = Il2CppNativeEvidenceEngine.analyze(report)
         val mapping = Il2CppSemanticMappingEngine.analyze(report)
         val risk = Il2CppMonetizationRiskEngine.analyze(report)
+        val moddingResistance = Il2CppModdingResistanceEngine.analyze(report, risk, nativeEvidence)
         val warnings = buildList {
             if (pair.il2cpp.metadata?.magicValid != true) add("global-metadata.dat magic/version could not be validated.")
             if (pair.il2cpp.metadata?.reconstructionTruncated == true || pair.il2cpp.truncated) add("IL2CPP reconstruction is partial; absence of a candidate is not proof of absence.")
@@ -64,6 +66,7 @@ object Il2CppPairAssessmentEngine {
             if (mapping.contextualMappings > 0) add("${mapping.contextualMappings} obfuscated symbols received contextual semantic aliases for review.")
             if (!nativeEvidence.correlationDataAvailable) add("Pair-only scan has no external Ghidra correlation dataset; native identity verification becomes available in the full APK audit.")
             if (nativeEvidence.conflicting > 0) add("${nativeEvidence.conflicting} IL2CPP method correlation(s) conflict with canonical metadata identity/token evidence and were not trusted.")
+            if (moddingResistance.clientAuthoritative > 0) add("${moddingResistance.clientAuthoritative} monetization/entitlement target(s) appear client-authoritative and require trust-boundary remediation.")
             add("Pair matching is assumed from the supplied files unless independent build/provenance evidence is available.")
         }
         return Result(
@@ -71,6 +74,7 @@ object Il2CppPairAssessmentEngine {
             risk = risk,
             mapping = mapping,
             nativeEvidence = nativeEvidence,
+            moddingResistance = moddingResistance,
             managedDump = Il2CppManagedDumpExporter.export(report, metadataFile),
             aggregateSha256 = aggregateSha,
             warnings = warnings,
