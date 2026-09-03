@@ -347,7 +347,8 @@ object GradleModuleEvidenceExporter {
     private fun isGradleBuildFile(path: String): Boolean = path.substringAfterLast('/') in GRADLE_BUILD_FILES
 
     private fun shouldReadMarker(path: String): Boolean =
-        path.endsWith(".properties") || path.endsWith(".version") || path.substringAfterLast('/').contains("_version")
+        isGradleBuildFile(path) || path.endsWith(".properties") || path.endsWith(".version") ||
+            path.substringAfterLast('/').contains("_version")
 
     private fun sourceInputs(context: Context, source: AuditSourceSpec): List<ArchiveInput> = when (source.kind) {
         AuditSourceKind.FILE_URI -> {

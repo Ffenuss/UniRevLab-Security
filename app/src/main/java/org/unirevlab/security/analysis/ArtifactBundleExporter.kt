@@ -192,8 +192,7 @@ object ArtifactBundleExporter {
 
     private fun isGradleEvidence(normalized: String): Boolean {
         val base = normalized.substringAfterLast('/')
-        return base in GRADLE_BUILD_FILES ||
-            normalized.endsWith(".kotlin_module") ||
+        return normalized.endsWith(".kotlin_module") ||
             normalized.endsWith(".version") ||
             base.contains("_version") ||
             normalized.contains("meta-inf/com/android/build/gradle/") ||
@@ -244,13 +243,4 @@ object ArtifactBundleExporter {
     private const val MAX_INCLUDED_ENTRIES = 256
     private const val MAX_SINGLE_ENTRY_BYTES = 256L * 1024L * 1024L
     private const val MAX_TOTAL_BYTES = 768L * 1024L * 1024L
-    private val GRADLE_BUILD_FILES = setOf(
-        "build.gradle",
-        "build.gradle.kts",
-        "settings.gradle",
-        "settings.gradle.kts",
-        "gradle.properties",
-        "gradle-wrapper.properties",
-        "libs.versions.toml",
-    )
 }
