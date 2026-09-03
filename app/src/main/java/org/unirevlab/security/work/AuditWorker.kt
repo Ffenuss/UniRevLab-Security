@@ -24,6 +24,7 @@ import org.unirevlab.security.analysis.AnalysisStage
 import org.unirevlab.security.analysis.Il2CppManagedDumpExporter
 import org.unirevlab.security.analysis.LocalArtifactInspector
 import org.unirevlab.security.analysis.OffsetEvidenceExporter
+import org.unirevlab.security.analysis.OffsetReadableExporter
 import org.unirevlab.security.analysis.ReportJsonExporter
 import org.unirevlab.security.analysis.VerificationPlanExporter
 import org.unirevlab.security.data.AgreementStore
@@ -97,12 +98,14 @@ class AuditWorker(
             val reportFile = repository.outputFile(jobId, AuditJobRepository.REPORT_JSON)
             val customerFile = repository.outputFile(jobId, AuditJobRepository.CUSTOMER_REPORT)
             val offsetsFile = repository.outputFile(jobId, AuditJobRepository.OFFSET_EVIDENCE)
+            val readableOffsetsFile = repository.outputFile(jobId, AuditJobRepository.OFFSET_READABLE)
             val managedDumpFile = repository.outputFile(jobId, AuditJobRepository.IL2CPP_DUMP)
             val gradleEvidenceFile = repository.outputFile(jobId, AuditJobRepository.GRADLE_MODULE_EVIDENCE)
             val planFile = repository.outputFile(jobId, AuditJobRepository.VERIFICATION_PLAN)
             writeTextAtomically(reportFile) { output -> ReportJsonExporter.write(report, output) }
             update(jobId, AuditStage.REPORT, 90, "Полный JSON записан; готовим offsets и план проверок")
             offsetsFile.writeText(OffsetEvidenceExporter.export(report), Charsets.UTF_8)
+            writeTextAtomically(readableOffsetsFile) { output -> OffsetReadableExporter.write(report, output) }
             planFile.writeText(VerificationPlanExporter.export(report), Charsets.UTF_8)
 
             ensureActive()
@@ -139,6 +142,7 @@ class AuditWorker(
                 reportFile,
                 customerFile,
                 offsetsFile,
+                readableOffsetsFile,
                 managedDumpFile,
                 gradleEvidenceFile,
                 planFile,
@@ -277,7 +281,7 @@ class AuditWorker(
         var metadataFile: File? = null
         var nestedApkFile: File? = null
         try {
-            if (report.il2cpp?.detected == true && artifactBundle.isFile) {
+            if (artifactBundle.isFile) {
                 ZipFile(artifactBundle).use { zip ->
                     val metadata = zip.entries().asSequence()
                         .filterNot { it.isDirectory }
