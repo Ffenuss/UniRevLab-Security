@@ -132,6 +132,7 @@ class AuditJobRepository(context: Context) {
         const val REPORT_JSON = "full-report.json"
         const val CUSTOMER_REPORT = "customer-report.md"
         const val OFFSET_EVIDENCE = "offset-evidence.json"
+        const val OFFSET_READABLE = "offsets-readable.html"
         const val IL2CPP_DUMP = "il2cpp-dump.cs"
         const val GRADLE_MODULE_EVIDENCE = "gradle-module-evidence.json"
         const val VERIFICATION_PLAN = "verification-plan.json"
@@ -144,6 +145,7 @@ class AuditJobRepository(context: Context) {
             REPORT_JSON,
             CUSTOMER_REPORT,
             OFFSET_EVIDENCE,
+            OFFSET_READABLE,
             IL2CPP_DUMP,
             GRADLE_MODULE_EVIDENCE,
             VERIFICATION_PLAN,
