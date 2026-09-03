@@ -15,8 +15,8 @@ android {
         applicationId = "org.unirevlab.security"
         minSdk = 26
         targetSdk = 36
-        versionCode = 48
-        versionName = "0.36.1-preview-il2cpp-large-files"
+        versionCode = 49
+        versionName = "0.37.0-preview-modding-resistance"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
