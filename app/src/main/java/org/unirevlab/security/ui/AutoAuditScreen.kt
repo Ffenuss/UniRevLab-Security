@@ -142,7 +142,7 @@ fun AutoAuditScreen(
             item {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Eyebrow("UNIREVLAB · AUTO AUDIT 0.38.1")
+                        Eyebrow("UNIREVLAB · AUTO AUDIT 0.39")
                         Text("Аудит в один выбор", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
                     }
                     OutlinedButton(onClick = onEditProfile, enabled = !isRunning) { Text("Профиль") }
@@ -335,7 +335,8 @@ private fun OutputCard(onExport: (String) -> Unit) {
     val outputs = listOf(
         AuditJobRepository.SIGNED_EVIDENCE_PACKAGE to ("Пакет заказчику" to "Все результаты + подпись"),
         AuditJobRepository.CUSTOMER_REPORT to ("Отчёт .md" to "Что найдено и как исправить"),
-        AuditJobRepository.OFFSET_EVIDENCE to ("Экспорт офсетов" to "RVA, metadata offsets, tokens"),
+        AuditJobRepository.OFFSET_READABLE to ("Офсеты — понятный отчёт" to "HTML: поиск, фильтры, имена и пояснения"),
+        AuditJobRepository.OFFSET_EVIDENCE to ("Офсеты JSON" to "Технические RVA, metadata offsets и tokens"),
         AuditJobRepository.IL2CPP_DUMP to ("IL2CPP dump" to "Восстановленные types, fields, methods"),
         AuditJobRepository.GRADLE_MODULE_EVIDENCE to ("Gradle-модули" to "Base, split, dynamic-feature и build metadata"),
         AuditJobRepository.VERIFICATION_PLAN to ("План проверок" to "Безопасные тесты owner-build"),
