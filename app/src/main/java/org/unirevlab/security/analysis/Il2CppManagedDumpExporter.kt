@@ -55,11 +55,14 @@ object Il2CppManagedDumpExporter {
     ) {
         val il2cpp = report.il2cpp
         val metadata = il2cpp?.metadata
-        if (il2cpp?.detected != true || metadata == null) {
+        if (metadata == null) {
             out.run {
                 appendLine("// UniRevLab IL2CPP reconstructed managed dump")
                 appendLine("// artifact_sha256=${report.artifact.sha256}")
                 appendLine("// status=IL2CPP_METADATA_NOT_AVAILABLE")
+                appendLine("// il2cpp_detected=${il2cpp?.detected == true}")
+                appendLine("// libil2cpp_libraries=${il2cpp?.libil2cppLibraries?.size ?: 0}")
+                appendLine("// reason=No parsed global-metadata.dat was attached to the combined base/split analysis result")
             }
             return
         }
