@@ -93,14 +93,15 @@ class AuditWorker(
             }
 
             ensureActive()
-            update(jobId, AuditStage.REPORT, 89, "Сборка полного и клиентского отчётов")
+            update(jobId, AuditStage.REPORT, 89, "Потоковая запись полного JSON без дублирования в памяти")
             val reportFile = repository.outputFile(jobId, AuditJobRepository.REPORT_JSON)
             val customerFile = repository.outputFile(jobId, AuditJobRepository.CUSTOMER_REPORT)
             val offsetsFile = repository.outputFile(jobId, AuditJobRepository.OFFSET_EVIDENCE)
             val managedDumpFile = repository.outputFile(jobId, AuditJobRepository.IL2CPP_DUMP)
             val gradleEvidenceFile = repository.outputFile(jobId, AuditJobRepository.GRADLE_MODULE_EVIDENCE)
             val planFile = repository.outputFile(jobId, AuditJobRepository.VERIFICATION_PLAN)
-            reportFile.writeText(ReportJsonExporter.export(report), Charsets.UTF_8)
+            writeTextAtomically(reportFile) { output -> ReportJsonExporter.write(report, output) }
+            update(jobId, AuditStage.REPORT, 90, "Полный JSON записан; готовим offsets и план проверок")
             offsetsFile.writeText(OffsetEvidenceExporter.export(report), Charsets.UTF_8)
             planFile.writeText(VerificationPlanExporter.export(report), Charsets.UTF_8)
 
@@ -316,7 +317,9 @@ class AuditWorker(
                     }
                 }
             }
-            destination.writeText(Il2CppManagedDumpExporter.export(report, metadataFile), Charsets.UTF_8)
+            writeTextAtomically(destination) { output ->
+                Il2CppManagedDumpExporter.write(report, metadataFile, output)
+            }
         } finally {
             metadataFile?.delete()
             nestedApkFile?.delete()
@@ -346,6 +349,29 @@ class AuditWorker(
         return destination
     }
 
+    private fun writeTextAtomically(destination: File, block: (Appendable) -> Unit) {
+        require(destination.parentFile?.isDirectory == true || destination.parentFile?.mkdirs() == true) {
+            "Не удалось создать каталог результата"
+        }
+        val temporary = File(destination.parentFile, ".${destination.name}.streaming.tmp")
+        if (temporary.exists()) check(temporary.delete()) { "Не удалось очистить временный файл отчёта" }
+        try {
+            temporary.bufferedWriter(Charsets.UTF_8, REPORT_STREAM_BUFFER_BYTES).use { output ->
+                block(output)
+            }
+            if (destination.exists()) check(destination.delete()) { "Не удалось заменить предыдущий результат" }
+            if (!temporary.renameTo(destination)) {
+                temporary.inputStream().buffered().use { input ->
+                    destination.outputStream().buffered().use { output -> input.copyTo(output) }
+                }
+                check(temporary.delete()) { "Не удалось завершить потоковую запись" }
+            }
+        } catch (error: Throwable) {
+            temporary.delete()
+            throw error
+        }
+    }
+
     private fun AnalysisStage.toAuditStage(): AuditStage = when (this) {
         AnalysisStage.PREPARING, AnalysisStage.HASHING, AnalysisStage.CACHE -> AuditStage.PREPARING
         AnalysisStage.ARCHIVE -> AuditStage.ARCHIVE
@@ -372,6 +398,7 @@ class AuditWorker(
         private const val MAX_ERROR_LENGTH = 500
         private const val MAX_METADATA_FOR_DUMP_BYTES = 128L * 1024L * 1024L
         private const val MAX_NESTED_APK_FOR_DUMP_BYTES = 256L * 1024L * 1024L
+        private const val REPORT_STREAM_BUFFER_BYTES = 128 * 1024
     }
 }
 
