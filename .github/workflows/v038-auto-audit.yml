@@ -1,4 +1,4 @@
-name: Build UniRevLab v0.38.1 Auto Audit Memory Fix APK
+name: Build UniRevLab v0.39 Readable Offsets and Split IL2CPP APK
 
 on:
   push:
@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: v0381-${{ github.ref }}
+  group: v0390-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -92,14 +92,14 @@ jobs:
           test -s "${APK}"
           unzip -t "${APK}" >/dev/null
           "${ANDROID_HOME}/build-tools/36.0.0/zipalign" -c -P 16 -v 4 "${APK}" >/dev/null
-          cp "${APK}" UniRevLab-Security-v0.38.1-auto-audit-memory-fix-debug.apk
-          sha256sum UniRevLab-Security-v0.38.1-auto-audit-memory-fix-debug.apk | tee UniRevLab-Security-v0.38.1-auto-audit-memory-fix-debug.apk.sha256
+          cp "${APK}" UniRevLab-Security-v0.39.0-readable-offsets-debug.apk
+          sha256sum UniRevLab-Security-v0.39.0-readable-offsets-debug.apk | tee UniRevLab-Security-v0.39.0-readable-offsets-debug.apk.sha256
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: UniRevLab-Security-v0.38.1-auto-audit-memory-fix-debug
+          name: UniRevLab-Security-v0.39.0-readable-offsets-debug
           path: |
-            UniRevLab-Security-v0.38.1-auto-audit-memory-fix-debug.apk
-            UniRevLab-Security-v0.38.1-auto-audit-memory-fix-debug.apk.sha256
+            UniRevLab-Security-v0.39.0-readable-offsets-debug.apk
+            UniRevLab-Security-v0.39.0-readable-offsets-debug.apk.sha256
           if-no-files-found: error
