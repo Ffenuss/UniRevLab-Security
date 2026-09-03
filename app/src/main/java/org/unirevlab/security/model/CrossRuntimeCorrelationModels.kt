@@ -30,8 +30,8 @@ data class Il2CppRegistrationCorrelation(
 /**
  * Conservative IL2CPP managed-method to native-function correlation.
  *
- * No mapping is emitted from ordering assumptions alone. A result requires either an explicit
- * metadata token literal in a recovered function identity or a unique type+method identity match.
+ * No mapping is emitted from ordering assumptions alone. A result requires evidence such as a
+ * validated codegen-module token slot, explicit metadata-token identity, or unique type+method match.
  */
 data class Il2CppMethodNativeCorrelation(
     val metadataEntry: String,

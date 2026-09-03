@@ -49,6 +49,7 @@ object Il2CppSemanticMappingEngine {
             return emptyResult(report.artifact.sha256)
         }
 
+        val nativeEvidenceByMethod = Il2CppNativeEvidenceEngine.analyze(report).methods.associateBy { it.methodIndex }
         val methodsByType = metadata.methodDefinitions.groupBy { it.declaringTypeIndex }
         val fieldsByType = metadata.fieldDefinitions.groupBy { it.declaringTypeIndex }
         val contexts = metadata.typeDefinitions.associate { type ->
@@ -171,14 +172,26 @@ object Il2CppSemanticMappingEngine {
                             confidence = Confidence.HIGH,
                             basis = Basis.EXACT_SEMANTIC,
                             semanticCategory = category,
-                            evidence = listOf(
-                                "Semantic marker is present in the exact managed method identity from global-metadata.dat.",
-                                "methodIndex=${method.index}, params=${method.parameterCount}, token=0x${method.token.toString(16)}",
-                            ),
+                            evidence = buildList {
+                                add("Semantic marker is present in the exact managed method identity from global-metadata.dat.")
+                                add("methodIndex=${method.index}, params=${method.parameterCount}, token=0x${method.token.toString(16)}")
+                                nativeEvidenceByMethod[method.index]?.let { native ->
+                                    add("Native correlation ${native.verdict}: ${native.nativeFunctionName ?: "<unnamed>"} · ${native.sourceEvidence ?: "unknown source"} (${native.sourceConfidence ?: "unknown"}).")
+                                    native.evidence.take(2).forEach(::add)
+                                }
+                            },
                         ),
                     )
                 }
-                obfuscated -> add(contextualOrStructural("METHOD", method.index, identity, context))
+                obfuscated -> add(
+                    contextualOrStructural(
+                        "METHOD",
+                        method.index,
+                        identity,
+                        context,
+                        nativeEvidenceByMethod[method.index]?.let(::nativeEvidenceLines).orEmpty(),
+                    ),
+                )
             }
         }
 
@@ -217,6 +230,7 @@ object Il2CppSemanticMappingEngine {
         index: Int,
         identity: String,
         context: TypeContext?,
+        extraEvidence: List<String> = emptyList(),
     ): Entry {
         val category = context?.categories?.singleOrNull()
         if (category != null) {
@@ -233,6 +247,7 @@ object Il2CppSemanticMappingEngine {
                 evidence = buildList {
                     add("The symbol name itself looks obfuscated; semantic role is inferred only from its enclosing type context.")
                     evidence.take(4).forEach { add("Context evidence: $it") }
+                    extraEvidence.take(4).forEach(::add)
                     add("Treat this as a review candidate, not as a recovered original identifier or confirmed runtime value.")
                 },
             )
@@ -245,11 +260,17 @@ object Il2CppSemanticMappingEngine {
             confidence = Confidence.LOW,
             basis = Basis.STRUCTURAL,
             semanticCategory = null,
-            evidence = listOf(
-                "Short/opaque managed name suggests obfuscation.",
-                "No unique semantic category could be inferred from metadata context; a stable structural analyst alias was assigned.",
-            ),
+            evidence = buildList {
+                add("Short/opaque managed name suggests obfuscation.")
+                add("No unique semantic category could be inferred from metadata context; a stable structural analyst alias was assigned.")
+                extraEvidence.take(4).forEach(::add)
+            },
         )
+    }
+
+    private fun nativeEvidenceLines(value: Il2CppNativeEvidenceEngine.MethodEvidence): List<String> = buildList {
+        add("Native correlation ${value.verdict}: ${value.nativeFunctionName ?: "<unnamed>"} · ${value.sourceEvidence ?: "unknown source"} (${value.sourceConfidence ?: "unknown"}).")
+        value.evidence.take(2).forEach(::add)
     }
 
     private fun semanticCategories(value: String): Set<String> {

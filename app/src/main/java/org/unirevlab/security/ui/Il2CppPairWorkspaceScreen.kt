@@ -243,6 +243,10 @@ private fun Il2CppPairResultPanel(current: Il2CppPairAssessmentEngine.Result) {
             Text("Metadata v${risk.metadataVersion ?: "?"} · types ${risk.typeCount} · methods ${risk.methodCount} · fields ${risk.fieldCount}")
             Text("Monetization ${risk.monetizationCandidates} · validation ${risk.validationCandidates} · client-state ${risk.clientStateCandidates}")
             Text("Native correlations ${risk.nativeCorrelations} · coverage ${if (risk.coverageComplete) "COMPLETE" else "PARTIAL"}")
+            Text("Native evidence: verified ${current.nativeEvidence.verified} · supported ${current.nativeEvidence.supported} · weak ${current.nativeEvidence.weak} · conflicting ${current.nativeEvidence.conflicting}")
+            if (!current.nativeEvidence.correlationDataAvailable) {
+                Text("Ghidra/native correlation dataset: not available in pair-only mode", style = MaterialTheme.typography.bodySmall)
+            }
             Text("Obfuscation ${current.mapping.obfuscationScore}/100 · suspected ${current.mapping.suspectedSymbols} · mapped ${current.mapping.mappedSymbols}")
             Text("Semantic ${current.mapping.semanticMappings} · contextual ${current.mapping.contextualMappings} · structural ${current.mapping.structuralMappings}", style = MaterialTheme.typography.bodySmall)
             Text("Pair SHA-256 ${current.aggregateSha256.take(24)}…", style = MaterialTheme.typography.bodySmall)

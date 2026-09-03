@@ -21,8 +21,9 @@ object Il2CppManagedDumpExporter {
             }
         }
 
+        val nativeEvidence = Il2CppNativeEvidenceEngine.analyze(report)
+        val nativeEvidenceByMethod = nativeEvidence.methods.associateBy { it.methodIndex }
         val analystMapping = Il2CppSemanticMappingEngine.analyze(report)
-        val correlations = report.correlations?.il2cppMethods.orEmpty().groupBy { it.methodIndex }
         val methodsByType = metadata.methodDefinitions.groupBy { it.declaringTypeIndex }
         val fieldsByType = metadata.fieldDefinitions.groupBy { it.declaringTypeIndex }
         val methodLimit = maxMethods.coerceAtLeast(0)
@@ -42,7 +43,8 @@ object Il2CppManagedDumpExporter {
             appendLine("# coverage=${if (!metadata.truncated && !metadata.reconstructionTruncated && metadata.parseError == null) "COMPLETE" else "PARTIAL"}")
             appendLine("# NOTE: managed names are exact identities present in the supplied metadata; they may already have been obfuscated before IL2CPP conversion.")
             appendLine("# FIELD typeIndex is metadata type identity, not a runtime address or live value.")
-            appendLine("# Native correlations list names only; no patch offsets are emitted.")
+            appendLine("# Native correlations are identity/token validated before display; no patch offsets are emitted.")
+            appendLine("# native_evidence_available=${nativeEvidence.correlationDataAvailable} verified=${nativeEvidence.verified} supported=${nativeEvidence.supported} weak=${nativeEvidence.weak} conflicting=${nativeEvidence.conflicting}")
             appendLine()
 
             metadata.typeDefinitions.sortedBy { it.index }.forEach { type ->
@@ -79,9 +81,14 @@ object Il2CppManagedDumpExporter {
                             .append(method.token.toString(16))
                             .append(" index=")
                             .append(method.index)
-                        correlations[method.index].orEmpty().firstOrNull { it.functionName.isNotBlank() }?.let { correlation ->
-                            append(" native=").append(sanitize(correlation.functionName))
-                            append(" confidence=").append(sanitize(correlation.confidence))
+                        nativeEvidenceByMethod[method.index]?.takeIf { evidence ->
+                            evidence.verdict != Il2CppNativeEvidenceEngine.Verdict.CONFLICTING &&
+                                !evidence.nativeFunctionName.isNullOrBlank()
+                        }?.let { correlation ->
+                            append(" native=").append(sanitize(correlation.nativeFunctionName.orEmpty()))
+                            append(" nativeVerdict=").append(correlation.verdict)
+                            append(" nativeEvidence=").append(sanitize(correlation.sourceEvidence.orEmpty()))
+                            append(" nativeConfidence=").append(sanitize(correlation.sourceConfidence.orEmpty()))
                         }
                         appendLine()
                         emittedMethods++

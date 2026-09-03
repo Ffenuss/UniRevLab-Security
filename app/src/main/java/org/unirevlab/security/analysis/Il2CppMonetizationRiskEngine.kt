@@ -77,8 +77,8 @@ object Il2CppMonetizationRiskEngine {
             )
         }
 
-        val nativeByMethod = report.correlations?.il2cppMethods.orEmpty()
-            .groupBy { it.methodIndex }
+        val nativeEvidence = Il2CppNativeEvidenceEngine.analyze(report)
+        val nativeEvidenceByMethod = nativeEvidence.methods.associateBy { it.methodIndex }
         val candidates = LinkedHashMap<String, Candidate>()
 
         fun add(candidate: Candidate) {
@@ -134,14 +134,17 @@ object Il2CppMonetizationRiskEngine {
         metadata.methodDefinitions.forEach { method ->
             val identity = "${method.declaringType}.${method.name}"
             classify(method.name).forEach { category ->
-                val native = nativeByMethod[method.index].orEmpty()
-                    .firstOrNull { it.functionName.isNotBlank() }
+                val native = nativeEvidenceByMethod[method.index]?.takeIf { evidence ->
+                    evidence.verdict != Il2CppNativeEvidenceEngine.Verdict.CONFLICTING &&
+                        !evidence.nativeFunctionName.isNullOrBlank()
+                }
                 val evidence = buildList {
                     add("Exact managed method identity recovered from global-metadata.dat")
                     add("Semantic marker in method name: ${markerFor(method.name, category)}")
                     add("Metadata method index=${method.index}, token=0x${method.token.toString(16)}")
                     native?.let {
-                        add("Correlated to recovered native function identity: ${it.functionName} (${it.confidence})")
+                        add("Validated native identity: ${it.nativeFunctionName} · ${it.verdict} · ${it.sourceEvidence} (${it.sourceConfidence})")
+                        it.evidence.take(2).forEach(::add)
                     }
                 }
                 add(
@@ -153,7 +156,7 @@ object Il2CppMonetizationRiskEngine {
                         metadataToken = method.token,
                         methodIndex = method.index,
                         declaringType = method.declaringType,
-                        nativeFunctionName = native?.functionName,
+                        nativeFunctionName = native?.nativeFunctionName,
                         evidence = evidence,
                     ),
                 )
@@ -193,7 +196,10 @@ object Il2CppMonetizationRiskEngine {
                 val field = if (mapping.kind == "FIELD") metadata.fieldDefinitions.firstOrNull { it.index == mapping.symbolIndex } else null
                 val type = if (mapping.kind == "TYPE") metadata.typeDefinitions.firstOrNull { it.index == mapping.symbolIndex } else null
                 val native = method?.let { current ->
-                    nativeByMethod[current.index].orEmpty().firstOrNull { it.functionName.isNotBlank() }
+                    nativeEvidenceByMethod[current.index]?.takeIf { evidence ->
+                        evidence.verdict != Il2CppNativeEvidenceEngine.Verdict.CONFLICTING &&
+                            !evidence.nativeFunctionName.isNullOrBlank()
+                    }
                 }
                 add(
                     Candidate(
@@ -208,8 +214,8 @@ object Il2CppMonetizationRiskEngine {
                         metadataToken = method?.token ?: field?.token ?: type?.token,
                         methodIndex = method?.index,
                         declaringType = method?.declaringType ?: field?.declaringType ?: type?.fullName,
-                        nativeFunctionName = native?.functionName,
-                        evidence = mapping.evidence + listOf(
+                        nativeFunctionName = native?.nativeFunctionName,
+                        evidence = mapping.evidence + native?.evidence.orEmpty().take(3) + listOf(
                             "Contextual analyst alias: ${mapping.alias}",
                             "This candidate is inferred from enclosing metadata context and does not prove a live premium value or authorization result.",
                         ),
