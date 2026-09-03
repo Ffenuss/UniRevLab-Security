@@ -345,9 +345,9 @@ class LocalArtifactInspector(
         }
         val nativeRaw = mergeNativeSummaries(nativeParts)
         val native = nativeRaw?.let { JniBridgeCorrelator.correlate(dex, it) }
-        progress.emit(AnalysisStage.NATIVE, 76, "Native/JNI анализ завершён", nativeBase.coerceAtMost(nativeTotal), nativeTotal.takeIf { it > 0 })
+        progress.emit(AnalysisStage.NATIVE, 76, nativeProgressDetail(native), nativeBase.coerceAtMost(nativeTotal), nativeTotal.takeIf { it > 0 })
 
-        progress.emit(AnalysisStage.IL2CPP, 77, "Проверяем IL2CPP metadata и registration evidence…", 0, files.size)
+        progress.emit(AnalysisStage.IL2CPP, 77, "libil2cpp.so уже разобран как ELF; связываем его с global-metadata.dat и registration evidence…", 0, files.size)
         val il2cppParts = files.mapIndexedNotNull { index, file ->
             progress.checkCancelled()
             inspectIl2Cpp(file, native, archiveIndexes.getOrNull(index)).also {
@@ -355,6 +355,7 @@ class LocalArtifactInspector(
             }
         }
         val il2cpp = chooseIl2Cpp(il2cppParts)
+        progress.emit(AnalysisStage.IL2CPP, 81, il2CppProgressDetail(il2cpp))
 
         progress.emit(AnalysisStage.RUNTIME, 82, "Определяем runtime-профили…")
         val runtimeEvidence = RuntimeProfileScanner.prepareSharedEvidence(dex, native)
@@ -545,6 +546,27 @@ class LocalArtifactInspector(
         (if (summary.metadata?.magicValid == true) 1000 else 0) +
             (if (summary.detected) 100 else 0) + confidenceRank(summary.confidence) * 10 +
             summary.registrationCandidates.size.coerceAtMost(9)
+    }
+
+    private fun nativeProgressDetail(native: NativeSummary?): String {
+        val libraries = native?.libraries.orEmpty()
+            .filter { it.entryName.substringAfterLast('/').equals("libil2cpp.so", ignoreCase = true) }
+        if (libraries.isEmpty()) return "Native/JNI анализ завершён · libil2cpp.so не обнаружен"
+        val bytes = libraries.sumOf { it.sizeBytes }
+        val exports = libraries.sumOf { it.exportedSymbols.size }
+        val imports = libraries.sumOf { it.importedSymbols.size }
+        val partial = libraries.count { it.truncated || it.parseError != null }
+        return "Native/JNI анализ завершён · libil2cpp.so разобран: ABI ${libraries.size}, ${formatBytes(bytes)}, exports $exports, imports $imports" +
+            if (partial > 0) " · частично: $partial" else ""
+    }
+
+    private fun il2CppProgressDetail(il2cpp: Il2CppSummary?): String {
+        if (il2cpp?.detected != true) return "IL2CPP не обнаружен; metadata/registration evidence отсутствуют"
+        val metadata = il2cpp.metadata
+        val coverage = if (il2cpp.truncated || metadata?.truncated == true || metadata?.reconstructionTruncated == true) "частично" else "полностью"
+        return "IL2CPP evidence готова: libil2cpp.so ${il2cpp.libil2cppLibraries.size}, metadata v${metadata?.metadataVersion ?: "?"}, " +
+            "types ${metadata?.typeDefinitions?.size ?: 0}, methods ${metadata?.methodDefinitions?.size ?: 0}, " +
+            "registration candidates ${il2cpp.registrationCandidates.size} · покрытие: $coverage"
     }
 
     private fun mergeRuntimeSummaries(values: List<RuntimeSummary>): RuntimeSummary? {
@@ -769,12 +791,12 @@ class LocalArtifactInspector(
             inspectNativeLibraries(apk, it, session = session, archiveIndex = archiveIndex, progress = progress, overallBase = 0, overallTotal = nativeCount.coerceAtLeast(1))
         }
         val native = nativeRaw?.let { JniBridgeCorrelator.correlate(dex, it) }
-        progress.emit(AnalysisStage.NATIVE, 76, "Native/JNI анализ завершён", native?.librariesScanned ?: 0, nativeCount.takeIf { it > 0 })
+        progress.emit(AnalysisStage.NATIVE, 76, nativeProgressDetail(native), native?.librariesScanned ?: 0, nativeCount.takeIf { it > 0 })
 
-        progress.emit(AnalysisStage.IL2CPP, 77, "Проверяем IL2CPP metadata и registration evidence…")
+        progress.emit(AnalysisStage.IL2CPP, 77, "libil2cpp.so уже разобран как ELF; связываем его с global-metadata.dat и registration evidence…")
         val il2cpp = inspectIl2Cpp(apk, native, archiveIndex)
         progress.checkCancelled()
-        progress.emit(AnalysisStage.IL2CPP, 81, "IL2CPP этап завершён")
+        progress.emit(AnalysisStage.IL2CPP, 81, il2CppProgressDetail(il2cpp))
 
         progress.emit(AnalysisStage.RUNTIME, 82, "Определяем runtime-профили…")
         val runtimeEvidence = RuntimeProfileScanner.prepareSharedEvidence(dex, native)
