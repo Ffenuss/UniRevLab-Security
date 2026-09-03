@@ -1,4 +1,4 @@
-name: Build UniRevLab v0.36.0 IL2CPP Evidence Explorer Preview APK
+name: Build UniRevLab v0.36.1 Large IL2CPP Files Hotfix APK
 
 on:
   push:
@@ -20,7 +20,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: v0360-${{ github.ref }}
+  group: v0361-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -40,11 +40,11 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit --allow-empty -m "Start v0.36.0 CI run ${{ github.run_id }} [skip ci]"
+          git commit --allow-empty -m "Start v0.36.1 CI run ${{ github.run_id }} [skip ci]"
           git push origin HEAD:fix-analysis-progress-v0221
 
-      - name: Apply v0.36.0 IL2CPP Evidence Explorer integration
-        run: python tools/apply_v0360_il2cpp_evidence_explorer.py
+      - name: Apply v0.36.1 large IL2CPP file limits
+        run: python tools/apply_v0361_large_il2cpp_files.py
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -126,12 +126,12 @@ jobs:
           unzip -t "${TARGET_APK}" >/dev/null
           "${ANDROID_HOME}/build-tools/36.0.0/zipalign" -c -P 16 -v 4 "${APK}" >/dev/null
           "${ANDROID_HOME}/build-tools/36.0.0/zipalign" -c -P 16 -v 4 "${TARGET_APK}" >/dev/null
-          cp "${APK}" UniRevLab-Security-v0.36.0-il2cpp-evidence-explorer-preview-debug.apk
+          cp "${APK}" UniRevLab-Security-v0.36.1-il2cpp-large-files-preview-debug.apk
           cp "${TARGET_APK}" UniRevLab-TestTarget-v1.0-debug.apk
-          sha256sum UniRevLab-Security-v0.36.0-il2cpp-evidence-explorer-preview-debug.apk | tee UniRevLab-Security-v0.36.0-il2cpp-evidence-explorer-preview-debug.apk.sha256
+          sha256sum UniRevLab-Security-v0.36.1-il2cpp-large-files-preview-debug.apk | tee UniRevLab-Security-v0.36.1-il2cpp-large-files-preview-debug.apk.sha256
           sha256sum UniRevLab-TestTarget-v1.0-debug.apk | tee UniRevLab-TestTarget-v1.0-debug.apk.sha256
 
-      - name: Commit verified v0.36.0 sources
+      - name: Commit verified v0.36.1 sources
         if: github.ref_name == 'fix-analysis-progress-v0221'
         shell: bash
         run: |
@@ -140,24 +140,24 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add \
             app/build.gradle.kts \
-            app/src/main/java/org/unirevlab/security/analysis/Il2CppEvidenceExplorerModel.kt \
-            app/src/main/java/org/unirevlab/security/ui/Il2CppEvidenceExplorerPanel.kt \
-            app/src/main/java/org/unirevlab/security/ui/ProductToolsScreen.kt \
-            app/src/test/java/org/unirevlab/security/analysis/Il2CppEvidenceExplorerModelTest.kt
+            app/src/main/java/org/unirevlab/security/analysis/ElfNativeScanner.kt \
+            app/src/main/java/org/unirevlab/security/analysis/Il2CppScanner.kt \
+            app/src/main/java/org/unirevlab/security/ui/Il2CppPairWorkspaceScreen.kt \
+            app/src/test/java/org/unirevlab/security/analysis/Il2CppLargeFileLimitsTest.kt
           if ! git diff --cached --quiet; then
-            git commit -m "Apply v0.36.0 IL2CPP Evidence Explorer (run ${{ github.run_id }}) [skip ci]"
+            git commit -m "Apply v0.36.1 large IL2CPP files hotfix (run ${{ github.run_id }}) [skip ci]"
           else
-            git commit --allow-empty -m "Verify v0.36.0 sources (run ${{ github.run_id }}) [skip ci]"
+            git commit --allow-empty -m "Verify v0.36.1 sources (run ${{ github.run_id }}) [skip ci]"
           fi
           git push origin HEAD:fix-analysis-progress-v0221
 
       - name: Upload UniRevLab APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: UniRevLab-Security-v0.36.0-il2cpp-evidence-explorer-preview-debug
+          name: UniRevLab-Security-v0.36.1-il2cpp-large-files-preview-debug
           path: |
-            UniRevLab-Security-v0.36.0-il2cpp-evidence-explorer-preview-debug.apk
-            UniRevLab-Security-v0.36.0-il2cpp-evidence-explorer-preview-debug.apk.sha256
+            UniRevLab-Security-v0.36.1-il2cpp-large-files-preview-debug.apk
+            UniRevLab-Security-v0.36.1-il2cpp-large-files-preview-debug.apk.sha256
           if-no-files-found: error
 
       - name: Upload TestTarget APK artifact
