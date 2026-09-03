@@ -21,14 +21,15 @@ managed_dump = (ROOT / "app/src/main/java/org/unirevlab/security/analysis/Il2Cpp
 resistance = (ROOT / "app/src/main/java/org/unirevlab/security/analysis/Il2CppModdingResistanceEngine.kt").read_text(encoding="utf-8")
 pair_engine = (ROOT / "app/src/main/java/org/unirevlab/security/analysis/Il2CppPairAssessmentEngine.kt").read_text(encoding="utf-8")
 audit_worker = (ROOT / "app/src/main/java/org/unirevlab/security/work/AuditWorker.kt").read_text(encoding="utf-8")
+inspector = (ROOT / "app/src/main/java/org/unirevlab/security/analysis/LocalArtifactInspector.kt").read_text(encoding="utf-8")
 gradle_evidence = (ROOT / "app/src/main/java/org/unirevlab/security/analysis/GradleModuleEvidenceExporter.kt").read_text(encoding="utf-8")
 gradle_evidence_test = (ROOT / "app/src/test/java/org/unirevlab/security/analysis/GradleModuleEvidenceExporterTest.kt").read_text(encoding="utf-8")
 
 checks = [
     ("compileSdk 37.0", app, r"version\s*=\s*release\(37\)[\s\S]*minorApiLevel\s*=\s*0"),
     ("targetSdk 36", app, r"targetSdk\s*=\s*36"),
-    ("v0.38.0 preview versionCode", app, r"versionCode\s*=\s*50"),
-    ("v0.38.0 auto audit versionName", app, r'versionName\s*=\s*"0\.38\.0-preview-auto-audit"'),
+    ("v0.38.1 preview versionCode", app, r"versionCode\s*=\s*51"),
+    ("v0.38.1 memory-safe versionName", app, r'versionName\s*=\s*"0\.38\.1-preview-auto-audit-memory-fix"'),
     ("release signing input gate", app, r'tasks\.register\("verifyReleaseSigningInputs"\)'),
     ("AGP 9.3.0", root_build, r'id\("com\.android\.application"\) version "9\.3\.0"'),
     ("Kotlin Compose 2.3.21", root_build, r'id\("org\.jetbrains\.kotlin\.plugin\.compose"\) version "2\.3\.21"'),
@@ -44,9 +45,12 @@ checks = [
     ("CI lint", workflow, r':app:lintDebug'),
     ("CI debug build", workflow, r':app:assembleDebug'),
     ("CI APK integrity verify", workflow, r'unzip -t .*APK'),
-    ("CI APK SHA-256", workflow, r'sha256sum .*UniRevLab-Security-v0\.38\.0-auto-audit-preview-debug\.apk'),
+    ("CI APK SHA-256", workflow, r'sha256sum .*UniRevLab-Security-v0\.38\.1-auto-audit-memory-fix-debug\.apk'),
     ("CI artifact upload", workflow, r'actions/upload-artifact@v4'),
     ("WorkManager persistent audit", audit_worker, r'OneTimeWorkRequestBuilder<AuditWorker>'),
+    ("full report streamed to disk", audit_worker, r'ReportJsonExporter\.write\(report, output\)'),
+    ("IL2CPP dump streamed to disk", audit_worker, r'Il2CppManagedDumpExporter\.write\(report, metadataFile, output\)'),
+    ("analysis cache invalidated for v0.38.1", inspector, r'ENGINE_VERSION\s*=\s*"0\.38\.1-auto-audit-memory-fix"'),
     ("Gradle/module exporter wired", audit_worker, r'GradleModuleEvidenceExporter\.export'),
     ("Gradle split manifest parsing", gradle_evidence, r'configForSplit[\s\S]*isFeatureSplit'),
     ("Gradle dynamic feature classification", gradle_evidence, r'DYNAMIC_FEATURE'),
@@ -85,6 +89,19 @@ legacy_ok = not legacy_found
 print(f"{'PASS' if legacy_ok else 'FAIL'}: CI legacy migration replay disabled")
 if not legacy_ok:
     failed.append("CI legacy migration replay disabled (found: " + ", ".join(legacy_found) + ")")
+
+in_memory_exports = [
+    marker
+    for marker in (
+        "ReportJsonExporter.export(report)",
+        "Il2CppManagedDumpExporter.export(report, metadataFile)",
+    )
+    if marker in audit_worker
+]
+streaming_only_ok = not in_memory_exports
+print(f"{'PASS' if streaming_only_ok else 'FAIL'}: worker avoids artifact-sized in-memory exports")
+if not streaming_only_ok:
+    failed.append("worker avoids artifact-sized in-memory exports (found: " + ", ".join(in_memory_exports) + ")")
 
 if failed:
     raise SystemExit("Android build-config preflight failed: " + ", ".join(failed))
