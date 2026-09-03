@@ -15,8 +15,8 @@ android {
         applicationId = "org.unirevlab.security"
         minSdk = 26
         targetSdk = 36
-        versionCode = 49
-        versionName = "0.37.0-preview-modding-resistance"
+        versionCode = 50
+        versionName = "0.38.0-preview-auto-audit"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -75,6 +75,7 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.work:work-runtime-ktx:2.11.2")
     implementation("com.android.tools.build:apksig:2.3.0")
     implementation("org.smali:smali:2.5.2")
     implementation("org.smali:baksmali:2.5.2")

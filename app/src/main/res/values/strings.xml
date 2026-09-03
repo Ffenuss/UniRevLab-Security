@@ -1,3 +1,7 @@
 <resources>
     <string name="app_name">UniRevLab Security</string>
+    <string name="audit_notification_channel">Анализ приложений</string>
+    <string name="audit_notification_channel_description">Ход длительного авторизованного анализа APK</string>
+    <string name="audit_notification_title">UniRevLab: автоматический аудит</string>
+    <string name="audit_notification_cancel">Остановить</string>
 </resources>

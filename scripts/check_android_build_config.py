@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 app = (ROOT / "app/build.gradle.kts").read_text(encoding="utf-8")
 root_build = (ROOT / "build.gradle.kts").read_text(encoding="utf-8")
 workflow_dir = ROOT / ".github" / "workflows"
-workflow_path = workflow_dir / "bootstrap-v022.yml"
+workflow_path = workflow_dir / "v038-auto-audit.yml"
 if not workflow_path.is_file():
     candidates = sorted(list(workflow_dir.glob("*.yml")) + list(workflow_dir.glob("*.yaml")))
     candidates = [p for p in candidates if "assembleDebug" in p.read_text(encoding="utf-8", errors="replace")]
@@ -20,12 +20,15 @@ pair_workspace = (ROOT / "app/src/main/java/org/unirevlab/security/ui/Il2CppPair
 managed_dump = (ROOT / "app/src/main/java/org/unirevlab/security/analysis/Il2CppManagedDumpExporter.kt").read_text(encoding="utf-8")
 resistance = (ROOT / "app/src/main/java/org/unirevlab/security/analysis/Il2CppModdingResistanceEngine.kt").read_text(encoding="utf-8")
 pair_engine = (ROOT / "app/src/main/java/org/unirevlab/security/analysis/Il2CppPairAssessmentEngine.kt").read_text(encoding="utf-8")
+audit_worker = (ROOT / "app/src/main/java/org/unirevlab/security/work/AuditWorker.kt").read_text(encoding="utf-8")
+gradle_evidence = (ROOT / "app/src/main/java/org/unirevlab/security/analysis/GradleModuleEvidenceExporter.kt").read_text(encoding="utf-8")
+gradle_evidence_test = (ROOT / "app/src/test/java/org/unirevlab/security/analysis/GradleModuleEvidenceExporterTest.kt").read_text(encoding="utf-8")
 
 checks = [
     ("compileSdk 37.0", app, r"version\s*=\s*release\(37\)[\s\S]*minorApiLevel\s*=\s*0"),
     ("targetSdk 36", app, r"targetSdk\s*=\s*36"),
-    ("v0.37.0 preview versionCode", app, r"versionCode\s*=\s*49"),
-    ("v0.37.0 modding resistance versionName", app, r'versionName\s*=\s*"0\.37\.0-preview-modding-resistance"'),
+    ("v0.38.0 preview versionCode", app, r"versionCode\s*=\s*50"),
+    ("v0.38.0 auto audit versionName", app, r'versionName\s*=\s*"0\.38\.0-preview-auto-audit"'),
     ("release signing input gate", app, r'tasks\.register\("verifyReleaseSigningInputs"\)'),
     ("AGP 9.3.0", root_build, r'id\("com\.android\.application"\) version "9\.3\.0"'),
     ("Kotlin Compose 2.3.21", root_build, r'id\("org\.jetbrains\.kotlin\.plugin\.compose"\) version "2\.3\.21"'),
@@ -41,12 +44,13 @@ checks = [
     ("CI lint", workflow, r':app:lintDebug'),
     ("CI debug build", workflow, r':app:assembleDebug'),
     ("CI APK integrity verify", workflow, r'unzip -t .*APK'),
-    ("CI APK SHA-256", workflow, r'sha256sum .*UniRevLab-Security-v0\.37\.0-modding-resistance-preview-debug\.apk'),
+    ("CI APK SHA-256", workflow, r'sha256sum .*UniRevLab-Security-v0\.38\.0-auto-audit-preview-debug\.apk'),
     ("CI artifact upload", workflow, r'actions/upload-artifact@v4'),
-    ("CI current v0.37 migration", workflow, r'python tools/apply_v0370_modding_resistance\.py'),
-    ("CI current migration runs before Java", workflow, r'(?s)Apply v0\.37\.0 modding resistance integration.*Set up Java 17'),
-    ("CI modding resistance engine persisted", workflow, r'Il2CppModdingResistanceEngine\.kt'),
-    ("CI modding resistance tests persisted", workflow, r'Il2CppModdingResistanceEngineTest\.kt'),
+    ("WorkManager persistent audit", audit_worker, r'OneTimeWorkRequestBuilder<AuditWorker>'),
+    ("Gradle/module exporter wired", audit_worker, r'GradleModuleEvidenceExporter\.export'),
+    ("Gradle split manifest parsing", gradle_evidence, r'configForSplit[\s\S]*isFeatureSplit'),
+    ("Gradle dynamic feature classification", gradle_evidence, r'DYNAMIC_FEATURE'),
+    ("Gradle evidence regression test", gradle_evidence_test, r'recoversDynamicFeatureAndAgpMetadata'),
     ("pair workspace libil2cpp limit 2 GiB", pair_workspace, r'MAX_LIBRARY_BYTES\s*=\s*2L\s*\*\s*1024L\s*\*\s*1024L\s*\*\s*1024L'),
     ("ELF scanner max input 2 GiB", elf_scanner, r'maxElfBytes:\s*Long\s*=\s*2L\s*\*\s*1024L\s*\*\s*1024L\s*\*\s*1024L'),
     ("ELF ASCII scan remains bounded", elf_scanner, r'maxAsciiScanBytes:\s*Long\s*=\s*64L\s*\*\s*1024L\s*\*\s*1024L'),
@@ -81,12 +85,6 @@ legacy_ok = not legacy_found
 print(f"{'PASS' if legacy_ok else 'FAIL'}: CI legacy migration replay disabled")
 if not legacy_ok:
     failed.append("CI legacy migration replay disabled (found: " + ", ".join(legacy_found) + ")")
-
-current_migration_count = workflow.count("python tools/apply_v0370_modding_resistance.py")
-current_once = current_migration_count == 1
-print(f"{'PASS' if current_once else 'FAIL'}: CI current migration applied exactly once")
-if not current_once:
-    failed.append(f"CI current migration applied exactly once (count={current_migration_count})")
 
 if failed:
     raise SystemExit("Android build-config preflight failed: " + ", ".join(failed))
