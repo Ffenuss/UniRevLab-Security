@@ -34,7 +34,7 @@ class Il2CppEvidenceExplorerModelTest {
         assertEquals("Game.PremiumService.IsPremium", row.managedIdentity)
         assertEquals("Game_PremiumService_IsPremium", row.nativeFunctionName)
         assertEquals("CODEGEN_MODULE_METHOD_TOKEN_SLOT", row.nativeProvenance)
-        assertEquals(0x06000001, row.metadataToken)
+        assertEquals(0x06000001L, row.metadataToken)
         assertTrue(row.evidence.any { it.contains("canonical global-metadata.dat", ignoreCase = true) })
         assertEquals(1, result.verified)
     }
