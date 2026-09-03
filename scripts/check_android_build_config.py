@@ -14,12 +14,15 @@ if not workflow_path.is_file():
         raise SystemExit(f"Expected exactly one Android debug CI workflow, found {len(candidates)}")
     workflow_path = candidates[0]
 workflow = workflow_path.read_text(encoding="utf-8")
+elf_scanner = (ROOT / "app/src/main/java/org/unirevlab/security/analysis/ElfNativeScanner.kt").read_text(encoding="utf-8")
+il2cpp_scanner = (ROOT / "app/src/main/java/org/unirevlab/security/analysis/Il2CppScanner.kt").read_text(encoding="utf-8")
+pair_workspace = (ROOT / "app/src/main/java/org/unirevlab/security/ui/Il2CppPairWorkspaceScreen.kt").read_text(encoding="utf-8")
 
 checks = [
     ("compileSdk 37.0", app, r"version\s*=\s*release\(37\)[\s\S]*minorApiLevel\s*=\s*0"),
     ("targetSdk 36", app, r"targetSdk\s*=\s*36"),
-    ("v0.36.0 preview versionCode", app, r"versionCode\s*=\s*47"),
-    ("v0.36.0 IL2CPP evidence explorer versionName", app, r'versionName\s*=\s*"0\.36\.0-preview-il2cpp-evidence-explorer"'),
+    ("v0.36.1 preview versionCode", app, r"versionCode\s*=\s*48"),
+    ("v0.36.1 large IL2CPP files versionName", app, r'versionName\s*=\s*"0\.36\.1-preview-il2cpp-large-files"'),
     ("release signing input gate", app, r'tasks\.register\("verifyReleaseSigningInputs"\)'),
     ("AGP 9.3.0", root_build, r'id\("com\.android\.application"\) version "9\.3\.0"'),
     ("Kotlin Compose 2.3.21", root_build, r'id\("org\.jetbrains\.kotlin\.plugin\.compose"\) version "2\.3\.21"'),
@@ -35,13 +38,15 @@ checks = [
     ("CI lint", workflow, r':app:lintDebug'),
     ("CI debug build", workflow, r':app:assembleDebug'),
     ("CI APK integrity verify", workflow, r'unzip -t .*APK'),
-    ("CI APK SHA-256", workflow, r'sha256sum .*UniRevLab-Security-v0\.36\.0-il2cpp-evidence-explorer-preview-debug\.apk'),
+    ("CI APK SHA-256", workflow, r'sha256sum .*UniRevLab-Security-v0\.36\.1-il2cpp-large-files-preview-debug\.apk'),
     ("CI artifact upload", workflow, r'actions/upload-artifact@v4'),
-    ("CI current IL2CPP evidence explorer migration", workflow, r'python tools/apply_v0360_il2cpp_evidence_explorer\.py'),
-    ("CI current migration runs before Java", workflow, r'(?s)Apply v0\.36\.0 IL2CPP Evidence Explorer integration.*Set up Java 17'),
-    ("CI Evidence Explorer model persisted", workflow, r'Il2CppEvidenceExplorerModel\.kt'),
-    ("CI Evidence Explorer panel persisted", workflow, r'Il2CppEvidenceExplorerPanel\.kt'),
-    ("CI Evidence Explorer tests persisted", workflow, r'Il2CppEvidenceExplorerModelTest\.kt'),
+    ("CI current large-file migration", workflow, r'python tools/apply_v0361_large_il2cpp_files\.py'),
+    ("CI current migration runs before Java", workflow, r'(?s)Apply v0\.36\.1 large IL2CPP file limits.*Set up Java 17'),
+    ("CI large-file limits test persisted", workflow, r'Il2CppLargeFileLimitsTest\.kt'),
+    ("pair workspace libil2cpp limit 2 GiB", pair_workspace, r'MAX_LIBRARY_BYTES\s*=\s*2L\s*\*\s*1024L\s*\*\s*1024L\s*\*\s*1024L'),
+    ("ELF scanner max input 2 GiB", elf_scanner, r'maxElfBytes:\s*Long\s*=\s*2L\s*\*\s*1024L\s*\*\s*1024L\s*\*\s*1024L'),
+    ("ELF ASCII scan remains bounded", elf_scanner, r'maxAsciiScanBytes:\s*Long\s*=\s*64L\s*\*\s*1024L\s*\*\s*1024L'),
+    ("IL2CPP metadata max 128 MiB", il2cpp_scanner, r'maxMetadataBytes:\s*Long\s*=\s*128L\s*\*\s*1024L\s*\*\s*1024L'),
 ]
 
 failed = []
@@ -58,6 +63,7 @@ legacy_migrations = [
     "apply_v0330_",
     "apply_v0340_il2cpp_semantic_mapping.py",
     "apply_v0350_il2cpp_native_evidence.py",
+    "apply_v0360_il2cpp_evidence_explorer.py",
 ]
 legacy_found = [marker for marker in legacy_migrations if marker in workflow]
 legacy_ok = not legacy_found
@@ -65,7 +71,7 @@ print(f"{'PASS' if legacy_ok else 'FAIL'}: CI legacy migration replay disabled")
 if not legacy_ok:
     failed.append("CI legacy migration replay disabled (found: " + ", ".join(legacy_found) + ")")
 
-current_migration_count = workflow.count("python tools/apply_v0360_il2cpp_evidence_explorer.py")
+current_migration_count = workflow.count("python tools/apply_v0361_large_il2cpp_files.py")
 current_once = current_migration_count == 1
 print(f"{'PASS' if current_once else 'FAIL'}: CI current migration applied exactly once")
 if not current_once:
