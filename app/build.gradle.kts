@@ -15,8 +15,8 @@ android {
         applicationId = "org.unirevlab.security"
         minSdk = 26
         targetSdk = 36
-        versionCode = 50
-        versionName = "0.38.0-preview-auto-audit"
+        versionCode = 51
+        versionName = "0.38.1-preview-auto-audit-memory-fix"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
