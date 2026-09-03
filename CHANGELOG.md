@@ -1,29 +1,23 @@
 # Changelog
 
-## 0.22.0-dev-performance-ux
+## 0.26.0-auto-audit
 
 ### Added
-- app launcher/round icon resources and in-app UniRevLab visual identity;
-- dark Material 3 product theme, redesigned assessment/dashboard/installed-app/agreement surfaces;
-- dedicated `Справка и функции` screen describing file analysis, installed-app analysis, RE Browser, Ghidra, advisory feeds, coordinator sync, version diff and each export action;
-- real analysis cancellation from the dashboard via interruptible IO;
-- app-private normalized whole-analysis cache keyed by artifact SHA-256 and engine version.
+- one-selection installed-app/APK audit flow with persisted customer profile and per-target authority confirmation;
+- persistent WorkManager foreground pipeline with stage progress, cancellation and result recovery;
+- bounded automatic DEX/native/IL2CPP/managed/runtime evidence bundle;
+- static RVA/metadata offset export, defensive verification plan and Russian customer report;
+- device-keystore ECDSA manifest signature and all-in-one evidence ZIP.
 
-### Performance
-- shared DEX structural index between inventory and code/xref analysis;
-- SHA-256 content dedup for repeated DEX/native payloads inside base+split assessments;
-- bounded two-worker DEX/native parallelism with a process-wide executor;
-- single bounded APK central-directory classification index reused by downstream analyzers;
-- streaming/bounded merge collectors and one-pass DEX/native rule classification;
-- background RE Browser index construction plus debounce/early-stop search;
-- IL2CPP symbol inventory and cross-runtime matching avoid repeated normalization/full-list passes.
+### Changed
+- replaced the previous manual dashboard/import sequence with an Auto Audit home screen;
+- retained the v0.22 content-addressed cache, shared archive index and bounded parallel DEX/native analysis;
+- engine/version provenance advanced to `0.26.0-auto-audit` (versionCode 30).
 
-### Verification
-- current `classes7.dex` shared-index parity benchmark: PASS; cold code scan 1452.43 ms vs shared-index 759.16 ms (~1.91x) in this container;
-- analysis-cache Java serialization round-trip and engine-version invalidation: PASS;
-- static-core + report schema validation: PASS; M2.4: PASS; M2.5 + SBOM validation: PASS;
-- compile-only Compose/API stub typecheck for redesigned UI: PASS;
-- real Android Gradle build is still not claimed locally because the runtime cannot resolve/download the Android/Gradle toolchain.
+### Safety
+- the target archive remains immutable and non-executing input;
+- no hook implementation, bypass patch, injected mod menu, target re-signing or modified APK is produced;
+- active checks are expressed as a verification plan for an owner-supplied test/source build.
 
 ## 0.21.0-dev-range-rbac-attestation
 
@@ -272,4 +266,3 @@
 - Added in-session version diff for the same package: permissions, exported components, deep links, findings, dependencies, DEX methods/classes, native libraries/exports, and signer changes.
 - Added structured X.509 signing certificate identity/lineage metadata (subject, issuer, serial, validity, algorithms, key size, current signer).
 - Static report schema advanced to 1.11.
-

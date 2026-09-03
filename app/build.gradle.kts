@@ -15,8 +15,8 @@ android {
         applicationId = "org.unirevlab.security"
         minSdk = 26
         targetSdk = 36
-        versionCode = 18
-        versionName = "0.22.0-dev-performance-ux"
+        versionCode = 30
+        versionName = "0.26.0-auto-audit"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -74,6 +74,7 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.work:work-runtime-ktx:2.11.2")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 

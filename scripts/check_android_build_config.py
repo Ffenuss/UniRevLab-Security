@@ -9,13 +9,13 @@ workflow = (ROOT / ".github/workflows/android.yml").read_text()
 release_workflow = (ROOT / ".github/workflows/release.yml").read_text()
 
 checks = {
-    "compileSdk 37.0": r"version\s*=\s*release\(37\)[\s\S]*minorApiLevel\s*=\s*0",
+    "compileSdk 37": r"compileSdk\s*(?:=\s*37|\{[\s\S]*?version\s*=\s*release\(37\))",
     "targetSdk 36": r"targetSdk\s*=\s*36",
-    "versionCode 18": r"versionCode\s*=\s*18",
-    "versionName v0.22": r'versionName\s*=\s*"0\.22\.0-dev-performance-ux"',
+    "versionCode 30": r"versionCode\s*=\s*30",
+    "versionName v0.26": r'versionName\s*=\s*"0\.26\.0-auto-audit"',
     "AGP 9.3.0": r'id\("com\.android\.application"\) version "9\.3\.0"',
     "Kotlin Compose 2.3.21": r'id\("org\.jetbrains\.kotlin\.plugin\.compose"\) version "2\.3\.21"',
-    "CI Android platform 37.0": r'platforms;android-37\.0',
+    "CI Android platform 37": r'platforms;android-37',
     "CI build-tools 36.0.0": r'build-tools;36\.0\.0',
     "CI NDK 28.2.13676358": r'ndk;28\.2\.13676358',
     "CI Gradle 9.5.0": r"gradle-version:\s*'9\.5\.0'",
@@ -40,7 +40,7 @@ checks = {
     "release Ghidra evidence download": r'actions/download-artifact@v4[\s\S]*release-ghidra-',
 }
 texts = {
-    "compileSdk 37.0": app, "targetSdk 36": app, "versionCode 18": app, "versionName v0.22": app,
+    "compileSdk 37": app, "targetSdk 36": app, "versionCode 30": app, "versionName v0.26": app,
     "AGP 9.3.0": root_build, "Kotlin Compose 2.3.21": root_build,
 }
 for key in list(checks):

@@ -50,8 +50,31 @@ import java.security.cert.X509Certificate
 import java.security.interfaces.DSAPublicKey
 import java.security.interfaces.ECPublicKey
 import java.security.interfaces.RSAPublicKey
+import java.util.concurrent.CancellationException
 import java.util.zip.ZipException
 import java.util.zip.ZipFile
+
+data class InspectionProgress(
+    val stage: String,
+    val progress: Int,
+    val message: String,
+    val current: Int? = null,
+    val total: Int? = null,
+)
+
+class InspectionControl(
+    private val progressSink: (InspectionProgress) -> Unit = {},
+    private val cancelled: () -> Boolean = { false },
+) {
+    fun update(stage: String, progress: Int, message: String, current: Int? = null, total: Int? = null) {
+        ensureActive()
+        progressSink(InspectionProgress(stage, progress.coerceIn(0, 100), message, current, total))
+    }
+
+    fun ensureActive() {
+        if (cancelled() || Thread.currentThread().isInterrupted) throw CancellationException("Анализ отменён пользователем")
+    }
+}
 
 class LocalArtifactInspector(
     private val context: Context,
@@ -60,7 +83,12 @@ class LocalArtifactInspector(
     private val cacheDir = context.cacheDir
     private val resultCache = AnalysisResultCache(File(cacheDir, "normalized-analysis-cache"), ENGINE_VERSION)
 
-    fun inspect(uri: Uri, scope: AssessmentScope): StaticAnalysisReport {
+    fun inspect(
+        uri: Uri,
+        scope: AssessmentScope,
+        control: InspectionControl = InspectionControl(),
+    ): StaticAnalysisReport {
+        control.update("preparing", 4, "Проверка выбранного файла")
         val metadata = queryMetadata(uri)
         metadata.second?.let { size ->
             require(size <= MAX_ARTIFACT_BYTES) {
@@ -70,10 +98,12 @@ class LocalArtifactInspector(
 
         val temp = File.createTempFile("unirevlab-artifact-", ".apk", cacheDir)
         return try {
-            val digest = copyToBoundedTempAndHash(uri, temp)
+            control.update("preparing", 6, "Копирование и SHA-256 выбранного файла")
+            val digest = copyToBoundedTempAndHash(uri, temp, control)
             val displayName = metadata.first ?: "artifact"
             val sizeBytes = metadata.second ?: temp.length()
             resultCache.load(digest)?.let { cached ->
+                control.update("report", 88, "Результат найден в защищённом локальном кэше")
                 return rebindCachedReport(
                     cached, scope, displayName, sizeBytes, digest,
                     sourceKind = "FILE", sourcePackageName = null, sourceInstallerPackageName = null, splitApkCount = 0,
@@ -85,6 +115,7 @@ class LocalArtifactInspector(
                 displayName = displayName,
                 sizeBytes = sizeBytes,
                 sha256 = digest,
+                control = control,
             ).also(resultCache::store)
         } finally {
             temp.delete()
@@ -95,7 +126,12 @@ class LocalArtifactInspector(
      * Analyze an application already installed on this Android device without launching it.
      * Base and split APKs are all included in DEX/native/runtime/SBOM analysis.
      */
-    fun inspectInstalledApp(app: InstalledAppDescriptor, scope: AssessmentScope): StaticAnalysisReport {
+    fun inspectInstalledApp(
+        app: InstalledAppDescriptor,
+        scope: AssessmentScope,
+        control: InspectionControl = InspectionControl(),
+    ): StaticAnalysisReport {
+        control.update("preparing", 4, "Проверка APK-набора ${app.label}")
         val files = (listOf(app.baseApkPath) + app.splitApkPaths).map(::File)
         require(files.isNotEmpty() && files.first().isFile) { "Base APK установленного приложения недоступен" }
         require(files.all { it.isFile && it.canRead() }) { "Один или несколько APK установленного приложения недоступны для чтения" }
@@ -104,8 +140,9 @@ class LocalArtifactInspector(
             "Набор APK приложения превышает локальный лимит ${MAX_INSTALLED_APK_SET_BYTES / (1024 * 1024)} MiB"
         }
 
-        val aggregateHash = aggregateInstalledHash(app.packageName, files)
+        val aggregateHash = aggregateInstalledHash(app.packageName, files, control)
         resultCache.load(aggregateHash)?.let { cached ->
+            control.update("report", 88, "Результат найден в защищённом локальном кэше")
             return rebindCachedReport(
                 cached, scope, "${app.label} (${app.packageName})", totalSize, aggregateHash,
                 sourceKind = "INSTALLED_APP", sourcePackageName = app.packageName,
@@ -113,7 +150,12 @@ class LocalArtifactInspector(
             )
         }
         val session = AnalysisSession()
-        val archiveIndexes = files.map(ApkArchiveIndex::build)
+        control.update("archive", 10, "Индекс APK и split-пакетов")
+        val archiveIndexes = files.mapIndexed { index, file ->
+            control.ensureActive()
+            control.update("archive", 10 + ((index + 1) * 6 / files.size.coerceAtLeast(1)), "Архив ${index + 1} из ${files.size}", index + 1, files.size)
+            ApkArchiveIndex.build(file)
+        }
         val stats = files.mapIndexed { index, file -> archiveIndexes[index]?.let(::archiveStatsFromIndex) ?: inspectArchiveCentralDirectory(file) }
         val archive = aggregateArchiveStats(stats)
         val base = files.first()
@@ -124,7 +166,9 @@ class LocalArtifactInspector(
                     ?: KotlinAxmlManifestParser.parse(bytes)
             }
         } else null
+        control.update("manifest", 19, "Manifest, подпись и ресурсы")
         val resourceBySource = files.mapIndexedNotNull { index, file ->
+            control.ensureActive()
             val source = installedEntryPrefix(index, file)
             ResourceTableResolver.scanApk(file, source)?.let { Triple(source, file, it) }
         }
@@ -144,28 +188,35 @@ class LocalArtifactInspector(
             "Package name base APK не совпадает с выбранным установленным приложением"
         }
 
+        control.update("dex", 32, "Индексирование DEX")
         val dex = mergeDexSummaries(files.mapIndexedNotNull { index, file ->
+            control.ensureActive()
             val count = stats.getOrNull(index)?.dexFiles ?: 0
             count.takeIf { it > 0 }?.let {
-                inspectDexStrings(file, it, installedEntryPrefix(index, file), session, archiveIndexes.getOrNull(index))
+                inspectDexStrings(file, it, installedEntryPrefix(index, file), session, archiveIndexes.getOrNull(index), control)
             }
         })
         val manifestDexReachability = ManifestDexReachabilityAnalyzer.analyze(manifest, dex)
+        control.update("native", 55, "Анализ native ELF и JNI")
         val nativeRaw = mergeNativeSummaries(files.mapIndexedNotNull { index, file ->
+            control.ensureActive()
             val count = stats.getOrNull(index)?.nativeLibraries ?: 0
             count.takeIf { it > 0 }?.let {
-                inspectNativeLibraries(file, it, installedEntryPrefix(index, file), session, archiveIndexes.getOrNull(index))
+                inspectNativeLibraries(file, it, installedEntryPrefix(index, file), session, archiveIndexes.getOrNull(index), control)
             }
         })
         val native = nativeRaw?.let { JniBridgeCorrelator.correlate(dex, it) }
+        control.update("il2cpp", 70, "IL2CPP и runtime-метаданные")
         val il2cpp = chooseIl2Cpp(files.mapIndexedNotNull { index, file -> inspectIl2Cpp(file, native, archiveIndexes.getOrNull(index)) })
         val runtimeEvidence = RuntimeProfileScanner.prepareSharedEvidence(dex, native)
         val runtimes = mergeRuntimeSummaries(files.mapIndexedNotNull { index, file ->
             RuntimeProfileScanner.scanApk(file, dex, native, il2cpp, sharedEvidence = runtimeEvidence, archiveIndex = archiveIndexes.getOrNull(index))
         })
         val runtimeArtifacts = mergeRuntimeArtifacts(files.mapIndexedNotNull { index, file ->
+            control.ensureActive()
             RuntimeArtifactScanner.scanApk(file, native, archiveIndex = archiveIndexes.getOrNull(index))
         })
+        control.update("supply_chain", 81, "Компоненты и зависимости")
         val supplyChain = mergeSupplyChain(files.mapIndexed { index, file ->
             SupplyChainScanner.scan(file, dex, native, il2cpp, runtimeArtifacts, archiveIndex = archiveIndexes.getOrNull(index))
         })
@@ -191,6 +242,7 @@ class LocalArtifactInspector(
             if (native != null) addAll(NativeRuleEngine.evaluate(native))
             if (il2cpp != null) addAll(Il2CppRuleEngine.evaluate(il2cpp))
         }.sortedWith(compareBy({ findingSeverityOrder(it.severity) }, { it.id }))
+        control.update("report", 88, "Формирование результатов")
         val report = StaticAnalysisReport(
             engineVersion = ENGINE_VERSION,
             assessment = scope,
@@ -487,8 +539,10 @@ class LocalArtifactInspector(
         sourcePackageName: String? = null,
         sourceInstallerPackageName: String? = null,
         splitApkCount: Int = 0,
+        control: InspectionControl = InspectionControl(),
     ): StaticAnalysisReport {
         val session = AnalysisSession()
+        control.update("archive", 10, "Структура APK и подпись")
         val archiveIndex = ApkArchiveIndex.build(apk)
         val archive = archiveOverride ?: archiveIndex?.let(::archiveStatsFromIndex) ?: inspectArchiveCentralDirectory(apk)
         val artifact = ArtifactSummary(
@@ -507,6 +561,7 @@ class LocalArtifactInspector(
             splitApkCount = splitApkCount,
         )
         val baseArchive = archive
+        control.update("manifest", 20, "Manifest и таблица ресурсов")
         val axmlOverlay = if (baseArchive?.hasAndroidManifest == true) {
             val manifestBytes = readBoundedManifest(apk)
             manifestBytes?.let { bytes ->
@@ -522,14 +577,18 @@ class LocalArtifactInspector(
             NetworkSecurityConfigScanner.scan(apk, axmlOverlay.networkSecurityConfigReference, resolvedNetworkSecurityEntry)
         } else null
         val manifest = if (baseArchive?.hasAndroidManifest == true) inspectManifest(apk, axmlOverlay, networkSecurity) else null
-        val dex = baseArchive?.dexFiles?.takeIf { it > 0 }?.let { inspectDexStrings(apk, it, session = session, archiveIndex = archiveIndex) }
+        control.update("dex", 32, "Индексирование DEX")
+        val dex = baseArchive?.dexFiles?.takeIf { it > 0 }?.let { inspectDexStrings(apk, it, session = session, archiveIndex = archiveIndex, control = control) }
         val manifestDexReachability = ManifestDexReachabilityAnalyzer.analyze(manifest, dex)
-        val nativeRaw = baseArchive?.nativeLibraries?.takeIf { it > 0 }?.let { inspectNativeLibraries(apk, it, session = session, archiveIndex = archiveIndex) }
+        control.update("native", 55, "Анализ native ELF и JNI")
+        val nativeRaw = baseArchive?.nativeLibraries?.takeIf { it > 0 }?.let { inspectNativeLibraries(apk, it, session = session, archiveIndex = archiveIndex, control = control) }
         val native = nativeRaw?.let { JniBridgeCorrelator.correlate(dex, it) }
+        control.update("il2cpp", 70, "IL2CPP и runtime-метаданные")
         val il2cpp = inspectIl2Cpp(apk, native, archiveIndex)
         val runtimeEvidence = RuntimeProfileScanner.prepareSharedEvidence(dex, native)
         val runtimes = RuntimeProfileScanner.scanApk(apk, dex, native, il2cpp, sharedEvidence = runtimeEvidence, archiveIndex = archiveIndex)
         val runtimeArtifacts = RuntimeArtifactScanner.scanApk(apk, native, archiveIndex = archiveIndex)
+        control.update("supply_chain", 81, "Компоненты и зависимости")
         val supplyChain = SupplyChainScanner.scan(apk, dex, native, il2cpp, runtimeArtifacts, archiveIndex = archiveIndex)
         val findings = buildList {
             if (manifest != null) addAll(ManifestRuleEngine.evaluate(manifest))
@@ -537,6 +596,7 @@ class LocalArtifactInspector(
             if (native != null) addAll(NativeRuleEngine.evaluate(native))
             if (il2cpp != null) addAll(Il2CppRuleEngine.evaluate(il2cpp))
         }.sortedWith(compareBy({ findingSeverityOrder(it.severity) }, { it.id }))
+        control.update("report", 88, "Формирование результатов")
         return StaticAnalysisReport(
             engineVersion = ENGINE_VERSION,
             assessment = scope,
@@ -576,15 +636,17 @@ class LocalArtifactInspector(
         )
     }
 
-    private fun aggregateInstalledHash(packageName: String, files: List<File>): String {
+    private fun aggregateInstalledHash(packageName: String, files: List<File>, control: InspectionControl): String {
         val digest = MessageDigest.getInstance("SHA-256")
         digest.update(packageName.toByteArray(Charsets.UTF_8))
         files.forEachIndexed { index, file ->
+            control.ensureActive()
             digest.update(index.toString().toByteArray(Charsets.UTF_8))
             digest.update(file.name.toByteArray(Charsets.UTF_8))
             file.inputStream().buffered().use { input ->
                 val buffer = ByteArray(IO_BUFFER_BYTES)
                 while (true) {
+                    control.ensureActive()
                     val read = input.read(buffer)
                     if (read <= 0) break
                     digest.update(buffer, 0, read)
@@ -671,6 +733,7 @@ class LocalArtifactInspector(
         entryPrefix: String? = null,
         session: AnalysisSession = AnalysisSession(),
         archiveIndex: ApkArchiveIndex? = null,
+        control: InspectionControl = InspectionControl(),
     ): DexSummary {
         var filesScanned = 0
         var stringsDeclared = 0L
@@ -720,6 +783,8 @@ class LocalArtifactInspector(
                 run {
                     var cursor = 0
                     while (cursor < candidates.size) {
+                        control.ensureActive()
+                        control.update("dex", 32 + (cursor * 21 / candidates.size.coerceAtLeast(1)), "DEX ${cursor + 1} из ${candidates.size}", cursor + 1, candidates.size)
                         if (Thread.currentThread().isInterrupted) throw java.io.InterruptedIOException("DEX analysis cancelled")
                         if (totalDexBytes >= MAX_TOTAL_DEX_BYTES) {
                             truncated = true
@@ -867,6 +932,7 @@ class LocalArtifactInspector(
         entryPrefix: String? = null,
         session: AnalysisSession = AnalysisSession(),
         archiveIndex: ApkArchiveIndex? = null,
+        control: InspectionControl = InspectionControl(),
     ): NativeSummary {
         var filesScanned = 0
         var parseErrors = 0
@@ -915,6 +981,8 @@ class LocalArtifactInspector(
                 val selected = nativeEntries.take(MAX_NATIVE_LIBRARIES)
                 var cursor = 0
                 while (cursor < selected.size) {
+                    control.ensureActive()
+                    control.update("native", 55 + (cursor * 14 / selected.size.coerceAtLeast(1)), "Native ${cursor + 1} из ${selected.size}", cursor + 1, selected.size)
                     if (Thread.currentThread().isInterrupted) throw java.io.InterruptedIOException("Native analysis cancelled")
                     val prepared = ArrayList<PreparedNativeEntry>(NATIVE_PARALLELISM)
                     while (cursor < selected.size && prepared.size < NATIVE_PARALLELISM) {
@@ -1030,7 +1098,7 @@ class LocalArtifactInspector(
         org.unirevlab.security.model.Severity.INFORMATIONAL -> 4
     }
 
-    private fun copyToBoundedTempAndHash(uri: Uri, destination: File): String {
+    private fun copyToBoundedTempAndHash(uri: Uri, destination: File, control: InspectionControl): String {
         val digest = MessageDigest.getInstance("SHA-256")
         contentResolver.openInputStream(uri).use { input ->
             requireNotNull(input) { "Не удалось открыть выбранный файл" }
@@ -1039,6 +1107,7 @@ class LocalArtifactInspector(
                     val buffer = ByteArray(IO_BUFFER_BYTES)
                     var total = 0L
                     while (true) {
+                        control.ensureActive()
                         val read = input.read(buffer)
                         if (read <= 0) break
                         total += read
@@ -1299,7 +1368,7 @@ class LocalArtifactInspector(
     )
 
     companion object {
-        const val ENGINE_VERSION = "0.22.0-dev-performance-ux"
+        const val ENGINE_VERSION = "0.26.0-auto-audit"
         private const val MAX_DEX_FILES = 32
         private const val MAX_SINGLE_DEX_BYTES = 96L * 1024L * 1024L
         private const val MAX_TOTAL_DEX_BYTES = 384L * 1024L * 1024L
