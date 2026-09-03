@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.39.0-preview-readable-offsets
+
+### Added
+- `offsets-readable.html`: a mobile-friendly searchable and filterable report with demangled C++ names, library, ABI, Build ID, RVA, token, size and plain-language evidence categories;
+- a separate UI export action for the readable report while retaining the complete machine-readable JSON.
+
+### Fixed
+- merge `global-metadata.dat` and `libil2cpp.so` evidence across different base/split APKs before dump generation;
+- allow a managed dump whenever parsed metadata is available, even if the library-presence confidence flag is incomplete;
+- invalidate the previous analysis cache so affected APK sets are scanned again.
+
 ## 0.38.1-preview-auto-audit-memory-fix
 
 ### Fixed
