@@ -13,7 +13,7 @@ import java.io.RandomAccessFile
  */
 object ElfNativeScanner {
     data class Limits(
-        val maxElfBytes: Long = 128L * 1024L * 1024L,
+        val maxElfBytes: Long = 2L * 1024L * 1024L * 1024L,
         val maxSections: Int = 4096,
         val maxProgramHeaders: Int = 512,
         val maxSymbols: Int = 30_000,

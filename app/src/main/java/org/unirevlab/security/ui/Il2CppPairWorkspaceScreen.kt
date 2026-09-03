@@ -320,5 +320,5 @@ private fun copyUriBounded(context: Context, uri: Uri, target: File, maxBytes: L
     require(target.isFile && target.length() > 0L) { "Выбранный файл пуст" }
 }
 
-private const val MAX_METADATA_BYTES = 64L * 1024L * 1024L
-private const val MAX_LIBRARY_BYTES = 128L * 1024L * 1024L
+private const val MAX_METADATA_BYTES = 128L * 1024L * 1024L
+private const val MAX_LIBRARY_BYTES = 2L * 1024L * 1024L * 1024L

@@ -22,7 +22,7 @@ import java.util.zip.ZipFile
  */
 object Il2CppScanner {
     data class Limits(
-        val maxMetadataBytes: Long = 64L * 1024L * 1024L,
+        val maxMetadataBytes: Long = 128L * 1024L * 1024L,
         val maxPrintableStrings: Int = 12_000,
         val maxAssemblyCandidates: Int = 300,
         val maxManagedNameCandidates: Int = 1_000,
