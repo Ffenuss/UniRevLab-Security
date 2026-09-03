@@ -221,8 +221,9 @@ class AuditWorker(
 
     private fun persistTerminal(jobId: String, stage: AuditStage, message: String, error: String?) {
         runCatching {
+            val previousProgress = repository.loadState(jobId)?.progress ?: 0
             repository.writeState(
-                PersistedAuditState(jobId, stage, if (stage == AuditStage.COMPLETE) 100 else 0, message, System.currentTimeMillis(), error)
+                PersistedAuditState(jobId, stage, if (stage == AuditStage.COMPLETE) 100 else previousProgress, message, System.currentTimeMillis(), error)
             )
         }
     }

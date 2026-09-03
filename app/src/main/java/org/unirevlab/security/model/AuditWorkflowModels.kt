@@ -23,6 +23,7 @@ enum class AuditStage(
     ARTIFACTS("artifacts", "Пакет артефактов и RVA", 94),
     SIGNING("signing", "Подпись evidence-пакета", 98),
     COMPLETE("complete", "Готово", 100),
+    CANCELLING("cancelling", "Остановка анализа", 0),
     CANCELLED("cancelled", "Отменено", 0),
     FAILED("failed", "Ошибка", 0),
     ;

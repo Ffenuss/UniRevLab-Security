@@ -142,6 +142,17 @@ private fun UniRevLabApp() {
                 jobs.loadSummary(observedJobId)?.let { summary = it }
             }
             if (info == null || info.state.isFinished) {
+                if (info?.state == WorkInfo.State.CANCELLED && observedJobId != null && auditState?.stage?.isTerminal() != true) {
+                    val cancelled = (auditState ?: jobs.loadState(observedJobId))?.copy(
+                        stage = AuditStage.CANCELLED,
+                        message = "Анализ остановлен",
+                        updatedAtEpochMs = System.currentTimeMillis(),
+                    )
+                    if (cancelled != null) {
+                        jobs.writeState(cancelled)
+                        auditState = cancelled
+                    }
+                }
                 isRunning = false
                 authorityConfirmed = false
                 info?.outputData?.getString(org.unirevlab.security.work.AuditWorker.KEY_ERROR)?.let { error = it }
@@ -245,8 +256,18 @@ private fun UniRevLabApp() {
                 )
             },
             onCancel = {
-                workId?.let { AuditScheduler.cancel(appContext, it) }
-                isRunning = false
+                val currentJob = jobId
+                val currentState = auditState
+                if (currentJob != null && currentState != null && currentState.stage != AuditStage.CANCELLING) {
+                    val cancelling = currentState.copy(
+                        stage = AuditStage.CANCELLING,
+                        message = "Запрос на остановку отправлен. Завершаем текущую безопасную операцию…",
+                        updatedAtEpochMs = System.currentTimeMillis(),
+                    )
+                    jobs.writeState(cancelling)
+                    auditState = cancelling
+                    workId?.let { AuditScheduler.cancel(appContext, it) }
+                }
             },
             onEditProfile = { route = Route.PROFILE },
             onExport = { fileName ->

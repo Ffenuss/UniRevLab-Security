@@ -253,7 +253,12 @@ private fun ProgressCard(state: PersistedAuditState, running: Boolean, onCancel:
             StageRail(state.stage)
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             if (running) {
-                OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text("Остановить") }
+                val cancellationRequested = state.stage == AuditStage.CANCELLING
+                OutlinedButton(
+                    onClick = onCancel,
+                    enabled = !cancellationRequested,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(if (cancellationRequested) "Остановка запрошена…" else "Остановить") }
             }
         }
     }
