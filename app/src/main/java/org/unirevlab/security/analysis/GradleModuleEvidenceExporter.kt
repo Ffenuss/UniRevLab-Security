@@ -505,10 +505,10 @@ object GradleModuleEvidenceExporter {
         "minagpversion",
         "version",
     )
-    private val XML_SPLIT = Regex("""(?:^|\\s)split\\s*=\\s*[\"']([^\"']+)[\"']""")
-    private val XML_CONFIG_FOR_SPLIT = Regex("""(?:android:)?configForSplit\\s*=\\s*[\"']([^\"']+)[\"']""")
-    private val XML_FEATURE = Regex("""(?:android:)?isFeatureSplit\\s*=\\s*[\"']([^\"']+)[\"']""")
-    private val XML_USES_SPLIT = Regex("""<uses-split[^>]+(?:android:)?name\\s*=\\s*[\"']([^\"']+)[\"']""")
+    private val XML_SPLIT = Regex("""(?:^|\s)split\s*=\s*["']([^"']+)["']""")
+    private val XML_CONFIG_FOR_SPLIT = Regex("""(?:android:)?configForSplit\s*=\s*["']([^"']+)["']""")
+    private val XML_FEATURE = Regex("""(?:android:)?isFeatureSplit\s*=\s*["']([^"']+)["']""")
+    private val XML_USES_SPLIT = Regex("""<uses-split[^>]+(?:android:)?name\s*=\s*["']([^"']+)["']""")
 
     private const val MAX_NESTED_DEPTH = 2
     private const val MAX_ARCHIVES = 128
