@@ -1,4 +1,4 @@
-# v0.38.1 Auto Audit
+# v0.39 Auto Audit
 
 ## Outcome
 
@@ -10,6 +10,10 @@ one signed evidence package.
 v0.38.1 writes the full JSON and IL2CPP managed dump directly to disk instead of constructing a
 second artifact-sized String in the Android heap. It also invalidates pre-v0.38.1 analysis cache
 entries and reports `libil2cpp.so` ELF coverage separately from metadata correlation.
+
+v0.39 merges IL2CPP evidence across base and split APKs, so a `global-metadata.dat` stored in one
+split is paired with `libil2cpp.so` from another. It also adds a mobile-friendly searchable HTML
+offset report with readable C++ names, library/ABI/Build ID context and plain-language categories.
 
 ## Automatic stages
 
@@ -37,6 +41,7 @@ scanner checks.
 - `il2cpp-dump.cs` — reconstructed metadata dump when IL2CPP metadata is available;
 - `gradle-module-evidence.json` — base/split/dynamic-feature map plus bounded Gradle/AGP/AAR/Kotlin metadata;
 - `offset-evidence.json` — RVA/file-offset/token evidence with explicit address semantics;
+- `offsets-readable.html` — searchable human-readable view of verified mappings and raw native evidence;
 - `analysis-artifacts.zip` — automatically located bounded analysis inputs and hashes;
 - `verification-plan.json` — defensive test plan for an owner-supplied test/source build;
 - `evidence-manifest.json` and `evidence-signature.json` — independently verifiable integrity data.
