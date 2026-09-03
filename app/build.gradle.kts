@@ -15,8 +15,8 @@ android {
         applicationId = "org.unirevlab.security"
         minSdk = 26
         targetSdk = 36
-        versionCode = 46
-        versionName = "0.35.0-preview-il2cpp-native-evidence"
+        versionCode = 47
+        versionName = "0.36.0-preview-il2cpp-evidence-explorer"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

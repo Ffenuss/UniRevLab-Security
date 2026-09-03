@@ -58,7 +58,7 @@ enum class ProductTool(
     SIGNING("Signatures / Integrity", "APK signing schemes, certificates and self-check signals", "SIG"),
     NETWORK("Network Security", "Cleartext policy, Network Security Config and TLS pinning", "TLS"),
     NATIVE("Native / JNI", "ELF, JNI bridges, symbols and hardening", "JNI"),
-    RUNTIME("Runtime / Game Engines", "IL2CPP, Unity Mono, Flutter, Hermes and Unreal", "RUN"),
+    RUNTIME("Runtime / Game Engines", "IL2CPP evidence explorer, Unity Mono, Flutter, Hermes and Unreal", "RUN"),
     SUPPLY_CHAIN("SBOM / CVE", "Dependencies, native libraries and advisory matches", "SBOM"),
     RE_BROWSER("RE / Call Graph", "Cross-references, basic blocks and Ghidra correlation", "RE"),
     PATCH_LAB("Patch / Hook Lab", "Authorized trace, diff, rebuild and installability checks", "LAB"),
@@ -579,14 +579,8 @@ private fun RuntimeToolPanel(report: StaticAnalysisReport) {
             "Monetization attack surface",
             "${risk.posture} · candidates ${risk.candidates.size} · client-state ${risk.clientStateCandidates} · validation ${risk.validationCandidates}",
         )
-        risk.candidates.take(40).forEach { candidate ->
-            InfoCard(
-                "${candidate.category} · ${candidate.kind} · ${candidate.confidence}\n${candidate.managedIdentity}" +
-                    (candidate.nativeFunctionName?.let { "\nNative correlation: $it" } ?: "") +
-                    (candidate.metadataToken?.let { "\nmetadata token 0x${it.toString(16)}" } ?: ""),
-            )
-        }
         risk.recommendations.take(5).forEach { InfoCard("Hardening: $it") }
+        Il2CppEvidenceExplorerPanel(report)
     }
     report.runtimeArtifacts?.flutter?.let { MetricCard("Flutter", "detected=${it.detected} · confidence=${it.confidence}") }
     report.runtimeArtifacts?.hermes?.let { MetricCard("Hermes", "detected=${it.detected} · confidence=${it.confidence} · bytecode=${it.bytecodeFiles.size}") }
@@ -666,7 +660,7 @@ private fun productToolMetric(tool: ProductTool, report: StaticAnalysisReport): 
         ProductTool.SIGNING -> "Schemes ${manifest?.signingSchemes?.joinToString()?.ifBlank { "?" } ?: "?"} · certs ${manifest?.signingCertificates?.size ?: 0} →"
         ProductTool.NETWORK -> "Cleartext ${if (manifest?.usesCleartextTraffic == true) "YES" else "NO"} · pin-set ${manifest?.networkSecurity?.pinSetPresent ?: false} →"
         ProductTool.NATIVE -> "Libraries ${report.native?.librariesScanned ?: 0} · JNI ${report.native?.jniBridges?.size ?: 0} →"
-        ProductTool.RUNTIME -> "Profiles ${report.runtimes?.profiles?.size ?: 0} · IL2CPP ${report.il2cpp?.detected ?: false} →"
+        ProductTool.RUNTIME -> "IL2CPP ${report.il2cpp?.detected ?: false} · native links ${report.correlations?.il2cppMethods?.size ?: 0} · evidence explorer →"
         ProductTool.SUPPLY_CHAIN -> "Components ${report.supplyChain?.components?.size ?: 0} · advisories ${report.supplyChain?.vulnerabilities?.size ?: 0} →"
         ProductTool.RE_BROWSER -> "Call edges ${dex?.callXrefs?.size ?: 0} · blocks ${dex?.basicBlocks?.size ?: 0} →"
         ProductTool.PATCH_LAB -> "Trace · diff · rebuild · installability →"
