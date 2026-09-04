@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.40.0-preview-trustworthy-report
+
+- distinguish asset packs, dynamic features and configuration splits from their packaged distribution manifests;
+- merge split IL2CPP evidence from v0.39 and invalidate older cached reports;
+- classify native paths inside split containers correctly;
+- remove HTTPS, XML namespace, localhost and format-template noise from cleartext URL findings;
+- require Mono runtime or valid CLI assemblies before reporting Unity Mono;
+- export native symbols fairly across libraries instead of exhausting a global alphabetical cap;
+- make customer-report explicit about completed work, manual-review signals, analyzer limitations and advisory-feed status;
+- add evidence excerpts and a finding-linked verification plan;
+- document selective artifact-bundle coverage and preserve real split source labels.
+
 ## 0.39.0-preview-readable-offsets
 
 ### Added

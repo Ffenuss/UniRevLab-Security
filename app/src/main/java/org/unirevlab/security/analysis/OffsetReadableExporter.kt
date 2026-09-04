@@ -18,15 +18,7 @@ object OffsetReadableExporter {
         val registrationCandidates = report.il2cpp?.registrationCandidates.orEmpty()
             .sortedWith(compareBy({ it.libraryEntry }, { it.virtualAddress }, { it.kind }))
             .take(MAX_REGISTRATION_ROWS)
-        val rawSymbols = libraries.asSequence()
-            .flatMap { library ->
-                (library.exportedSymbols + library.importedSymbols).asSequence().map { library to it }
-            }
-            .filter { (_, symbol) -> symbol.defined && symbol.virtualAddress != null }
-            .distinctBy { (library, symbol) -> Triple(library.entryName, symbol.name, symbol.virtualAddress) }
-            .sortedWith(compareBy({ it.first.entryName }, { it.second.virtualAddress }, { it.second.name }))
-            .take(MAX_NATIVE_SYMBOL_ROWS)
-            .toList()
+        val rawSymbols = fairNativeSymbols(libraries)
 
         val allIl2cppMappings = report.correlations?.il2cppMethods.orEmpty().size
         val allJniMappings = report.correlations?.jniNative.orEmpty().size
@@ -186,6 +178,38 @@ object OffsetReadableExporter {
         return if (symbol.symbolType.equals("FUNC", ignoreCase = true)) "$readable(…)" else readable
     }
 
+    private fun fairNativeSymbols(
+        libraries: List<NativeLibrarySummary>,
+    ): List<Pair<NativeLibrarySummary, NativeSymbolReference>> {
+        if (libraries.isEmpty()) return emptyList()
+        val catalogs = libraries.map { library ->
+            (library.exportedSymbols + library.importedSymbols)
+                .asSequence()
+                .filter { it.defined && it.virtualAddress != null }
+                .distinctBy { it.name to it.virtualAddress }
+                .sortedWith(compareBy({ it.virtualAddress }, { it.name }))
+                .toList()
+        }
+        val guaranteed = minOf(MIN_NATIVE_SYMBOL_ROWS_PER_LIBRARY, MAX_NATIVE_SYMBOL_ROWS / libraries.size)
+        val selected = catalogs.map { it.take(guaranteed).toMutableList() }
+        var remaining = (MAX_NATIVE_SYMBOL_ROWS - selected.sumOf { it.size }).coerceAtLeast(0)
+        while (remaining > 0) {
+            var added = false
+            for (index in libraries.indices) {
+                val next = selected[index].size
+                if (next >= catalogs[index].size) continue
+                selected[index] += catalogs[index][next]
+                remaining--
+                added = true
+                if (remaining == 0) break
+            }
+            if (!added) break
+        }
+        return libraries.indices.flatMap { index ->
+            selected[index].map { symbol -> libraries[index] to symbol }
+        }
+    }
+
     private fun describeSymbol(symbol: NativeSymbolReference): String {
         val name = symbol.name.lowercase()
         return when {
@@ -221,6 +245,7 @@ object OffsetReadableExporter {
     private const val MAX_JNI_MAPPING_ROWS = 2_000
     private const val MAX_REGISTRATION_ROWS = 1_000
     private const val MAX_NATIVE_SYMBOL_ROWS = 5_000
+    private const val MIN_NATIVE_SYMBOL_ROWS_PER_LIBRARY = 32
     private const val MAX_MEANING_CHARS = 320
 
     private val STYLE = """

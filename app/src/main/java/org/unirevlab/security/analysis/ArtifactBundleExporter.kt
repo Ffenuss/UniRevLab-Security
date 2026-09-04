@@ -44,6 +44,9 @@ object ArtifactBundleExporter {
         var included = 0
         var omitted = 0
         var totalBytes = 0L
+        var sourceFileEntriesSeen = 0
+        var selectedCandidateEntries = 0
+        var excludedBySelection = 0
 
         destination.outputStream().buffered().use { rawOutput ->
             ZipOutputStream(rawOutput).use { output ->
@@ -51,15 +54,20 @@ object ArtifactBundleExporter {
                     ensureActive(cancelled)
                     inputSource.open().use { rawInput ->
                         ZipInputStream(BufferedInputStream(rawInput)).use { input ->
-                            var entryIndex = 0
                             while (true) {
                                 ensureActive(cancelled)
                                 val entry = input.nextEntry ?: break
-                                entryIndex++
-                                if (entry.isDirectory || !isRelevant(entry.name)) {
+                                if (entry.isDirectory) {
                                     input.closeEntry()
                                     continue
                                 }
+                                sourceFileEntriesSeen++
+                                if (!isRelevant(entry.name)) {
+                                    excludedBySelection++
+                                    input.closeEntry()
+                                    continue
+                                }
+                                selectedCandidateEntries++
                                 val safePath = safeEntryPath(entry.name)
                                 if (safePath == null || included >= MAX_INCLUDED_ENTRIES) {
                                     omitted++
@@ -113,12 +121,27 @@ object ArtifactBundleExporter {
                 }
 
                 val inventory = JSONObject()
-                    .put("schemaVersion", "1.0")
+                    .put("schemaVersion", "1.1")
                     .put("sourceKind", source.kind.name)
                     .put("sourceDisplayName", source.displayName)
+                    .put("sourceFileEntriesSeen", sourceFileEntriesSeen)
+                    .put("selectedCandidateEntries", selectedCandidateEntries)
+                    .put("excludedBySelection", excludedBySelection)
                     .put("includedEntries", included)
                     .put("omittedEntries", omitted)
                     .put("includedBytes", totalBytes)
+                    .put(
+                        "countSemantics",
+                        "omittedEntries counts only selected evidence candidates rejected or copied partially; excludedBySelection counts ordinary APK entries outside this evidence bundle's allowlist.",
+                    )
+                    .put(
+                        "sources",
+                        JSONArray(inputs.mapIndexed { index, input ->
+                            JSONObject()
+                                .put("outputPrefix", "source-${(index + 1).toString().padStart(2, '0')}/")
+                                .put("sourceLabel", input.label)
+                        }),
+                    )
                     .put("safety", "Passive analysis artifacts only; no target code was executed or modified.")
                     .put("entries", JSONArray(records.map(Record::toJson)))
                     .toString(2)
@@ -139,9 +162,9 @@ object ArtifactBundleExporter {
             })
         }
         AuditSourceKind.INSTALLED_APP -> {
-            (listOf(requireNotNull(source.baseApkPath)) + source.splitApkPaths).mapIndexed { index, path ->
+            (listOf(requireNotNull(source.baseApkPath)) + source.splitApkPaths).map { path ->
                 val file = File(path)
-                InputSource(if (index == 0) "base.apk" else "split-${index}.apk") {
+                InputSource(file.name) {
                     require(file.isFile && file.canRead()) { "APK установленного приложения недоступен: ${file.name}" }
                     FileInputStream(file)
                 }

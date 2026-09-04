@@ -382,10 +382,13 @@ object RuntimeArtifactScanner {
             assemblies += parseManagedAssembly(entry.name, bytes, limits.maxAssemblyNames)
         }
         val validCli = assemblies.count { it.cliMetadataPresent }
-        val signals = listOf(monoLibs.isNotEmpty(), unityLibs.isNotEmpty(), validCli > 0).count { it }
+        // libunity.so is present in both Mono and IL2CPP builds. Without a Mono runtime library
+        // or a valid CLI assembly it is not evidence of Unity Mono.
+        if (monoLibs.isEmpty() && validCli == 0) return null
+        val strongSignals = listOf(monoLibs.isNotEmpty(), validCli > 0).count { it }
         return UnityMonoRuntimeSummary(
-            detected = signals > 0,
-            confidence = if (signals >= 2) "HIGH" else "MEDIUM",
+            detected = true,
+            confidence = if (strongSignals >= 2) "HIGH" else "MEDIUM",
             monoLibraries = monoLibs,
             unityLibraries = unityLibs,
             assemblies = assemblies,

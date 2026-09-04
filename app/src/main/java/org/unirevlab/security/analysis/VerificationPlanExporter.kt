@@ -11,6 +11,7 @@ import java.util.Locale
  */
 object VerificationPlanExporter {
     fun export(report: StaticAnalysisReport): String {
+        val findingIds = report.findings.map { it.id }.toSet()
         val identifiers = buildList {
             report.dex?.classes.orEmpty().forEach { add(it.descriptor) }
             report.dex?.methods.orEmpty().forEach { add("${it.declaringClass} ${it.name}") }
@@ -18,6 +19,45 @@ object VerificationPlanExporter {
         }.asSequence().map { it.lowercase(Locale.ROOT) }.take(MAX_IDENTIFIERS).toList()
 
         val tests = buildList {
+            if ("ANDROID-EXPORTED-PROVIDER-UNPROTECTED" in findingIds ||
+                "ANDROID-EXPORTED-UNPROTECTED-REVIEW" in findingIds
+            ) add(
+                TestCase(
+                    id = "EXPORTED-COMPONENT-AUTHORIZATION",
+                    title = "Экспортированные Android-компоненты",
+                    reason = "Статический отчёт обнаружил внешне доступный component/provider без сильной manifest-level границы.",
+                    secureExpected = "Внешний caller не получает чувствительные данные и не запускает привилегированное действие без авторизации.",
+                    evidence = "Список URI/intent entry points, разрешения caller, журналы отказов и результаты проверки каждого доступного метода.",
+                    remediation = "Отключить export либо добавить permission и внутреннюю проверку полномочий.",
+                    sourceFindingIds = findingIds.filter { it.startsWith("ANDROID-EXPORTED-") }.sorted(),
+                )
+            )
+            if ("DEX-WEBVIEW-KNOWN-RISKY-ARGUMENT" in findingIds ||
+                "DEX-WEBVIEW-SENSITIVE-API" in findingIds
+            ) add(
+                TestCase(
+                    id = "WEBVIEW-RELEASE-HARDENING",
+                    title = "WebView release-конфигурация",
+                    reason = "Отчёт обнаружил чувствительную настройку или API WebView.",
+                    secureExpected = "Debugging и permissive file-origin возможности выключены в release, navigation и JavaScript bridge ограничены доверенными origins.",
+                    evidence = "Точный вариант сборки, call site, аргументы настройки, список разрешённых origins и отрицательные проверки navigation.",
+                    remediation = "Разделить debug/release настройки и применить allowlist для navigation и bridge.",
+                    sourceFindingIds = findingIds.filter { it.startsWith("DEX-WEBVIEW-") }.sorted(),
+                )
+            )
+            if ("ANDROID-APP-LINK-PLACEHOLDER-HOST" in findingIds ||
+                "ANDROID-UNVERIFIED-APP-LINKS" in findingIds
+            ) add(
+                TestCase(
+                    id = "APP-LINK-VERIFICATION",
+                    title = "Проверка App Links",
+                    reason = "В manifest найден непроверяемый либо шаблонный web-host.",
+                    secureExpected = "Release APK содержит настоящий host, а Android подтверждает Digital Asset Links для каждого чувствительного маршрута.",
+                    evidence = "Итоговый manifest, результат проверки App Links на устройстве и опубликованный assetlinks.json.",
+                    remediation = "Исправить manifest placeholders, включить autoVerify и проверять release APK в CI.",
+                    sourceFindingIds = findingIds.filter { it == "ANDROID-APP-LINK-PLACEHOLDER-HOST" || it == "ANDROID-UNVERIFIED-APP-LINKS" }.sorted(),
+                )
+            )
             if (countMatches(identifiers, ENTITLEMENT_TERMS) > 0) add(
                 TestCase(
                     id = "ENTITLEMENT-SERVER-AUTHORITY",
@@ -93,10 +133,11 @@ object VerificationPlanExporter {
         }
 
         return JSONObject()
-            .put("schemaVersion", "1.0")
+            .put("schemaVersion", "1.1")
             .put("assessmentId", report.assessment.assessmentId)
             .put("artifactSha256", report.artifact.sha256)
             .put("executionStatus", "NOT_EXECUTED")
+            .put("interpretation", "This file is a generated plan. Every test remains NOT_EXECUTED until evidence from an actual run is attached.")
             .put("scope", "Defensive verification for an owner-supplied or explicitly authorized test build.")
             .put("safety", "No patches, hook implementations, bypass recipes, or injected payloads are included.")
             .put("tests", JSONArray(tests.map(TestCase::toJson)))
@@ -113,12 +154,14 @@ object VerificationPlanExporter {
         val secureExpected: String,
         val evidence: String,
         val remediation: String,
+        val sourceFindingIds: List<String> = emptyList(),
     ) {
         fun toJson(): JSONObject = JSONObject()
             .put("id", id)
             .put("title", title)
             .put("reason", reason)
             .put("status", "NOT_EXECUTED")
+            .put("sourceFindingIds", JSONArray(sourceFindingIds))
             .put("secureExpected", secureExpected)
             .put("evidenceToCollect", evidence)
             .put("remediation", remediation)

@@ -34,6 +34,26 @@ class NativeRuleEngineTest {
         assertTrue(findings.any { it.id == "NATIVE-DYNAMIC-LOADING-API-REVIEW" && it.requiresManualReview })
     }
 
+    @Test
+    fun ignoresHttpsSchemasAndFormatTemplatesInCleartextFinding() {
+        val base = ElfNativeScanner.scan("lib/arm64-v8a/libnetwork.so", fixture("libjni_hardened.so"))
+        val modeled = base.copy(
+            httpUrls = listOf(
+                "https://api.example.com/v1",
+                "http://schemas.android.com/apk/res/android",
+                "http://%s%s",
+                "http://api.example.com/v1",
+            ),
+        )
+
+        val finding = NativeRuleEngine.evaluate(
+            NativeSummary(1, 1, listOf(modeled), parseErrors = 0, truncated = false),
+        ).single { it.id == "NATIVE-HARDCODED-HTTP-URL" }
+
+        assertTrue(finding.evidence.size == 1)
+        assertTrue(finding.evidence.single().value == "http://api.example.com/v1")
+    }
+
     private fun fixture(name: String): File {
         javaClass.classLoader?.getResource("fixtures/$name")?.let { return File(it.toURI()) }
         val candidates = listOf(

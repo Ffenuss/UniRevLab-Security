@@ -18,6 +18,7 @@ import java.util.zip.ZipInputStream
 data class GradleModuleEvidenceResult(
     val modulesDetected: Int,
     val dynamicFeaturesDetected: Int,
+    val assetPacksDetected: Int,
     val configurationSplitsDetected: Int,
     val buildFilesDetected: Int,
     val metadataMarkersDetected: Int,
@@ -98,6 +99,7 @@ object GradleModuleEvidenceExporter {
         val result = GradleModuleEvidenceResult(
             modulesDetected = accumulator.modules.size,
             dynamicFeaturesDetected = accumulator.modules.count { it.kind == "DYNAMIC_FEATURE" },
+            assetPacksDetected = accumulator.modules.count { it.kind == "ASSET_PACK" },
             configurationSplitsDetected = accumulator.modules.count { it.kind == "CONFIG_SPLIT" },
             buildFilesDetected = accumulator.markers.count { it.kind == "BUILD_FILE" },
             metadataMarkersDetected = accumulator.markers.size,
@@ -115,6 +117,7 @@ object GradleModuleEvidenceExporter {
             .put("summary", JSONObject()
                 .put("modulesDetected", result.modulesDetected)
                 .put("dynamicFeaturesDetected", result.dynamicFeaturesDetected)
+                .put("assetPacksDetected", result.assetPacksDetected)
                 .put("configurationSplitsDetected", result.configurationSplitsDetected)
                 .put("buildFilesDetected", result.buildFilesDetected)
                 .put("metadataMarkersDetected", result.metadataMarkersDetected)
@@ -221,7 +224,9 @@ object GradleModuleEvidenceExporter {
             val usesSplits = parsed.filter { it.name == "uses-split" }
                 .mapNotNull { it.attrAnyNamespace("name")?.takeIf(String::isNotBlank) }
                 .distinct().sorted()
-            val hasDistributionModule = parsed.any { it.name == "module" && it.namespace.orEmpty().contains("distribution") }
+            val distributionModule = parsed.firstOrNull { it.name == "module" && it.namespace.orEmpty().contains("distribution") }
+            val distributionType = distributionModule?.attrAnyNamespace("type")?.takeIf(String::isNotBlank)
+            val isAssetPack = distributionType.equals("asset-pack", ignoreCase = true)
             val delivery = when {
                 parsed.any { it.name == "on-demand" } -> "ON_DEMAND"
                 parsed.any { it.name == "fast-follow" } -> "FAST_FOLLOW"
@@ -231,12 +236,13 @@ object GradleModuleEvidenceExporter {
             return ModuleEvidence(
                 source = sourceLabel,
                 moduleName = split ?: moduleNameFromSource(sourceLabel),
-                kind = classifyModule(split, configForSplit, isFeature || hasDistributionModule, sourceLabel),
+                kind = classifyModule(split, configForSplit, isFeature, isAssetPack, sourceLabel),
                 confidence = "CONFIRMED",
                 splitName = split,
                 configForSplit = configForSplit,
                 usesSplits = usesSplits,
                 delivery = delivery,
+                distributionType = distributionType,
                 evidence = "AndroidManifest.xml",
             )
         }
@@ -246,11 +252,12 @@ object GradleModuleEvidenceExporter {
             val split = XML_SPLIT.find(text)?.groupValues?.get(1)?.takeIf(String::isNotBlank)
             val configForSplit = XML_CONFIG_FOR_SPLIT.find(text)?.groupValues?.get(1)?.takeIf(String::isNotBlank)
             val isFeature = XML_FEATURE.find(text)?.groupValues?.get(1).equals("true", ignoreCase = true)
-            val hasDistributionModule = text.contains("<dist:module")
+            val distributionType = XML_DISTRIBUTION_TYPE.find(text)?.groupValues?.get(1)?.takeIf(String::isNotBlank)
+            val isAssetPack = distributionType.equals("asset-pack", ignoreCase = true)
             return ModuleEvidence(
                 source = sourceLabel,
                 moduleName = split ?: moduleNameFromSource(sourceLabel),
-                kind = classifyModule(split, configForSplit, isFeature || hasDistributionModule, sourceLabel),
+                kind = classifyModule(split, configForSplit, isFeature, isAssetPack, sourceLabel),
                 confidence = "CONFIRMED",
                 splitName = split,
                 configForSplit = configForSplit,
@@ -261,6 +268,7 @@ object GradleModuleEvidenceExporter {
                     text.contains("<dist:install-time") -> "INSTALL_TIME"
                     else -> null
                 },
+                distributionType = distributionType,
                 evidence = "AndroidManifest.xml",
             )
         }
@@ -274,20 +282,28 @@ object GradleModuleEvidenceExporter {
         return ModuleEvidence(
             source = sourceLabel,
             moduleName = moduleName,
-            kind = classifyModule(moduleName, null, false, sourceLabel),
+            kind = classifyModule(moduleName, null, false, false, sourceLabel),
             confidence = "INFERRED",
             splitName = moduleName.takeUnless { it == "base" || it == "selected-file" },
             configForSplit = null,
             usesSplits = emptyList(),
             delivery = null,
+            distributionType = null,
             evidence = "archive filename; manifest could not be decoded",
         )
     }
 
-    private fun classifyModule(split: String?, configForSplit: String?, isFeature: Boolean, sourceLabel: String): String {
+    private fun classifyModule(
+        split: String?,
+        configForSplit: String?,
+        isFeature: Boolean,
+        isAssetPack: Boolean,
+        sourceLabel: String,
+    ): String {
         val name = (split ?: sourceLabel).lowercase(Locale.ROOT)
         return when {
             !configForSplit.isNullOrBlank() || name.contains("split_config") || name.contains("config.") || name.contains("config-") -> "CONFIG_SPLIT"
+            isAssetPack -> "ASSET_PACK"
             isFeature -> "DYNAMIC_FEATURE"
             split.isNullOrBlank() && (name.endsWith("base.apk") || name.contains("base-master") || sourceLabel == "selected-file") -> "BASE"
             !split.isNullOrBlank() -> "SPLIT"
@@ -308,9 +324,19 @@ object GradleModuleEvidenceExporter {
             normalized.contains("splits") -> "SPLIT_METADATA"
             else -> "BUILD_METADATA"
         }
-        val properties = if (bytes.isNotEmpty() && (normalized.endsWith(".properties") || normalized.endsWith(".version"))) {
+        val parsedProperties = if (bytes.isNotEmpty() && (normalized.endsWith(".properties") || normalized.endsWith(".version"))) {
             parseSafeProperties(bytes)
         } else emptyMap()
+        val plainVersion = if (parsedProperties.isEmpty() && normalized.endsWith(".version")) {
+            parsePlainVersion(bytes)
+        } else null
+        val properties = if (plainVersion != null) mapOf("version" to plainVersion) else parsedProperties
+        val parseStatus = when {
+            bytes.isEmpty() -> "NOT_READ"
+            properties.isNotEmpty() -> "PARSED"
+            normalized.endsWith(".properties") || normalized.endsWith(".version") -> "NO_SAFE_VERSION_VALUE"
+            else -> "NOT_APPLICABLE"
+        }
         return MarkerEvidence(
             source = source,
             path = path,
@@ -318,6 +344,7 @@ object GradleModuleEvidenceExporter {
             sizeRead = bytes.size,
             sha256 = bytes.takeIf(ByteArray::isNotEmpty)?.let(::sha256),
             properties = properties,
+            parseStatus = parseStatus,
         )
     }
 
@@ -330,6 +357,13 @@ object GradleModuleEvidenceExporter {
             if (key.lowercase(Locale.ROOT) !in SAFE_PROPERTY_KEYS) return@forEach
             put(key, line.substring(separator + 1).trim().take(MAX_PROPERTY_LENGTH))
         }
+    }
+
+    private fun parsePlainVersion(bytes: ByteArray): String? {
+        val lines = bytes.toString(Charsets.UTF_8).lineSequence().map(String::trim).filter(String::isNotBlank).toList()
+        if (lines.size != 1) return null
+        val value = lines.single()
+        return value.takeIf { VERSION_VALUE.matches(it) && it.any(Char::isDigit) }
     }
 
     private fun isBuildOrMetadataMarker(path: String): Boolean =
@@ -457,6 +491,7 @@ object GradleModuleEvidenceExporter {
         val configForSplit: String?,
         val usesSplits: List<String>,
         val delivery: String?,
+        val distributionType: String?,
         val evidence: String,
     ) {
         fun toJson(): JSONObject = JSONObject()
@@ -468,6 +503,7 @@ object GradleModuleEvidenceExporter {
             .put("configForSplit", configForSplit ?: JSONObject.NULL)
             .put("usesSplits", JSONArray(usesSplits))
             .put("delivery", delivery ?: JSONObject.NULL)
+            .put("distributionType", distributionType ?: JSONObject.NULL)
             .put("evidence", evidence)
     }
 
@@ -478,6 +514,7 @@ object GradleModuleEvidenceExporter {
         val sizeRead: Int,
         val sha256: String?,
         val properties: Map<String, String>,
+        val parseStatus: String,
     ) {
         fun toJson(): JSONObject = JSONObject()
             .put("source", source)
@@ -485,6 +522,7 @@ object GradleModuleEvidenceExporter {
             .put("kind", kind)
             .put("sizeRead", sizeRead)
             .put("sha256", sha256 ?: JSONObject.NULL)
+            .put("parseStatus", parseStatus)
             .put("properties", JSONObject(properties))
     }
 
@@ -509,7 +547,9 @@ object GradleModuleEvidenceExporter {
     private val XML_SPLIT = Regex("""(?:^|\s)split\s*=\s*["']([^"']+)["']""")
     private val XML_CONFIG_FOR_SPLIT = Regex("""(?:android:)?configForSplit\s*=\s*["']([^"']+)["']""")
     private val XML_FEATURE = Regex("""(?:android:)?isFeatureSplit\s*=\s*["']([^"']+)["']""")
+    private val XML_DISTRIBUTION_TYPE = Regex("""(?:dist:)?type\s*=\s*["']([^"']+)["']""")
     private val XML_USES_SPLIT = Regex("""<uses-split[^>]+(?:android:)?name\s*=\s*["']([^"']+)["']""")
+    private val VERSION_VALUE = Regex("[0-9A-Za-z][0-9A-Za-z._+\\-]{0,127}")
 
     private const val MAX_NESTED_DEPTH = 2
     private const val MAX_ARCHIVES = 128
