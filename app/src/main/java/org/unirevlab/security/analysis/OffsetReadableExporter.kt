@@ -141,9 +141,10 @@ object OffsetReadableExporter {
             ModificationSurfaceClassifier.ProfileConfidence.MEDIUM -> "средняя"
             ModificationSurfaceClassifier.ProfileConfidence.LOW -> "низкая"
         }
+        val reasonsHtml = result.profileReasons.joinToString("") { reason -> "<li>${html(reason)}</li>" }
         out.line("<section class=\"explorer priority-block\"><h2>Приоритетные поверхности модификации</h2>")
         out.line("<p><strong>${html(profile)}</strong> · уверенность: ${html(confidence)}.</p>")
-        out.line("<ul>${result.profileReasons.joinToString(\"\") { \"<li>${html(it)}</li>\" }}</ul>")
+        out.line("<ul>$reasonsHtml</ul>")
         out.line("<p class=\"notice warn\">Это автоматическая сортировка для защитного аудита. RVA подтверждён как адрес в библиотеке, но категория по имени не доказывает, что изменение создаст рабочий мод, unlock или bypass.</p>")
 
         if (result.resolvedOffsets.isEmpty()) {
@@ -158,11 +159,16 @@ object OffsetReadableExporter {
                     candidate.abi?.let { append("<small>ABI: ").append(html(it)).append("</small>") }
                     candidate.buildId?.let { append("<small>Build ID: ").append(html(it.take(24))).append("</small>") }
                 }.ifBlank { "—" }
+                val technicalHtml = candidate.technicalName
+                    ?.takeIf { it != candidate.displayName }
+                    ?.let { "<small><code>${html(it)}</code></small>" }
+                    .orEmpty()
+                val rvaText = candidate.rva?.let(::hex) ?: "—"
                 out.line("<tr><td><span class=\"status priority-${candidate.priority.name.lowercase()}\">${candidate.priority}</span></td>" +
                     "<td>${html(domainLabel(candidate.domain))}</td><td>${html(categoryLabel(candidate.category))}</td>" +
                     "<td>${html(sourceLabel(candidate.source))}<small>confidence: ${html(candidate.confidence)}</small></td>" +
-                    "<td><strong>${html(candidate.displayName)}</strong>${candidate.technicalName?.takeIf { it != candidate.displayName }?.let { \"<small><code>${html(it)}</code></small>\" }.orEmpty()}</td>" +
-                    "<td>$identity</td><td><code>${candidate.rva?.let(::hex) ?: \"—\"}</code></td><td>${html(compact(candidate.reason))}</td></tr>")
+                    "<td><strong>${html(candidate.displayName)}</strong>$technicalHtml</td>" +
+                    "<td>$identity</td><td><code>$rvaText</code></td><td>${html(compact(candidate.reason))}</td></tr>")
             }
             out.line("</tbody></table></div>")
         }
@@ -172,9 +178,10 @@ object OffsetReadableExporter {
             out.line("<p class=\"muted\">Это ориентиры из metadata. Token не является native-оффсетом.</p>")
             out.line("<div class=\"table-wrap compact-table\"><table><thead><tr><th>Приоритет</th><th>Область</th><th>Категория</th><th>Managed identity</th><th>Metadata token</th><th>Статус</th></tr></thead><tbody>")
             result.unresolvedManagedCandidates.forEach { candidate ->
+                val tokenText = candidate.metadataToken?.let(::hex) ?: "—"
                 out.line("<tr><td><span class=\"status priority-${candidate.priority.name.lowercase()}\">${candidate.priority}</span></td>" +
                     "<td>${html(domainLabel(candidate.domain))}</td><td>${html(categoryLabel(candidate.category))}</td>" +
-                    "<td><strong>${html(candidate.displayName)}</strong></td><td><code>${candidate.metadataToken?.let(::hex) ?: \"—\"}</code></td>" +
+                    "<td><strong>${html(candidate.displayName)}</strong></td><td><code>$tokenText</code></td>" +
                     "<td>RVA не подтверждён</td></tr>")
             }
             out.line("</tbody></table></div>")
