@@ -37,6 +37,7 @@ class OffsetReadableExporterTest {
                 suspiciousArchivePaths = 0,
                 truncatedArchiveScan = false,
             ),
+            manifest = null,
             native = NativeSummary(
                 librariesDiscovered = 1,
                 librariesScanned = 1,
