@@ -133,7 +133,7 @@ object AnalysisManager {
     private fun start(
         targetLabel: String,
         assessmentScope: AssessmentScope,
-        block: (onProgress: (AnalysisProgress) -> Unit) -> StaticAnalysisReport,
+        block: (control: InspectionControl) -> StaticAnalysisReport,
     ) {
         val runId = nextRunId.incrementAndGet()
         val startedAt = System.currentTimeMillis()
@@ -153,7 +153,13 @@ object AnalysisManager {
         val job = managerScope.launch(start = CoroutineStart.LAZY) {
             try {
                 val report = runInterruptible(Dispatchers.IO) {
-                    block { progress -> publishProgress(runId, targetLabel, progress) }
+                    val control = InspectionControl(
+                        progressSink = { progress ->
+                            publishProgress(runId, targetLabel, progress.toAnalysisProgress(startedAt))
+                        },
+                        cancelled = { Thread.currentThread().isInterrupted },
+                    )
+                    block(control)
                 }
 
                 synchronized(lock) {
@@ -233,6 +239,33 @@ object AnalysisManager {
         }
     }
 
+    private fun InspectionProgress.toAnalysisProgress(startedAtEpochMs: Long): AnalysisProgress {
+        val analysisStage = when (stage.lowercase()) {
+            "archive" -> AnalysisStage.ARCHIVE
+            "manifest" -> AnalysisStage.MANIFEST
+            "dex" -> AnalysisStage.DEX
+            "reachability" -> AnalysisStage.REACHABILITY
+            "native" -> AnalysisStage.NATIVE
+            "il2cpp" -> AnalysisStage.IL2CPP
+            "runtime" -> AnalysisStage.RUNTIME
+            "supply_chain" -> AnalysisStage.SUPPLY_CHAIN
+            "report", "findings" -> AnalysisStage.FINDINGS
+            "saving" -> AnalysisStage.SAVING
+            "complete" -> AnalysisStage.COMPLETE
+            "hashing" -> AnalysisStage.HASHING
+            "cache" -> AnalysisStage.CACHE
+            else -> AnalysisStage.PREPARING
+        }
+        return AnalysisProgress(
+            stage = analysisStage,
+            percent = progress,
+            detail = message,
+            completedUnits = current,
+            totalUnits = total,
+            startedAtEpochMs = startedAtEpochMs,
+        )
+    }
+
     private fun publishProgress(runId: Long, targetLabel: String, progress: AnalysisProgress) {
         synchronized(lock) {
             when (val current = mutableState.value) {
@@ -288,3 +321,4 @@ object AnalysisManager {
         managerScope.cancel()
     }
 }
+

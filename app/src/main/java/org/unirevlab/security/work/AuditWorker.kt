@@ -20,7 +20,7 @@ import org.unirevlab.security.analysis.ArtifactBundleExporter
 import org.unirevlab.security.analysis.CustomerReportExporter
 import org.unirevlab.security.analysis.EvidencePackageSigner
 import org.unirevlab.security.analysis.GradleModuleEvidenceExporter
-import org.unirevlab.security.analysis.AnalysisStage
+import org.unirevlab.security.analysis.InspectionControl
 import org.unirevlab.security.analysis.Il2CppManagedDumpExporter
 import org.unirevlab.security.analysis.LocalArtifactInspector
 import org.unirevlab.security.analysis.OffsetEvidenceExporter
@@ -59,22 +59,25 @@ class AuditWorker(
             val spec = repository.loadSpec(jobId)
             require(spec.scope.confirmsAuthority) { "В scope отсутствует подтверждение полномочий" }
             val inspector = LocalArtifactInspector(applicationContext)
-            val onInspectionProgress: (org.unirevlab.security.analysis.AnalysisProgress) -> Unit = { event ->
-                val scaledProgress = 4 + (event.percent.coerceIn(0, 100) * 84 / 100)
-                update(
-                    jobId = jobId,
-                    stage = event.stage.toAuditStage(),
-                    progress = scaledProgress.coerceAtMost(88),
-                    message = event.detail,
-                    current = event.completedUnits,
-                    total = event.totalUnits,
-                )
-            }
+            val inspectionControl = InspectionControl(
+                progressSink = { event ->
+                    val scaledProgress = 4 + (event.progress.coerceIn(0, 100) * 84 / 100)
+                    update(
+                        jobId = jobId,
+                        stage = event.stage.toAuditStage(),
+                        progress = scaledProgress.coerceAtMost(88),
+                        message = event.message,
+                        current = event.current,
+                        total = event.total,
+                    )
+                },
+                cancelled = { isStopped },
+            )
             val report = when (spec.source.kind) {
                 AuditSourceKind.FILE_URI -> inspector.inspect(
                     android.net.Uri.parse(requireNotNull(spec.source.uri)),
                     spec.scope,
-                    onInspectionProgress,
+                    inspectionControl,
                 )
                 AuditSourceKind.INSTALLED_APP -> inspector.inspectInstalledApp(
                     InstalledAppDescriptor(
@@ -89,7 +92,7 @@ class AuditWorker(
                         installerPackageName = spec.source.installerPackageName,
                     ),
                     spec.scope,
-                    onInspectionProgress,
+                    inspectionControl,
                 )
             }
 
@@ -376,15 +379,15 @@ class AuditWorker(
         }
     }
 
-    private fun AnalysisStage.toAuditStage(): AuditStage = when (this) {
-        AnalysisStage.PREPARING, AnalysisStage.HASHING, AnalysisStage.CACHE -> AuditStage.PREPARING
-        AnalysisStage.ARCHIVE -> AuditStage.ARCHIVE
-        AnalysisStage.MANIFEST -> AuditStage.MANIFEST
-        AnalysisStage.DEX, AnalysisStage.REACHABILITY -> AuditStage.DEX
-        AnalysisStage.NATIVE -> AuditStage.NATIVE
-        AnalysisStage.IL2CPP, AnalysisStage.RUNTIME -> AuditStage.IL2CPP
-        AnalysisStage.SUPPLY_CHAIN -> AuditStage.SUPPLY_CHAIN
-        AnalysisStage.FINDINGS, AnalysisStage.SAVING, AnalysisStage.COMPLETE -> AuditStage.REPORT
+    private fun String.toAuditStage(): AuditStage = when (lowercase()) {
+        "archive" -> AuditStage.ARCHIVE
+        "manifest" -> AuditStage.MANIFEST
+        "dex", "reachability" -> AuditStage.DEX
+        "native" -> AuditStage.NATIVE
+        "il2cpp", "runtime" -> AuditStage.IL2CPP
+        "supply_chain" -> AuditStage.SUPPLY_CHAIN
+        "report", "findings", "saving", "complete" -> AuditStage.REPORT
+        else -> AuditStage.PREPARING
     }
 
     private class CancellationAwareAppendable(
