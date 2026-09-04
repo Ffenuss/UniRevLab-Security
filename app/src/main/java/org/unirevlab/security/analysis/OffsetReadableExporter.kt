@@ -7,6 +7,7 @@ import org.unirevlab.security.model.StaticAnalysisReport
 /** Human-readable, searchable companion to offset-evidence.json. */
 object OffsetReadableExporter {
     fun write(report: StaticAnalysisReport, out: Appendable) {
+        val modificationSurfaces = ModificationSurfaceClassifier.analyze(report)
         val libraries = report.native?.libraries.orEmpty()
         val libraryByEntry = libraries.associateBy(NativeLibrarySummary::entryName)
         val il2cppMappings = report.correlations?.il2cppMethods.orEmpty()
@@ -46,6 +47,8 @@ object OffsetReadableExporter {
         metric(out, "Связанные JNI", allJniMappings, "DEX → native RVA")
         metric(out, "Кандидаты registration", allRegistrations, "требуют проверки")
         metric(out, "Native-символы", allRawSymbols, "сырой ELF inventory")
+        metric(out, "Приоритетные RVA", modificationSurfaces.totalResolvedBeforeLimit, "защитная проверка")
+        metric(out, "Без RVA", modificationSurfaces.totalUnresolvedBeforeLimit, "только metadata")
         out.line("</section>")
 
         if (allIl2cppMappings == 0) {
@@ -56,6 +59,8 @@ object OffsetReadableExporter {
             out.line("<section class=\"notice ok\"><strong>Есть подтверждённые IL2CPP-связки.</strong> " +
                 "Начинайте с зелёных строк: metadata-метод связан с конкретной native-функцией и RVA.</section>")
         }
+
+        writeModificationPrioritization(out, modificationSurfaces)
 
         out.line("<section><h2>Как читать таблицу</h2><ul>")
         out.line("<li><strong>RVA</strong> — адрес относительно базы загрузки указанной библиотеки, не абсолютный адрес памяти.</li>")
@@ -121,6 +126,99 @@ object OffsetReadableExporter {
 
     private fun metric(out: Appendable, title: String, value: Int, subtitle: String) {
         out.line("<article class=\"metric\"><span>${html(title)}</span><strong>$value</strong><small>${html(subtitle)}</small></article>")
+    }
+
+    private fun writeModificationPrioritization(
+        out: Appendable,
+        result: ModificationSurfaceClassifier.Result,
+    ) {
+        val profile = when (result.targetProfile) {
+            ModificationSurfaceClassifier.TargetProfile.GAME_LIKELY -> "Вероятнее всего игра"
+            ModificationSurfaceClassifier.TargetProfile.APPLICATION_LIKELY -> "Вероятнее всего обычное приложение"
+        }
+        val confidence = when (result.profileConfidence) {
+            ModificationSurfaceClassifier.ProfileConfidence.HIGH -> "высокая"
+            ModificationSurfaceClassifier.ProfileConfidence.MEDIUM -> "средняя"
+            ModificationSurfaceClassifier.ProfileConfidence.LOW -> "низкая"
+        }
+        out.line("<section class=\"explorer priority-block\"><h2>Приоритетные поверхности модификации</h2>")
+        out.line("<p><strong>${html(profile)}</strong> · уверенность: ${html(confidence)}.</p>")
+        out.line("<ul>${result.profileReasons.joinToString(\"\") { \"<li>${html(it)}</li>\" }}</ul>")
+        out.line("<p class=\"notice warn\">Это автоматическая сортировка для защитного аудита. RVA подтверждён как адрес в библиотеке, но категория по имени не доказывает, что изменение создаст рабочий мод, unlock или bypass.</p>")
+
+        if (result.resolvedOffsets.isEmpty()) {
+            out.line("<p class=\"muted\">Подходящих кандидатов с подтверждённым RVA не найдено.</p>")
+        } else {
+            out.line("<h3>Кандидаты с RVA</h3><div class=\"table-wrap compact-table\"><table><thead><tr>" +
+                "<th>Приоритет</th><th>Область</th><th>Категория</th><th>Источник</th><th>Имя</th><th>Библиотека / ABI</th><th>RVA</th><th>Почему выделено</th>" +
+                "</tr></thead><tbody>")
+            result.resolvedOffsets.forEach { candidate ->
+                val identity = buildString {
+                    candidate.libraryEntry?.let { append("<code>").append(html(it)).append("</code>") }
+                    candidate.abi?.let { append("<small>ABI: ").append(html(it)).append("</small>") }
+                    candidate.buildId?.let { append("<small>Build ID: ").append(html(it.take(24))).append("</small>") }
+                }.ifBlank { "—" }
+                out.line("<tr><td><span class=\"status priority-${candidate.priority.name.lowercase()}\">${candidate.priority}</span></td>" +
+                    "<td>${html(domainLabel(candidate.domain))}</td><td>${html(categoryLabel(candidate.category))}</td>" +
+                    "<td>${html(sourceLabel(candidate.source))}<small>confidence: ${html(candidate.confidence)}</small></td>" +
+                    "<td><strong>${html(candidate.displayName)}</strong>${candidate.technicalName?.takeIf { it != candidate.displayName }?.let { \"<small><code>${html(it)}</code></small>\" }.orEmpty()}</td>" +
+                    "<td>$identity</td><td><code>${candidate.rva?.let(::hex) ?: \"—\"}</code></td><td>${html(compact(candidate.reason))}</td></tr>")
+            }
+            out.line("</tbody></table></div>")
+        }
+
+        if (result.unresolvedManagedCandidates.isNotEmpty()) {
+            out.line("<h3>Подходящие managed-методы без подтверждённого RVA</h3>")
+            out.line("<p class=\"muted\">Это ориентиры из metadata. Token не является native-оффсетом.</p>")
+            out.line("<div class=\"table-wrap compact-table\"><table><thead><tr><th>Приоритет</th><th>Область</th><th>Категория</th><th>Managed identity</th><th>Metadata token</th><th>Статус</th></tr></thead><tbody>")
+            result.unresolvedManagedCandidates.forEach { candidate ->
+                out.line("<tr><td><span class=\"status priority-${candidate.priority.name.lowercase()}\">${candidate.priority}</span></td>" +
+                    "<td>${html(domainLabel(candidate.domain))}</td><td>${html(categoryLabel(candidate.category))}</td>" +
+                    "<td><strong>${html(candidate.displayName)}</strong></td><td><code>${candidate.metadataToken?.let(::hex) ?: \"—\"}</code></td>" +
+                    "<td>RVA не подтверждён</td></tr>")
+            }
+            out.line("</tbody></table></div>")
+        }
+        if (result.totalResolvedBeforeLimit > result.resolvedOffsets.size || result.totalUnresolvedBeforeLimit > result.unresolvedManagedCandidates.size) {
+            out.line("<p class=\"muted\">Часть строк скрыта защитным лимитом; полные счётчики сохранены в JSON.</p>")
+        }
+        out.line("</section>")
+    }
+
+    private fun domainLabel(value: String): String = when (value) {
+        "GAMEPLAY" -> "Игровая логика"
+        "APPLICATION" -> "Обычное приложение"
+        "MONETIZATION" -> "Монетизация"
+        "SHARED_SECURITY" -> "Общая защита"
+        else -> value
+    }
+
+    private fun categoryLabel(value: String): String = when (value) {
+        "ECONOMY_REWARDS" -> "Экономика и награды"
+        "HEALTH_DAMAGE" -> "Здоровье и урон"
+        "COMBAT_RESOURCES" -> "Боевые ресурсы"
+        "MOVEMENT_PHYSICS" -> "Перемещение и физика"
+        "TIMERS_ENERGY" -> "Таймеры и энергия"
+        "PROGRESSION" -> "Прогресс"
+        "AUTHORIZATION" -> "Авторизация"
+        "FEATURE_GATES" -> "Доступ к функциям"
+        "QUOTA_LIMITS" -> "Квоты и лимиты"
+        "DATA_EXPORT_SYNC" -> "Данные и синхронизация"
+        "PREMIUM_ENTITLEMENT" -> "Premium/VIP"
+        "PURCHASE_RECEIPT" -> "Покупки и receipts"
+        "ADS" -> "Реклама"
+        "INTEGRITY_TAMPER" -> "Целостность и anti-tamper"
+        "LICENSE" -> "Лицензия"
+        "SERVER_VALIDATION" -> "Серверная проверка"
+        else -> value
+    }
+
+    private fun sourceLabel(value: String): String = when (value) {
+        "IL2CPP_METHOD_RVA" -> "IL2CPP method → RVA"
+        "JNI_METHOD_RVA" -> "DEX/JNI → RVA"
+        "NATIVE_SYMBOL_RVA" -> "ELF symbol → RVA"
+        "IL2CPP_METADATA_ONLY" -> "IL2CPP metadata"
+        else -> value
     }
 
     private fun row(
@@ -261,6 +359,7 @@ object OffsetReadableExporter {
         .table-wrap{overflow:auto;margin-top:14px;max-height:72vh;border:1px solid var(--line);border-radius:12px}table{border-collapse:collapse;width:100%;min-width:1080px}
         th,td{text-align:left;vertical-align:top;padding:10px;border-bottom:1px solid var(--line)}th{position:sticky;top:0;background:#182238;z-index:1}td small{display:block;margin-top:4px}
         .status{display:inline-block;border-radius:999px;padding:3px 8px;font-size:12px;font-weight:750}.confirmed{background:#173f34;color:#6ff2ba}.candidate{background:#4a3517;color:#ffd18b}.reference{background:#283247;color:#c7d1e6}
+        .priority-p1{background:#5a202b;color:#ffb4c0}.priority-p2{background:#594018;color:#ffd18b}.priority-p3{background:#283247;color:#c7d1e6}.priority-block h3{margin-top:24px}.compact-table{max-height:54vh}
         tr[hidden]{display:none}@media(max-width:700px){main{padding:14px}.explorer{padding:10px}.table-wrap{max-height:68vh}}
         </style>
     """.trimIndent()

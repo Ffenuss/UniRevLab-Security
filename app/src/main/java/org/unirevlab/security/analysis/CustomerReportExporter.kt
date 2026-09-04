@@ -8,6 +8,7 @@ import java.time.Instant
 
 object CustomerReportExporter {
     fun export(report: StaticAnalysisReport, gradleEvidence: GradleModuleEvidenceResult? = null): String {
+        val modificationSurfaces = ModificationSurfaceClassifier.analyze(report)
         val resistance = if (report.il2cpp?.detected == true) {
             runCatching { Il2CppModdingResistanceEngine.analyze(report) }.getOrNull()
         } else null
@@ -53,6 +54,8 @@ object CustomerReportExporter {
         appendLine("| DEX methods indexed | ${report.dex?.methodsIndexed ?: 0} |")
         appendLine("| Native libraries | ${report.native?.librariesScanned ?: 0} |")
         appendLine("| IL2CPP | ${if (report.il2cpp?.detected == true) "обнаружен" else "не обнаружен"} |")
+        appendLine("| Приоритетные modification-surface RVA | ${modificationSurfaces.totalResolvedBeforeLimit} |")
+        appendLine("| Semantic-кандидаты без RVA | ${modificationSurfaces.totalUnresolvedBeforeLimit} |")
         gradleEvidence?.let {
             appendLine("| APK/Gradle modules | ${it.modulesDetected} |")
             appendLine("| Dynamic features | ${it.dynamicFeaturesDetected} |")
@@ -95,6 +98,33 @@ object CustomerReportExporter {
         appendLine()
         appendLine("Metadata token, ELF-символ и подтверждённый native RVA метода — разные сущности. `offsets-readable.html` показывает их раздельно и не выдаёт сырой символ за готовый hook-offset.")
         appendLine()
+        appendLine("## Приоритетные поверхности, которые обычно проверяют при модификации клиента")
+        appendLine()
+        appendLine("- Профиль цели: **${targetProfileLabel(modificationSurfaces.targetProfile)}**; уверенность: ${profileConfidenceLabel(modificationSurfaces.profileConfidence)}.")
+        modificationSurfaces.profileReasons.forEach { appendLine("- ${safe(it)}") }
+        appendLine("- Кандидатов с реальным статическим RVA: ${modificationSurfaces.totalResolvedBeforeLimit}; managed-кандидатов только с metadata token: ${modificationSurfaces.totalUnresolvedBeforeLimit}.")
+        appendLine()
+        appendLine("Классификация показывает места для защитной проверки: игровую экономику, состояние игрока, таймеры и прогресс либо premium, подписки, рекламу, authorization и feature gates обычного приложения. Совпадение по имени не доказывает, что изменение создаст работающий мод или bypass.")
+        appendLine()
+        if (modificationSurfaces.resolvedOffsets.isNotEmpty()) {
+            appendLine("| Приоритет | Область | Категория | Источник | Identity | Библиотека | RVA |")
+            appendLine("|---|---|---|---|---|---|---|")
+            modificationSurfaces.resolvedOffsets.take(MAX_MODIFICATION_TARGETS).forEach { candidate ->
+                appendLine("| ${candidate.priority} | ${surfaceDomainLabel(candidate.domain)} | ${surfaceCategoryLabel(candidate.category)} | ${candidate.source} | `${safe(candidate.displayName)}` | `${safe(candidate.libraryEntry ?: "—")}` | `${candidate.rva?.let { "0x${it.toString(16)}" } ?: "—"}` |")
+            }
+            appendLine()
+            if (modificationSurfaces.totalResolvedBeforeLimit > MAX_MODIFICATION_TARGETS) {
+                appendLine("Полный список и объяснение каждого совпадения находятся в `offsets-readable.html` и `offset-evidence.json`.")
+                appendLine()
+            }
+        } else {
+            appendLine("Подходящих кандидатов с подтверждённым RVA не найдено. Это не означает отсутствие изменяемой клиентской логики.")
+            appendLine()
+        }
+        if (modificationSurfaces.unresolvedManagedCandidates.isNotEmpty()) {
+            appendLine("Найдены ${modificationSurfaces.totalUnresolvedBeforeLimit} подходящих managed identity без доказанного native RVA. Они вынесены отдельно в `offsets-readable.html`; metadata token нельзя использовать как native-оффсет.")
+            appendLine()
+        }
         report.supplyChain?.let { supply ->
             val advisoryFeed = supply.advisoryFeed
             appendLine("## Зависимости и известные уязвимости")
@@ -235,6 +265,27 @@ object CustomerReportExporter {
         else -> safe(value)
     }
 
+    private fun targetProfileLabel(value: ModificationSurfaceClassifier.TargetProfile): String = when (value) {
+        ModificationSurfaceClassifier.TargetProfile.GAME_LIKELY -> "вероятнее всего игра"
+        ModificationSurfaceClassifier.TargetProfile.APPLICATION_LIKELY -> "вероятнее всего обычное приложение"
+    }
+
+    private fun profileConfidenceLabel(value: ModificationSurfaceClassifier.ProfileConfidence): String = when (value) {
+        ModificationSurfaceClassifier.ProfileConfidence.HIGH -> "высокая"
+        ModificationSurfaceClassifier.ProfileConfidence.MEDIUM -> "средняя"
+        ModificationSurfaceClassifier.ProfileConfidence.LOW -> "низкая"
+    }
+
+    private fun surfaceDomainLabel(value: String): String = when (value) {
+        "GAMEPLAY" -> "Игровая логика"
+        "APPLICATION" -> "Обычное приложение"
+        "MONETIZATION" -> "Монетизация"
+        "SHARED_SECURITY" -> "Общая защита"
+        else -> safe(value)
+    }
+
+    private fun surfaceCategoryLabel(value: String): String = value.lowercase().replace('_', ' ')
+
     private fun localizedTitle(finding: Finding): String =
         LOCALIZED_TITLES[finding.id] ?: safe(finding.title)
 
@@ -324,4 +375,5 @@ object CustomerReportExporter {
     private const val MAX_FINDINGS = 50
     private const val MAX_EVIDENCE_PER_FINDING = 5
     private const val MAX_RESISTANCE_TARGETS = 30
+    private const val MAX_MODIFICATION_TARGETS = 30
 }

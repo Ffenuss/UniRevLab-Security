@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.41.0-preview-prioritized-surfaces
+
+- classify each analyzed target as likely game or likely ordinary application using runtime and recovered semantic evidence;
+- rank resolved IL2CPP, JNI and ELF RVAs commonly associated with gameplay, monetization, feature gates, authorization, quotas, licensing and client-integrity checks;
+- keep metadata-only managed candidates in a separate list so tokens are never presented as native offsets;
+- add a dedicated mobile-friendly prioritization section to `offsets-readable.html` and the customer report;
+- add machine-readable `modificationSurfacePrioritization` to `offset-evidence.json` with profile confidence, reasons, priority, source and evidence semantics;
+- add regression coverage for game and ordinary-application classification and invalidate older analysis cache entries.
+
 ## 0.40.0-preview-trustworthy-report
 
 - distinguish asset packs, dynamic features and configuration splits from their packaged distribution manifests;

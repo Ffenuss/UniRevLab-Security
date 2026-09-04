@@ -1364,7 +1364,7 @@ class LocalArtifactInspector(
     )
 
     companion object {
-        const val ENGINE_VERSION = "0.40.0-trustworthy-report"
+        const val ENGINE_VERSION = "0.41.0-prioritized-surfaces"
         private const val MAX_DEX_FILES = 32
         private const val MAX_SINGLE_DEX_BYTES = 96L * 1024L * 1024L
         private const val MAX_TOTAL_DEX_BYTES = 384L * 1024L * 1024L

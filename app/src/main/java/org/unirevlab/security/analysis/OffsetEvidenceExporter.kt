@@ -8,6 +8,7 @@ import org.unirevlab.security.model.StaticAnalysisReport
 /** Exports reproducible static RVA/token evidence without generating executable hooks. */
 object OffsetEvidenceExporter {
     fun export(report: StaticAnalysisReport): String {
+        val modificationSurfaces = ModificationSurfaceClassifier.analyze(report)
         val nativeLibraries = report.native?.libraries.orEmpty()
         val symbolCatalogs = nativeLibraries.map { library ->
             (library.exportedSymbols + library.importedSymbols)
@@ -111,7 +112,7 @@ object OffsetEvidenceExporter {
             .take(MAX_JNI_CORRELATIONS)
 
         return JSONObject()
-            .put("schemaVersion", "1.1")
+            .put("schemaVersion", "1.2")
             .put("engineVersion", report.engineVersion)
             .put("assessmentId", report.assessment.assessmentId)
             .put("artifactSha256", report.artifact.sha256)
@@ -125,6 +126,7 @@ object OffsetEvidenceExporter {
                     report.correlations?.jniNative.orEmpty().size > MAX_JNI_CORRELATIONS,
             )
             .put("nativeLibraries", JSONArray(libraries))
+            .put("modificationSurfacePrioritization", modificationSurfaces.toJson())
             .put(
                 "nativeSymbolCoverage",
                 JSONObject()
@@ -170,6 +172,37 @@ object OffsetEvidenceExporter {
     }
 
     private fun hex(value: Long): String = "0x" + value.toString(16)
+
+    private fun ModificationSurfaceClassifier.Result.toJson(): JSONObject = JSONObject()
+        .put("targetProfile", targetProfile.name)
+        .put("profileConfidence", profileConfidence.name)
+        .put("profileReasons", JSONArray(profileReasons))
+        .put("interpretation", "Heuristic defensive prioritization. A listed RVA is real static address evidence, but its category does not prove that changing it creates a working mod or bypass.")
+        .put("resolvedOffsetsAvailable", totalResolvedBeforeLimit)
+        .put("resolvedOffsetsExported", resolvedOffsets.size)
+        .put("unresolvedManagedAvailable", totalUnresolvedBeforeLimit)
+        .put("unresolvedManagedExported", unresolvedManagedCandidates.size)
+        .put("resolvedOffsets", JSONArray(resolvedOffsets.map { it.toJson() }))
+        .put("unresolvedManagedCandidates", JSONArray(unresolvedManagedCandidates.map { it.toJson() }))
+
+    private fun ModificationSurfaceClassifier.Candidate.toJson(): JSONObject = JSONObject()
+        .put("domain", domain)
+        .put("category", category)
+        .put("priority", priority.name)
+        .put("source", source)
+        .put("displayName", displayName)
+        .put("technicalName", technicalName ?: JSONObject.NULL)
+        .put("library", libraryEntry ?: JSONObject.NULL)
+        .put("abi", abi ?: JSONObject.NULL)
+        .put("buildId", buildId ?: JSONObject.NULL)
+        .put("rvaDecimal", rva ?: JSONObject.NULL)
+        .put("rvaHex", rva?.let(::hex) ?: JSONObject.NULL)
+        .put("metadataTokenDecimal", metadataToken ?: JSONObject.NULL)
+        .put("metadataTokenHex", metadataToken?.let(::hex) ?: JSONObject.NULL)
+        .put("resolvedRva", resolvedRva)
+        .put("confidence", confidence)
+        .put("matchedMarker", matchedMarker)
+        .put("reason", reason)
 
     private fun fairSelectSymbols(
         catalogs: List<List<NativeSymbolReference>>,
