@@ -62,9 +62,10 @@ object ReportContextEngine {
             }
         }
 
-        val ordered = (selected.toList() + listOfNotNull(firstChunk))
+        val ordered = selected.toList()
+            .sortedWith(compareByDescending<ScoredChunk> { it.score }.thenBy { it.index })
+            .plus(listOfNotNull(firstChunk))
             .distinctBy { it.index }
-            .sortedBy { it.index }
         val assembled = buildString(contextChars + 2_000) {
             appendLine("<full-report-access mode=\"stream-selected\" total-bytes=\"${file.length()}\" scanned-chunks=\"$chunks\">")
             appendLine("Все части файла были просмотрены локальным поиском. Ниже приведены наиболее релевантные исходные фрагменты полного отчёта.")
