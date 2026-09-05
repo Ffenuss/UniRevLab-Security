@@ -39,6 +39,7 @@ import org.unirevlab.security.ui.AgreementScreen
 import org.unirevlab.security.ui.AuditProfileScreen
 import org.unirevlab.security.ui.AutoAuditScreen
 import org.unirevlab.security.ui.InstalledAppsScreen
+import org.unirevlab.security.ui.ReportChatScreen
 import org.unirevlab.security.ui.UniRevLabTheme
 import org.unirevlab.security.work.AuditScheduler
 
@@ -52,7 +53,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Route { AGREEMENT, PROFILE, HOME, INSTALLED_APPS }
+private enum class Route { AGREEMENT, PROFILE, HOME, INSTALLED_APPS, AI_CHAT }
 
 @Composable
 private fun UniRevLabApp() {
@@ -234,6 +235,18 @@ private fun UniRevLabApp() {
                 )
             },
         )
+        Route.AI_CHAT -> {
+            val currentReport = jobId?.let { currentJobId ->
+                runCatching { jobs.outputFile(currentJobId, AuditJobRepository.REPORT_JSON) }
+                    .getOrNull()
+                    ?.takeIf { it.isFile && it.length() > 0 }
+            }
+            ReportChatScreen(
+                currentReport = currentReport,
+                currentReportLabel = summary?.displayName?.let { "$it · full-report.json" },
+                onBack = { route = Route.HOME },
+            )
+        }
         Route.HOME -> AutoAuditScreen(
             profile = requireNotNull(profile),
             authorityConfirmed = authorityConfirmed,
@@ -270,6 +283,7 @@ private fun UniRevLabApp() {
                 }
             },
             onEditProfile = { route = Route.PROFILE },
+            onOpenAiChat = { route = Route.AI_CHAT },
             onExport = { fileName ->
                 val fileLabel = exportName(fileName, summary?.displayName)
                 pendingExport = fileName to fileLabel

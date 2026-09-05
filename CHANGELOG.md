@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.42.0-preview-report-ai-chat
+
+- add an in-app OpenRouter chat that can use the current `full-report.json`, an imported report, or a signed evidence ZIP;
+- load the current free text-model catalog dynamically and let the user select and persist a model;
+- protect the user-supplied API key with Android Keystore AES-GCM and never embed a shared key in the APK;
+- stream-scan the entire report for every question; include small reports verbatim and select evidence from all chunks when a report exceeds model context;
+- keep the APK and `analysis-artifacts.zip` local, require explicit per-session consent before sending report excerpts, and request providers with `data_collection=deny`;
+- add bounded imports, bounded network responses, friendly 401/402/413/429/5xx errors and regression tests for free-model filtering and large-report retrieval.
+
 ## 0.41.0-preview-prioritized-surfaces
 
 - classify each analyzed target as likely game or likely ordinary application using runtime and recovered semantic evidence;

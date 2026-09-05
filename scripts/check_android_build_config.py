@@ -28,12 +28,17 @@ modification_surfaces = (ROOT / "app/src/main/java/org/unirevlab/security/analys
 il2cpp_merger = (ROOT / "app/src/main/java/org/unirevlab/security/analysis/Il2CppSummaryMerger.kt").read_text(encoding="utf-8")
 gradle_evidence = (ROOT / "app/src/main/java/org/unirevlab/security/analysis/GradleModuleEvidenceExporter.kt").read_text(encoding="utf-8")
 gradle_evidence_test = (ROOT / "app/src/test/java/org/unirevlab/security/analysis/GradleModuleEvidenceExporterTest.kt").read_text(encoding="utf-8")
+ai_chat = (ROOT / "app/src/main/java/org/unirevlab/security/ui/ReportChatScreen.kt").read_text(encoding="utf-8")
+openrouter_client = (ROOT / "app/src/main/java/org/unirevlab/security/ai/OpenRouterClient.kt").read_text(encoding="utf-8")
+openrouter_secret = (ROOT / "app/src/main/java/org/unirevlab/security/ai/OpenRouterSecretStore.kt").read_text(encoding="utf-8")
+report_context = (ROOT / "app/src/main/java/org/unirevlab/security/ai/ReportContextEngine.kt").read_text(encoding="utf-8")
+report_import = (ROOT / "app/src/main/java/org/unirevlab/security/ai/ReportImportStore.kt").read_text(encoding="utf-8")
 
 checks = [
     ("compileSdk 37.0", app, r"version\s*=\s*release\(37\)[\s\S]*minorApiLevel\s*=\s*0"),
     ("targetSdk 36", app, r"targetSdk\s*=\s*36"),
-    ("v0.41 preview versionCode", app, r"versionCode\s*=\s*54"),
-    ("v0.41 prioritized-surfaces versionName", app, r'versionName\s*=\s*"0\.41\.0-preview-prioritized-surfaces"'),
+    ("v0.42 preview versionCode", app, r"versionCode\s*=\s*55"),
+    ("v0.42 report-ai-chat versionName", app, r'versionName\s*=\s*"0\.42\.0-preview-report-ai-chat"'),
     ("release signing input gate", app, r'tasks\.register\("verifyReleaseSigningInputs"\)'),
     ("AGP 9.3.0", root_build, r'id\("com\.android\.application"\) version "9\.3\.0"'),
     ("Kotlin Compose 2.3.21", root_build, r'id\("org\.jetbrains\.kotlin\.plugin\.compose"\) version "2\.3\.21"'),
@@ -49,7 +54,7 @@ checks = [
     ("CI lint", workflow, r':app:lintDebug'),
     ("CI debug build", workflow, r':app:assembleDebug'),
     ("CI APK integrity verify", workflow, r'unzip -t .*APK'),
-    ("CI APK SHA-256", workflow, r'sha256sum .*UniRevLab-Security-v0\.41\.0-prioritized-surfaces-debug\.apk'),
+    ("CI APK SHA-256", workflow, r'sha256sum .*UniRevLab-Security-v0\.42\.0-report-ai-chat-debug\.apk'),
     ("CI artifact upload", workflow, r'actions/upload-artifact@v4'),
     ("WorkManager persistent audit", audit_worker, r'OneTimeWorkRequestBuilder<AuditWorker>'),
     ("full report streamed to disk", audit_worker, r'ReportJsonExporter\.write\(report, output\)'),
@@ -68,6 +73,12 @@ checks = [
     ("Gradle split manifest parsing", gradle_evidence, r'configForSplit[\s\S]*isFeatureSplit'),
     ("Gradle dynamic feature classification", gradle_evidence, r'DYNAMIC_FEATURE'),
     ("Gradle evidence regression test", gradle_evidence_test, r'recoversDynamicFeatureAndAgpMetadata'),
+    ("AI chat accepts JSON and signed ZIP", ai_chat, r'Выбрать JSON / ZIP'),
+    ("OpenRouter dynamic free model catalog", ai_chat, r'fetchFreeModels'),
+    ("OpenRouter strict provider data policy", openrouter_client, r'data_collection[^\n]*deny'),
+    ("OpenRouter key encrypted with Android Keystore", openrouter_secret, r'AndroidKeyStore[\s\S]*AES/GCM/NoPadding'),
+    ("full report context is streamed", report_context, r'InputStreamReader[\s\S]*MAX_SELECTED_CHUNKS'),
+    ("large report import is bounded", report_import, r'MAX_REPORT_BYTES[\s\S]*copyBoundedTo|copyBoundedTo[\s\S]*MAX_REPORT_BYTES'),
     ("pair workspace libil2cpp limit 2 GiB", pair_workspace, r'MAX_LIBRARY_BYTES\s*=\s*2L\s*\*\s*1024L\s*\*\s*1024L\s*\*\s*1024L'),
     ("ELF scanner max input 2 GiB", elf_scanner, r'maxElfBytes:\s*Long\s*=\s*2L\s*\*\s*1024L\s*\*\s*1024L\s*\*\s*1024L'),
     ("ELF ASCII scan remains bounded", elf_scanner, r'maxAsciiScanBytes:\s*Long\s*=\s*64L\s*\*\s*1024L\s*\*\s*1024L'),

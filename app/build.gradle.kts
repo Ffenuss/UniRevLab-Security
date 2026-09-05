@@ -15,8 +15,8 @@ android {
         applicationId = "org.unirevlab.security"
         minSdk = 26
         targetSdk = 36
-        versionCode = 54
-        versionName = "0.41.0-preview-prioritized-surfaces"
+        versionCode = 55
+        versionName = "0.42.0-preview-report-ai-chat"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

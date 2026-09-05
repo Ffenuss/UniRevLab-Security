@@ -132,6 +132,7 @@ fun AutoAuditScreen(
     onPickFile: () -> Unit,
     onCancel: () -> Unit,
     onEditProfile: () -> Unit,
+    onOpenAiChat: () -> Unit,
     onExport: (String) -> Unit,
 ) {
     Surface(Modifier.fillMaxSize()) {
@@ -142,7 +143,7 @@ fun AutoAuditScreen(
             item {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Eyebrow("UNIREVLAB · AUTO AUDIT 0.39")
+                        Eyebrow("UNIREVLAB · AUTO AUDIT 0.42")
                         Text("Аудит в один выбор", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
                     }
                     OutlinedButton(onClick = onEditProfile, enabled = !isRunning) { Text("Профиль") }
@@ -171,9 +172,31 @@ fun AutoAuditScreen(
                 item { ResultCard(summary) }
                 item { OutputCard(onExport) }
             }
+            item { AiReportChatCard(isRunning = isRunning, onOpen = onOpenAiChat) }
             item {
                 MethodBoundaryCard()
                 Spacer(Modifier.height(12.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun AiReportChatCard(isRunning: Boolean, onOpen: () -> Unit) {
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = .55f)),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Eyebrow("AI · OPENROUTER")
+            Text("Чат по полному отчёту", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Откройте текущий full-report.json или импортируйте ранее скачанный отчёт / подписанный пакет. Список бесплатных моделей загружается автоматически.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(onClick = onOpen, enabled = !isRunning, modifier = Modifier.fillMaxWidth()) {
+                Text("Открыть AI-чат")
             }
         }
     }
