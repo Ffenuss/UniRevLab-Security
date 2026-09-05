@@ -15,8 +15,8 @@ android {
         applicationId = "org.unirevlab.security"
         minSdk = 26
         targetSdk = 36
-        versionCode = 56
-        versionName = "0.42.1-preview-openrouter-privacy-fix"
+        versionCode = 57
+        versionName = "0.43.0-preview-real-il2cpp-dumper"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

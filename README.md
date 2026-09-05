@@ -2,7 +2,7 @@
 
 Open-source Android-first platform for **authorized** mobile application security assessment and reverse engineering.
 
-## Current milestone: v0.42.1-openrouter-privacy-fix
+## Current milestone: v0.43.0-real-il2cpp-dumper
 
 The Android client now exposes one primary workflow: save the customer profile once, confirm the
 scope for the current target, then select an installed application or APK. A persistent WorkManager
@@ -11,6 +11,8 @@ file hunting or manual result assembly.
 
 Implemented now:
 
+- real on-device IL2CPP reconstruction through a pinned Rodroid Rust engine: automatic ELF registration discovery, validated method/field RVAs, `dump.cs`, `script.json`, C/C++ headers and a machine-readable provenance manifest;
+- strict failure semantics: protected/mismatched pairs never produce a placeholder dump or guessed offsets, and large inputs cross JNI by file path instead of a Java byte array;
 - optional in-app OpenRouter chat over the current or imported full report, with a dynamically loaded free-model catalog and Android-Keystore-protected user key;
 - streaming full-report retrieval that avoids loading hundreds of megabytes into memory and clearly reports whether the complete file or selected source chunks were sent;
 - persistent one-selection Auto Audit workflow with progress, cancellation and recovery after UI/process recreation;

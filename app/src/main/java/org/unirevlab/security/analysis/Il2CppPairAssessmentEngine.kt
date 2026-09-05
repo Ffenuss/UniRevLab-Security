@@ -15,7 +15,7 @@ object Il2CppPairAssessmentEngine {
         val mapping: Il2CppSemanticMappingEngine.Result,
         val nativeEvidence: Il2CppNativeEvidenceEngine.Result,
         val moddingResistance: Il2CppModdingResistanceEngine.Result,
-        val managedDump: String,
+        val realDump: RealIl2CppDumpEngine.Result,
         val aggregateSha256: String,
         val warnings: List<String>,
     )
@@ -25,7 +25,9 @@ object Il2CppPairAssessmentEngine {
         libraryFile: File,
         projectName: String = "IL2CPP dump review",
         organization: String = "Local authorized assessment",
+        dumpOutputDirectory: File = File(metadataFile.parentFile, "real-il2cpp-dump"),
     ): Result {
+        val realDump = RealIl2CppDumpEngine.dump(metadataFile, libraryFile, dumpOutputDirectory)
         val pair = Il2CppScanner.scanPair(metadataFile, libraryFile)
         val aggregateSha = aggregateSha256(metadataFile, libraryFile)
         val report = StaticAnalysisReport(
@@ -59,6 +61,8 @@ object Il2CppPairAssessmentEngine {
         val moddingResistance = Il2CppModdingResistanceEngine.analyze(report, risk, nativeEvidence)
         val warnings = buildList {
             if (pair.il2cpp.metadata?.magicValid != true) add("global-metadata.dat magic/version could not be validated.")
+            if (!realDump.complete) add("Настоящий IL2CPP dump не создан: ${realDump.error ?: realDump.status}. Никакие офсеты не были выдуманы.")
+            if (realDump.complete) add("Настоящий dump подтверждён ${realDump.engine}; registrations ${realDump.codeRegistration}/${realDump.metadataRegistration}.")
             if (pair.il2cpp.metadata?.reconstructionTruncated == true || pair.il2cpp.truncated) add("IL2CPP reconstruction is partial; absence of a candidate is not proof of absence.")
             if (pair.native.libraries.firstOrNull()?.stripped == true) add("libil2cpp.so is stripped; exact native symbol correlation is limited without an external symbol/Ghidra result.")
             if (pair.il2cpp.metadata?.metadataVersion !in 27..31) add("Structured type/method/field reconstruction is currently optimized for metadata versions 27-31.")
@@ -75,7 +79,7 @@ object Il2CppPairAssessmentEngine {
             mapping = mapping,
             nativeEvidence = nativeEvidence,
             moddingResistance = moddingResistance,
-            managedDump = Il2CppManagedDumpExporter.export(report, metadataFile),
+            realDump = realDump,
             aggregateSha256 = aggregateSha,
             warnings = warnings,
         )
@@ -101,3 +105,4 @@ object Il2CppPairAssessmentEngine {
         }
     }
 }
+

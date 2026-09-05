@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.43.0-preview-real-il2cpp-dumper
+
+- replace the metadata-only C# approximation in the pair workspace with the pinned Rodroid IL2CPP Rust engine at commit `8bfb90229539833999e725c5cf6402a435b47f15`;
+- automatically locate and validate CodeRegistration/MetadataRegistration from normal Android ELF inputs, with symbol-table and ARM32 fallbacks;
+- generate a real `dump.cs`, `script.json`, `stringliteral.json`, native headers and a provenance manifest, then export them as one ZIP;
+- stream 100+ MB pair files by path across JNI and when saving results to avoid the prior Java-heap allocation failure;
+- refuse to emit offsets when metadata is protected, the pair does not match, registrations are unresolved or engine output is incomplete;
+- retain gameplay, economy, subscription, premium and purchase trust-boundary classification as defensive triage over confirmed engine output.
+
 ## 0.42.1-preview-openrouter-privacy-fix
 
 - recognize OpenRouter's `No endpoints found matching your data policy (Free model training)` response and replace the raw HTTP 404 with a clear in-app explanation;

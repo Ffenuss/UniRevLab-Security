@@ -37,8 +37,8 @@ report_import = (ROOT / "app/src/main/java/org/unirevlab/security/ai/ReportImpor
 checks = [
     ("compileSdk 37.0", app, r"version\s*=\s*release\(37\)[\s\S]*minorApiLevel\s*=\s*0"),
     ("targetSdk 36", app, r"targetSdk\s*=\s*36"),
-    ("v0.42.1 preview versionCode", app, r"versionCode\s*=\s*56"),
-    ("v0.42.1 privacy-fix versionName", app, r'versionName\s*=\s*"0\.42\.1-preview-openrouter-privacy-fix"'),
+    ("v0.43 preview versionCode", app, r"versionCode\s*=\s*57"),
+    ("v0.43 real dumper versionName", app, r'versionName\s*=\s*"0\.43\.0-preview-real-il2cpp-dumper"'),
     ("release signing input gate", app, r'tasks\.register\("verifyReleaseSigningInputs"\)'),
     ("AGP 9.3.0", root_build, r'id\("com\.android\.application"\) version "9\.3\.0"'),
     ("Kotlin Compose 2.3.21", root_build, r'id\("org\.jetbrains\.kotlin\.plugin\.compose"\) version "2\.3\.21"'),
@@ -54,12 +54,12 @@ checks = [
     ("CI lint", workflow, r':app:lintDebug'),
     ("CI debug build", workflow, r':app:assembleDebug'),
     ("CI APK integrity verify", workflow, r'unzip -t .*APK'),
-    ("CI APK SHA-256", workflow, r'sha256sum .*UniRevLab-Security-v0\.42\.1-openrouter-privacy-fix-debug\.apk'),
+    ("CI APK SHA-256", workflow, r'sha256sum .*UniRevLab-Security-v0\.43\.0-real-il2cpp-dumper-debug\.apk'),
     ("CI artifact upload", workflow, r'actions/upload-artifact@v4'),
     ("WorkManager persistent audit", audit_worker, r'OneTimeWorkRequestBuilder<AuditWorker>'),
     ("full report streamed to disk", audit_worker, r'ReportJsonExporter\.write\(report, output\)'),
-    ("IL2CPP dump streamed to disk", audit_worker, r'Il2CppManagedDumpExporter\.write\(report, metadataFile, output\)'),
-    ("analysis cache invalidated for v0.41", inspector, r'ENGINE_VERSION\s*=\s*"0\.41\.0-prioritized-surfaces"'),
+    ("real IL2CPP dump streamed by file path", audit_worker, r'RealIl2CppDumpEngine\.dump\(metadata, library, outputDirectory\)'),
+    ("analysis cache invalidated for v0.43", inspector, r'ENGINE_VERSION\s*=\s*"0\.43\.0-real-il2cpp-dumper"'),
     ("split IL2CPP evidence merger wired", inspector, r'Il2CppSummaryMerger\.merge\(values\)'),
     ("split IL2CPP metadata/library merge", il2cpp_merger, r'SPLIT_EVIDENCE_MERGED'),
     ("human offset report streamed", audit_worker, r'OffsetReadableExporter\.write\(report, output\)'),
@@ -92,6 +92,8 @@ checks = [
     ("modding resistance server gate", resistance, r'SERVER_GATED'),
     ("pair assessment integrates resistance", pair_engine, r'val moddingResistance: Il2CppModdingResistanceEngine\.Result'),
     ("pair UI shows resistance", pair_workspace, r'Modding Resistance Assessment'),
+    ("real IL2CPP JNI dump", pair_engine, r'RealIl2CppDumpEngine\.dump'),
+    ("real dump UI truth state", pair_workspace, r'REAL DUMP: COMPLETE'),
 ]
 
 failed = []

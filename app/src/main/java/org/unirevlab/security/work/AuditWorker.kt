@@ -21,10 +21,10 @@ import org.unirevlab.security.analysis.CustomerReportExporter
 import org.unirevlab.security.analysis.EvidencePackageSigner
 import org.unirevlab.security.analysis.GradleModuleEvidenceExporter
 import org.unirevlab.security.analysis.InspectionControl
-import org.unirevlab.security.analysis.Il2CppManagedDumpExporter
 import org.unirevlab.security.analysis.LocalArtifactInspector
 import org.unirevlab.security.analysis.OffsetEvidenceExporter
 import org.unirevlab.security.analysis.OffsetReadableExporter
+import org.unirevlab.security.analysis.RealIl2CppDumpEngine
 import org.unirevlab.security.analysis.ReportJsonExporter
 import org.unirevlab.security.analysis.VerificationPlanExporter
 import org.unirevlab.security.data.AgreementStore
@@ -133,10 +133,23 @@ class AuditWorker(
                     update(jobId, AuditStage.ARTIFACTS, (93 + count / 24).coerceAtMost(97), name)
                 },
             )
-            writeManagedDump(
-                report = report,
+            val realDump = writeRealManagedDump(
+                jobId = jobId,
                 artifactBundle = repository.outputFile(jobId, AuditJobRepository.ARTIFACT_BUNDLE),
                 destination = managedDumpFile,
+                packageDestination = repository.outputFile(jobId, AuditJobRepository.IL2CPP_DUMP_PACKAGE),
+            )
+            customerFile.appendText(
+                "\n\n## Настоящий IL2CPP dump\n\n" +
+                    if (realDump?.complete == true) {
+                        "- Статус: COMPLETE\n- Engine: ${realDump.engine}\n- Metadata: v${realDump.metadataVersion}\n" +
+                            "- CodeRegistration: ${realDump.codeRegistration}\n- MetadataRegistration: ${realDump.metadataRegistration}\n" +
+                            "- Игровые поверхности: ${realDump.gameplaySurfaceCount}\n- Приложение/монетизация: ${realDump.applicationSurfaceCount}\n"
+                    } else {
+                        "- Статус: NOT_AVAILABLE\n- Причина: ${realDump?.error ?: "matching global-metadata.dat/libil2cpp.so pair not found"}\n" +
+                            "- Офсеты не создавались и не угадывались.\n"
+                    },
+                Charsets.UTF_8,
             )
 
             ensureActive()
@@ -150,7 +163,8 @@ class AuditWorker(
                 gradleEvidenceFile,
                 planFile,
                 repository.outputFile(jobId, AuditJobRepository.ARTIFACT_BUNDLE),
-            )
+                repository.outputFile(jobId, AuditJobRepository.IL2CPP_DUMP_PACKAGE),
+            ).filter(File::isFile)
             EvidencePackageSigner.create(
                 inputs = signedInputs,
                 manifestFile = repository.outputFile(jobId, AuditJobRepository.EVIDENCE_MANIFEST),
@@ -178,7 +192,7 @@ class AuditWorker(
                 il2cppDetected = report.il2cpp?.detected == true,
                 il2cppMetadataVersion = report.il2cpp?.metadata?.metadataVersion,
                 exportedArtifactCount = artifactResult.includedEntries,
-                outputFiles = AuditJobRepository.OUTPUT_FILES.sorted(),
+                outputFiles = AuditJobRepository.OUTPUT_FILES.map { repository.outputFile(jobId, it) }.filter(File::isFile).map(File::getName).sorted(),
             )
             repository.writeSummary(summary)
             update(jobId, AuditStage.COMPLETE, 100, "Готово: evidence-пакет и отчёт сформированы")
@@ -280,15 +294,24 @@ class AuditWorker(
 
     private fun errorData(message: String) = workDataOf(KEY_ERROR to message.take(MAX_ERROR_LENGTH))
 
-    private fun writeManagedDump(report: StaticAnalysisReport, artifactBundle: File, destination: File) {
+    private fun writeRealManagedDump(
+        jobId: String,
+        artifactBundle: File,
+        destination: File,
+        packageDestination: File,
+    ): RealIl2CppDumpEngine.Result? {
         var metadataFile: File? = null
+        var libraryFile: File? = null
         var nestedApkFile: File? = null
+        val outputDirectory = File(destination.parentFile, ".real-il2cpp-$id")
         try {
             if (artifactBundle.isFile) {
                 ZipFile(artifactBundle).use { zip ->
-                    val metadata = zip.entries().asSequence()
-                        .filterNot { it.isDirectory }
-                        .firstOrNull { it.name.substringAfterLast('/').equals("global-metadata.dat", ignoreCase = true) }
+                    val entries = zip.entries().asSequence().filterNot { it.isDirectory }.toList()
+                    val metadata = entries.firstOrNull { it.name.substringAfterLast('/').equals("global-metadata.dat", ignoreCase = true) }
+                    val library = entries.filter { it.name.substringAfterLast('/').equals("libil2cpp.so", ignoreCase = true) }
+                        .sortedBy { if (it.name.contains("arm64-v8a", ignoreCase = true)) 0 else 1 }
+                        .firstOrNull()
                     if (metadata != null && metadata.size in 1..MAX_METADATA_FOR_DUMP_BYTES) {
                         metadataFile = copyZipEntryBounded(
                             zip,
@@ -296,9 +319,17 @@ class AuditWorker(
                             File(destination.parentFile, ".global-metadata-${id}.tmp"),
                             MAX_METADATA_FOR_DUMP_BYTES,
                         )
-                    } else {
-                        val nestedApk = zip.entries().asSequence()
-                            .filterNot { it.isDirectory }
+                    }
+                    if (library != null && library.size in 1..MAX_LIBRARY_FOR_DUMP_BYTES) {
+                        libraryFile = copyZipEntryBounded(
+                            zip,
+                            library,
+                            File(destination.parentFile, ".libil2cpp-$id.so"),
+                            MAX_LIBRARY_FOR_DUMP_BYTES,
+                        )
+                    }
+                    if (metadataFile == null || libraryFile == null) {
+                        val nestedApk = entries.asSequence()
                             .firstOrNull { it.name.endsWith(".apk", ignoreCase = true) && it.size in 1..MAX_NESTED_APK_FOR_DUMP_BYTES }
                         if (nestedApk != null) {
                             nestedApkFile = copyZipEntryBounded(
@@ -308,9 +339,13 @@ class AuditWorker(
                                 MAX_NESTED_APK_FOR_DUMP_BYTES,
                             )
                             ZipFile(requireNotNull(nestedApkFile)).use { nestedZip ->
-                                val nestedMetadata = nestedZip.entries().asSequence()
-                                    .filterNot { it.isDirectory }
+                                val nestedEntries = nestedZip.entries().asSequence().filterNot { it.isDirectory }.toList()
+                                val nestedMetadata = nestedEntries.asSequence()
                                     .firstOrNull { it.name.substringAfterLast('/').equals("global-metadata.dat", ignoreCase = true) }
+                                val nestedLibrary = nestedEntries.asSequence()
+                                    .filter { it.name.substringAfterLast('/').equals("libil2cpp.so", ignoreCase = true) }
+                                    .sortedBy { if (it.name.contains("arm64-v8a", ignoreCase = true)) 0 else 1 }
+                                    .firstOrNull()
                                 if (nestedMetadata != null && nestedMetadata.size in 1..MAX_METADATA_FOR_DUMP_BYTES) {
                                     metadataFile = copyZipEntryBounded(
                                         nestedZip,
@@ -319,17 +354,34 @@ class AuditWorker(
                                         MAX_METADATA_FOR_DUMP_BYTES,
                                     )
                                 }
+                                if (nestedLibrary != null && nestedLibrary.size in 1..MAX_LIBRARY_FOR_DUMP_BYTES) {
+                                    libraryFile = copyZipEntryBounded(
+                                        nestedZip,
+                                        nestedLibrary,
+                                        File(destination.parentFile, ".libil2cpp-$id.so"),
+                                        MAX_LIBRARY_FOR_DUMP_BYTES,
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
-            writeTextAtomically(destination) { output ->
-                Il2CppManagedDumpExporter.write(report, metadataFile, output)
+            val metadata = metadataFile ?: return null
+            val library = libraryFile ?: return null
+            update(jobId, AuditStage.IL2CPP, 97, "Настоящий IL2CPP dump: регистрации, методы, поля и RVA")
+            val result = RealIl2CppDumpEngine.dump(metadata, library, outputDirectory)
+            if (result.complete) {
+                requireNotNull(result.dumpCsFile).copyTo(destination, overwrite = true)
+                requireNotNull(result.packageFile).copyTo(packageDestination, overwrite = true)
             }
+            return result
         } finally {
             metadataFile?.delete()
+            libraryFile?.delete()
             nestedApkFile?.delete()
+            outputDirectory.deleteRecursively()
+            File(outputDirectory.parentFile, "${outputDirectory.name}-real-il2cpp-dump.zip").delete()
         }
     }
 
@@ -436,6 +488,7 @@ class AuditWorker(
         private const val MAX_MESSAGE_LENGTH = 180
         private const val MAX_ERROR_LENGTH = 500
         private const val MAX_METADATA_FOR_DUMP_BYTES = 128L * 1024L * 1024L
+        private const val MAX_LIBRARY_FOR_DUMP_BYTES = 256L * 1024L * 1024L
         private const val MAX_NESTED_APK_FOR_DUMP_BYTES = 256L * 1024L * 1024L
         private const val REPORT_STREAM_BUFFER_BYTES = 128 * 1024
         private const val STREAM_CANCELLATION_INTERVAL = 256

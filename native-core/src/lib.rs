@@ -1,6 +1,8 @@
 mod axml;
+mod il2cpp_dump;
 
 pub use axml::{parse_axml, AxmlAttribute, AxmlDocument, AxmlElement, AxmlError, AxmlLimits};
+pub use il2cpp_dump::{dump_il2cpp_pair, Il2CppDumpError, Il2CppDumpManifest};
 use sha2::{Digest, Sha256};
 
 /// Computes a stable fingerprint without executing the supplied bytes.
@@ -27,8 +29,8 @@ impl Default for AnalysisLimits {
 
 #[cfg(target_os = "android")]
 mod android_jni {
-    use super::{parse_axml, AxmlLimits};
-    use jni::objects::{JByteArray, JObject};
+    use super::{dump_il2cpp_pair, parse_axml, AxmlLimits};
+    use jni::objects::{JByteArray, JObject, JString};
     use jni::sys::jstring;
     use jni::JNIEnv;
 
@@ -36,7 +38,7 @@ mod android_jni {
     /// No file access, process access, or target-code execution is available through this API.
     #[unsafe(no_mangle)]
     pub extern "system" fn Java_org_unirevlab_security_nativecore_NativeAnalysis_parseAxmlJson(
-        env: JNIEnv,
+        mut env: JNIEnv,
         _object: JObject,
         input: JByteArray,
     ) -> jstring {
@@ -54,6 +56,34 @@ mod android_jni {
             Ok(value) => value.into_raw(),
             Err(_) => std::ptr::null_mut(),
         }
+    }
+
+    /// File-path based boundary keeps 100+ MB IL2CPP artifacts out of the Java heap.
+    #[unsafe(no_mangle)]
+    pub extern "system" fn Java_org_unirevlab_security_nativecore_NativeAnalysis_dumpIl2CppPairJson(
+        mut env: JNIEnv,
+        _object: JObject,
+        binary_path: JString,
+        metadata_path: JString,
+        output_dir: JString,
+    ) -> jstring {
+        let result = (|| {
+            let binary: String = env.get_string(&binary_path).map_err(|e| e.to_string())?.into();
+            let metadata: String = env.get_string(&metadata_path).map_err(|e| e.to_string())?.into();
+            let output: String = env.get_string(&output_dir).map_err(|e| e.to_string())?.into();
+            dump_il2cpp_pair(
+                std::path::Path::new(&binary),
+                std::path::Path::new(&metadata),
+                std::path::Path::new(&output),
+            )
+                .and_then(|manifest| serde_json::to_string(&manifest).map_err(Into::into))
+                .map_err(|e| e.to_string())
+        })();
+        let json = match result {
+            Ok(value) => value,
+            Err(error) => serde_json::json!({"status":"FAILED","error":error}).to_string(),
+        };
+        env.new_string(json).map(|v| v.into_raw()).unwrap_or(std::ptr::null_mut())
     }
 }
 
