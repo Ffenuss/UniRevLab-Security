@@ -94,6 +94,7 @@ fun ReportChatScreen(
     var messages by remember { mutableStateOf<List<OpenRouterChatMessage>>(emptyList()) }
     var question by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var busyMessage by remember { mutableStateOf("Подготавливаю запрос…") }
     var refreshingModels by remember { mutableStateOf(false) }
     var showModels by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
@@ -153,27 +154,43 @@ fun ReportChatScreen(
             val historyBefore = messages
             messages = messages + userMessage
             val result = runCatching {
-                withContext(Dispatchers.IO) {
-                    val key = requireNotNull(secretStore.loadKey()) { "Сначала сохраните API-ключ OpenRouter" }
-                    val policy = if (allowTrainingProviders) {
-                        OpenRouterDataPolicy.FREE_MODEL_COMPATIBLE
-                    } else {
-                        OpenRouterDataPolicy.STRICT
-                    }
-                    val primaryContext = ReportContextEngine.build(selectedReport.file, prompt, selectedModel.contextLength)
-                    try {
-                        ChatAttempt(
+                val key = withContext(Dispatchers.IO) {
+                    requireNotNull(secretStore.loadKey()) { "Сначала сохраните API-ключ OpenRouter" }
+                }
+                val policy = if (allowTrainingProviders) {
+                    OpenRouterDataPolicy.FREE_MODEL_COMPATIBLE
+                } else {
+                    OpenRouterDataPolicy.STRICT
+                }
+                busyMessage = "Быстро индексирую полный отчёт ${formatBytes(selectedReport.sizeBytes)}…"
+                val primaryContext = withContext(Dispatchers.IO) {
+                    ReportContextEngine.build(selectedReport.file, prompt, selectedModel.contextLength)
+                }
+                busyMessage = "Контекст готов. Жду OpenRouter (не более 150 секунд)…"
+                try {
+                    withContext(Dispatchers.IO) {
+                        try {
+                            ChatAttempt(
                             answer = client.complete(key, selectedModel, primaryContext, historyBefore, prompt, policy),
                             reportContext = primaryContext,
                             strictFallbackUsed = false,
-                        )
-                    } catch (failure: OpenRouterApiException) {
-                        val canUseStrictFallback = policy == OpenRouterDataPolicy.STRICT &&
-                            failure.reason == OpenRouterFailureReason.DATA_POLICY_NO_ENDPOINT &&
-                            selectedModel.id != OpenRouterModelCatalog.defaultModel().id
-                        if (!canUseStrictFallback) throw failure
-                        val fallback = OpenRouterModelCatalog.defaultModel()
-                        val fallbackContext = ReportContextEngine.build(selectedReport.file, prompt, fallback.contextLength)
+                            )
+                        } catch (failure: OpenRouterApiException) {
+                            throw failure
+                        }
+                    }
+                } catch (failure: OpenRouterApiException) {
+                    val canUseStrictFallback = policy == OpenRouterDataPolicy.STRICT &&
+                        failure.reason == OpenRouterFailureReason.DATA_POLICY_NO_ENDPOINT &&
+                        selectedModel.id != OpenRouterModelCatalog.defaultModel().id
+                    if (!canUseStrictFallback) throw failure
+                    val fallback = OpenRouterModelCatalog.defaultModel()
+                    busyMessage = "Выбранная модель отклонена политикой. Готовлю безопасный fallback…"
+                    val fallbackContext = withContext(Dispatchers.IO) {
+                        ReportContextEngine.build(selectedReport.file, prompt, fallback.contextLength)
+                    }
+                    busyMessage = "Жду безопасный fallback OpenRouter (не более 150 секунд)…"
+                    withContext(Dispatchers.IO) {
                         ChatAttempt(
                             answer = client.complete(key, fallback, fallbackContext, historyBefore, prompt, policy),
                             reportContext = fallbackContext,
@@ -322,7 +339,7 @@ fun ReportChatScreen(
                     item {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             CircularProgressIndicator()
-                            Text("Просматриваю полный отчёт и жду ответ модели…")
+                            Text(busyMessage)
                         }
                     }
                 }

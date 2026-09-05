@@ -39,6 +39,7 @@ object ReportContextEngine {
         }
 
         val terms = queryTerms(query)
+        val queryPattern = terms.takeIf { it.isNotEmpty() }?.joinToString("|") { Regex.escape(it) }?.let(::Regex)
         val perChunkChars = (contextChars / MAX_SELECTED_CHUNKS).coerceIn(8_000, CHUNK_CHARS)
         val selected = PriorityQueue<ScoredChunk>(compareBy<ScoredChunk> { it.score }.thenByDescending { it.index })
         var firstChunk: ScoredChunk? = null
@@ -50,10 +51,12 @@ object ReportContextEngine {
                 if (read < 0) break
                 if (read == 0) continue
                 val raw = String(buffer, 0, read)
+                val normalized = raw.lowercase(Locale.ROOT)
+                val scored = score(normalized, queryPattern)
                 val candidate = ScoredChunk(
                     index = chunks,
-                    score = score(raw, terms),
-                    text = excerpt(raw, terms, perChunkChars),
+                    score = scored.score,
+                    text = excerpt(raw, scored.firstMatch, perChunkChars),
                 )
                 if (chunks == 0) firstChunk = candidate.copy(score = Int.MAX_VALUE)
                 selected.add(candidate)
@@ -99,28 +102,26 @@ object ReportContextEngine {
         .take(MAX_QUERY_TERMS)
         .toSet()
 
-    private fun score(text: String, terms: Set<String>): Int {
-        val normalized = text.lowercase(Locale.ROOT)
+    private fun score(normalized: String, queryPattern: Regex?): ScoredText {
         var score = 0
-        for (term in terms) {
-            var from = 0
-            repeat(MAX_TERM_MATCHES) {
-                val match = normalized.indexOf(term, from)
-                if (match < 0) return@repeat
-                score += 12
-                from = match + term.length
+        var firstMatch: Int? = null
+        queryPattern?.findAll(normalized)?.take(MAX_QUERY_MATCHES_PER_CHUNK)?.forEach { match ->
+            score += 12
+            if (firstMatch == null) firstMatch = match.range.first
+        }
+        PRIORITY_MARKERS.forEach { (marker, weight) ->
+            val index = normalized.indexOf(marker)
+            if (index >= 0) {
+                score += weight
+                if (firstMatch == null || index < firstMatch!!) firstMatch = index
             }
         }
-        PRIORITY_MARKERS.forEach { (marker, weight) -> if (normalized.contains(marker)) score += weight }
-        return score
+        return ScoredText(score, firstMatch)
     }
 
-    private fun excerpt(text: String, terms: Set<String>, maxChars: Int): String {
+    private fun excerpt(text: String, firstMatch: Int?, maxChars: Int): String {
         if (text.length <= maxChars) return text
-        val normalized = text.lowercase(Locale.ROOT)
-        val queryMatch = terms.asSequence().map { normalized.indexOf(it) }.filter { it >= 0 }.minOrNull()
-        val priorityMatch = PRIORITY_MARKERS.asSequence().map { normalized.indexOf(it.first) }.filter { it >= 0 }.minOrNull()
-        val match = queryMatch ?: priorityMatch ?: 0
+        val match = firstMatch ?: 0
         val start = (match - maxChars / 3).coerceIn(0, text.length - maxChars)
         val end = (start + maxChars).coerceAtMost(text.length)
         return buildString(maxChars + 80) {
@@ -131,6 +132,7 @@ object ReportContextEngine {
     }
 
     private data class ScoredChunk(val index: Int, val score: Int, val text: String)
+    private data class ScoredText(val score: Int, val firstMatch: Int?)
 
     private val TOKEN = Regex("[\\p{L}\\p{N}_./:-]+")
     private val STOP_WORDS = setOf(
@@ -156,6 +158,6 @@ object ReportContextEngine {
     private const val BUFFER_BYTES = 64 * 1024
     private const val MAX_SELECTED_CHUNKS = 16
     private const val MAX_QUERY_TERMS = 24
-    private const val MAX_TERM_MATCHES = 16
+    private const val MAX_QUERY_MATCHES_PER_CHUNK = 96
     private const val MAX_REPORT_BYTES = 1_073_741_824L
 }

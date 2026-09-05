@@ -8,6 +8,7 @@
 - stream 100+ MB pair files by path across JNI and when saving results to avoid the prior Java-heap allocation failure;
 - refuse to emit offsets when metadata is protected, the pair does not match, registrations are unresolved or engine output is incomplete;
 - retain gameplay, economy, subscription, premium and purchase trust-boundary classification as defensive triage over confirmed engine output.
+- replace the per-term multi-scan of very large AI reports with one compiled query pass per chunk, show separate indexing/network stages and enforce a 150-second total OpenRouter watchdog.
 
 ## 0.42.1-preview-openrouter-privacy-fix
 

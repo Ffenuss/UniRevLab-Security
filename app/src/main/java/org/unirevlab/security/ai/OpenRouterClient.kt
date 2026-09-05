@@ -7,6 +7,10 @@ import java.io.InputStream
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
+import java.io.IOException
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 class OpenRouterClient(
     private val baseUrl: String = "https://openrouter.ai/api/v1",
@@ -36,12 +40,29 @@ class OpenRouterClient(
             setRequestProperty("Content-Type", "application/json")
             setRequestProperty("HTTP-Referer", APP_URL)
             setRequestProperty("X-OpenRouter-Title", APP_TITLE)
-            doOutput = true
-            outputStream.buffered().use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
         }
-        return connection.useResponse { status, body ->
-            if (status !in 200..299) throw apiFailure(status, body)
-            OpenRouterModelCatalog.parseChatResult(body, model.id)
+        val timedOut = AtomicBoolean(false)
+        val watchdog = WATCHDOG.schedule({
+            timedOut.set(true)
+            connection.disconnect()
+        }, TOTAL_REQUEST_TIMEOUT_MS.toLong(), TimeUnit.MILLISECONDS)
+        return try {
+            val bytes = payload.toString().toByteArray(Charsets.UTF_8)
+            connection.doOutput = true
+            connection.setFixedLengthStreamingMode(bytes.size)
+            connection.outputStream.buffered().use { it.write(bytes) }
+            connection.useResponse { status, body ->
+                if (status !in 200..299) throw apiFailure(status, body)
+                OpenRouterModelCatalog.parseChatResult(body, model.id)
+            }
+        } catch (error: IOException) {
+            if (timedOut.get()) {
+                throw IOException("OpenRouter не завершил запрос за ${TOTAL_REQUEST_TIMEOUT_MS / 1_000} секунд. Выберите другую бесплатную модель или повторите позже.", error)
+            }
+            throw error
+        } finally {
+            watchdog.cancel(false)
+            connection.disconnect()
         }
     }
 
@@ -149,11 +170,15 @@ class OpenRouterClient(
         private const val APP_URL = "https://github.com/Ffenuss/UniRevLab-Security"
         private const val CONNECT_TIMEOUT_MS = 20_000
         private const val READ_TIMEOUT_MS = 120_000
+        private const val TOTAL_REQUEST_TIMEOUT_MS = 150_000
         private const val MAX_HISTORY_MESSAGES = 10
         private const val MAX_HISTORY_MESSAGE_CHARS = 12_000
         private const val MAX_QUESTION_CHARS = 8_000
         private const val MAX_COMPLETION_TOKENS = 4_000
         private const val MAX_RESPONSE_BODY_CHARS = 1_000_000
+        private val WATCHDOG = Executors.newSingleThreadScheduledExecutor { runnable ->
+            Thread(runnable, "openrouter-timeout").apply { isDaemon = true }
+        }
         private val SYSTEM_PROMPT = """
             Ты — помощник по авторизованному аудиту безопасности Android-приложений.
             Отвечай на русском языке и опирайся только на переданный отчёт. Чётко разделяй подтверждённые факты,
