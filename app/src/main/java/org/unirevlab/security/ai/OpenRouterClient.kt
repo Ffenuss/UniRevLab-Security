@@ -25,9 +25,33 @@ class OpenRouterClient(
         reportContext: ReportContext,
         history: List<OpenRouterChatMessage>,
         question: String,
+        dataPolicy: OpenRouterDataPolicy = OpenRouterDataPolicy.STRICT,
     ): OpenRouterChatResult {
         require(apiKey.isNotBlank()) { "API-ключ OpenRouter не сохранён" }
         require(question.isNotBlank()) { "Введите вопрос" }
+        val payload = buildPayload(model, reportContext, history, question, dataPolicy)
+
+        val connection = open("$baseUrl/chat/completions", "POST").apply {
+            setRequestProperty("Authorization", "Bearer $apiKey")
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("HTTP-Referer", APP_URL)
+            setRequestProperty("X-OpenRouter-Title", APP_TITLE)
+            doOutput = true
+            outputStream.buffered().use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
+        }
+        return connection.useResponse { status, body ->
+            if (status !in 200..299) throw apiFailure(status, body)
+            OpenRouterModelCatalog.parseChatResult(body, model.id)
+        }
+    }
+
+    internal fun buildPayload(
+        model: OpenRouterModel,
+        reportContext: ReportContext,
+        history: List<OpenRouterChatMessage>,
+        question: String,
+        dataPolicy: OpenRouterDataPolicy,
+    ): JSONObject {
         val messages = JSONArray().put(
             JSONObject()
                 .put("role", "system")
@@ -56,7 +80,7 @@ class OpenRouterClient(
                 )
         )
 
-        val payload = JSONObject()
+        return JSONObject()
             .put("model", model.id)
             .put("messages", messages)
             .put("temperature", 0.15)
@@ -64,22 +88,9 @@ class OpenRouterClient(
             .put(
                 "provider",
                 JSONObject()
-                    .put("data_collection", "deny")
+                    .put("data_collection", dataPolicy.apiValue)
                     .put("allow_fallbacks", true)
             )
-
-        val connection = open("$baseUrl/chat/completions", "POST").apply {
-            setRequestProperty("Authorization", "Bearer $apiKey")
-            setRequestProperty("Content-Type", "application/json")
-            setRequestProperty("HTTP-Referer", APP_URL)
-            setRequestProperty("X-OpenRouter-Title", APP_TITLE)
-            doOutput = true
-            outputStream.buffered().use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
-        }
-        return connection.useResponse { status, body ->
-            if (status !in 200..299) throw apiFailure(status, body)
-            OpenRouterModelCatalog.parseChatResult(body, model.id)
-        }
     }
 
     private fun open(url: String, method: String): HttpURLConnection =
@@ -91,18 +102,24 @@ class OpenRouterClient(
             setRequestProperty("Accept", "application/json")
         }
 
-    private fun apiFailure(status: Int, body: String): IllegalStateException {
+    private fun apiFailure(status: Int, body: String): OpenRouterApiException {
         val detail = OpenRouterModelCatalog.parseError(body)
-        val friendly = when (status) {
-            401, 403 -> "OpenRouter отклонил API-ключ"
-            402 -> "Для этого запроса недостаточно бесплатного лимита или кредитов"
-            408 -> "OpenRouter не успел обработать запрос"
-            413 -> "Контекст отчёта оказался слишком большим для выбранной модели"
-            429 -> "Достигнут бесплатный лимит запросов OpenRouter. Повторите позже"
-            in 500..599 -> "OpenRouter или провайдер модели временно недоступен"
-            else -> "Ошибка OpenRouter HTTP $status"
+        val reason = classifyOpenRouterFailure(status, detail)
+        val message = if (reason == OpenRouterFailureReason.DATA_POLICY_NO_ENDPOINT) {
+            "Для модели нет endpoint, совместимого с текущей политикой данных"
+        } else {
+            val friendly = when (status) {
+                401, 403 -> "OpenRouter отклонил API-ключ"
+                402 -> "Для этого запроса недостаточно бесплатного лимита или кредитов"
+                408 -> "OpenRouter не успел обработать запрос"
+                413 -> "Контекст отчёта оказался слишком большим для выбранной модели"
+                429 -> "Достигнут бесплатный лимит запросов OpenRouter. Повторите позже"
+                in 500..599 -> "OpenRouter или провайдер модели временно недоступен"
+                else -> "Ошибка OpenRouter HTTP $status"
+            }
+            listOfNotNull(friendly, detail?.take(300)).distinct().joinToString(": ")
         }
-        return IllegalStateException(listOfNotNull(friendly, detail?.take(300)).distinct().joinToString(": "))
+        return OpenRouterApiException(status, reason, message)
     }
 
     private inline fun <T> HttpURLConnection.useResponse(block: (Int, String) -> T): T = try {

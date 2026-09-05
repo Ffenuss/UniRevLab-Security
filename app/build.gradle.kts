@@ -15,8 +15,8 @@ android {
         applicationId = "org.unirevlab.security"
         minSdk = 26
         targetSdk = 36
-        versionCode = 55
-        versionName = "0.42.0-preview-report-ai-chat"
+        versionCode = 56
+        versionName = "0.42.1-preview-openrouter-privacy-fix"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

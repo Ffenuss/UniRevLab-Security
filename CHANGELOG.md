@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.42.1-preview-openrouter-privacy-fix
+
+- recognize OpenRouter's `No endpoints found matching your data policy (Free model training)` response and replace the raw HTTP 404 with a clear in-app explanation;
+- keep `data_collection=deny` as the default and automatically retry the privacy-compatible free-model router when the selected free model has no compliant endpoint;
+- add an explicit, non-persistent compatibility switch for providers that may retain or train on submitted excerpts, gated by a separate customer-authorization confirmation;
+- link directly to the OpenRouter privacy settings when account-wide policy still blocks a free model;
+- reset the permissive choice whenever the report or model changes and add regression coverage for both request policies and error classification.
+
 ## 0.42.0-preview-report-ai-chat
 
 - add an in-app OpenRouter chat that can use the current `full-report.json`, an imported report, or a signed evidence ZIP;

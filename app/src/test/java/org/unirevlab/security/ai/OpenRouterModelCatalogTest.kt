@@ -58,4 +58,22 @@ class OpenRouterModelCatalogTest {
         assertEquals("Ответ", plain.text)
         assertEquals("Часть 1. Часть 2.", multipart.text)
     }
+
+    @Test
+    fun requestDataPolicyIsExplicitAndFailureIsClassified() {
+        val client = OpenRouterClient()
+        val model = OpenRouterModel("vendor/model:free", "Model", "", 64_000, false)
+        val context = ReportContext("evidence", 8, 1, 1, true)
+
+        val strict = client.buildPayload(model, context, emptyList(), "question", OpenRouterDataPolicy.STRICT)
+        val compatible = client.buildPayload(model, context, emptyList(), "question", OpenRouterDataPolicy.FREE_MODEL_COMPATIBLE)
+
+        assertEquals("deny", strict.getJSONObject("provider").getString("data_collection"))
+        assertEquals("allow", compatible.getJSONObject("provider").getString("data_collection"))
+        assertEquals(
+            OpenRouterFailureReason.DATA_POLICY_NO_ENDPOINT,
+            classifyOpenRouterFailure(404, "No endpoints found matching your data policy (Free model training)"),
+        )
+        assertEquals(OpenRouterFailureReason.GENERAL, classifyOpenRouterFailure(404, "Model not found"))
+    }
 }

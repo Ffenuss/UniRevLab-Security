@@ -30,6 +30,34 @@ data class OpenRouterChatResult(
     val modelId: String,
 )
 
+enum class OpenRouterDataPolicy(val apiValue: String) {
+    STRICT("deny"),
+    FREE_MODEL_COMPATIBLE("allow"),
+}
+
+enum class OpenRouterFailureReason {
+    DATA_POLICY_NO_ENDPOINT,
+    GENERAL,
+}
+
+class OpenRouterApiException(
+    val statusCode: Int,
+    val reason: OpenRouterFailureReason,
+    message: String,
+) : IllegalStateException(message)
+
+internal fun classifyOpenRouterFailure(status: Int, detail: String?): OpenRouterFailureReason {
+    val normalized = detail.orEmpty().lowercase()
+    return if (
+        status == 404 &&
+        ("data policy" in normalized || "free model training" in normalized)
+    ) {
+        OpenRouterFailureReason.DATA_POLICY_NO_ENDPOINT
+    } else {
+        OpenRouterFailureReason.GENERAL
+    }
+}
+
 object OpenRouterModelCatalog {
     private val freeRouter = OpenRouterModel(
         id = "openrouter/free",
