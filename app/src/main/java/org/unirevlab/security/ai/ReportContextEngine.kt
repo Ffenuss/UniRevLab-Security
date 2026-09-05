@@ -53,7 +53,7 @@ object ReportContextEngine {
                 val candidate = ScoredChunk(
                     index = chunks,
                     score = score(raw, terms),
-                    text = raw.take(perChunkChars),
+                    text = excerpt(raw, terms, perChunkChars),
                 )
                 if (chunks == 0) firstChunk = candidate.copy(score = Int.MAX_VALUE)
                 selected.add(candidate)
@@ -113,6 +113,21 @@ object ReportContextEngine {
         }
         PRIORITY_MARKERS.forEach { (marker, weight) -> if (normalized.contains(marker)) score += weight }
         return score
+    }
+
+    private fun excerpt(text: String, terms: Set<String>, maxChars: Int): String {
+        if (text.length <= maxChars) return text
+        val normalized = text.lowercase(Locale.ROOT)
+        val queryMatch = terms.asSequence().map { normalized.indexOf(it) }.filter { it >= 0 }.minOrNull()
+        val priorityMatch = PRIORITY_MARKERS.asSequence().map { normalized.indexOf(it.first) }.filter { it >= 0 }.minOrNull()
+        val match = queryMatch ?: priorityMatch ?: 0
+        val start = (match - maxChars / 3).coerceIn(0, text.length - maxChars)
+        val end = (start + maxChars).coerceAtMost(text.length)
+        return buildString(maxChars + 80) {
+            if (start > 0) appendLine("… [начало блока опущено]")
+            append(text, start, end)
+            if (end < text.length) appendLine("\n… [конец блока опущен]")
+        }
     }
 
     private data class ScoredChunk(val index: Int, val score: Int, val text: String)
