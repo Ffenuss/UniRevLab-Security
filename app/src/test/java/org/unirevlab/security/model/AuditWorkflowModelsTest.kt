@@ -52,4 +52,33 @@ class AuditWorkflowModelsTest {
         assertTrue(profile.isValid)
         assertEquals("Локальный тестовый режим", profile.organization)
     }
+
+    @Test
+    fun summaryPreservesRealDumpTruthState() {
+        val expected = AuditJobSummary(
+            jobId = "dump-job",
+            completedAtEpochMs = 30,
+            displayName = "Game",
+            packageName = "org.example.game",
+            artifactSha256 = "abc",
+            runtimeLabels = listOf("UNITY_IL2CPP"),
+            findings = 1,
+            critical = 0,
+            high = 0,
+            medium = 1,
+            dexMethods = 10,
+            nativeLibraries = 8,
+            il2cppDetected = true,
+            il2cppMetadataVersion = 31,
+            il2cppDetectionSource = "REAL_DUMP_COMPLETE",
+            il2cppDumpStatus = "COMPLETE",
+            il2cppSuccessfulAbis = listOf("arm64-v8a"),
+            confirmedGameplaySurfaces = 12,
+            confirmedApplicationSurfaces = 3,
+            exportedArtifactCount = 20,
+            outputFiles = listOf("il2cpp-dump.cs"),
+        )
+
+        assertEquals(expected, AuditWorkflowJson.decodeSummary(AuditWorkflowJson.encodeSummary(expected)))
+    }
 }

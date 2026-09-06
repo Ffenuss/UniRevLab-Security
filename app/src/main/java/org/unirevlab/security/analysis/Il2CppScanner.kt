@@ -48,6 +48,13 @@ object Il2CppScanner {
     ): Il2CppSummary? {
         val il2cppLibs = native?.libraries.orEmpty()
             .filter { it.entryName.substringAfterLast('/').equals("libil2cpp.so", ignoreCase = true) }
+        // Detection must not depend on whether the bounded ELF detail list retained this large library.
+        val il2cppLibraryNames = java.util.TreeSet<String>().apply {
+            addAll(il2cppLibs.map { it.entryName })
+            archiveEntryNames.orEmpty()
+                .filter { it.substringAfterLast('/').equals("libil2cpp.so", ignoreCase = true) }
+                .forEach(::add)
+        }
         val apiSet = java.util.TreeSet<String>()
         val registrationMap = LinkedHashMap<Triple<String, String, String>, Il2CppRegistrationCandidate>()
         fun consumeSymbol(symbol: org.unirevlab.security.model.NativeSymbolReference) {
@@ -94,7 +101,7 @@ object Il2CppScanner {
                     }.sortedBy { it.name }.firstOrNull()
                 }
 
-                if (metadataEntry == null && il2cppLibs.isEmpty()) return null
+                if (metadataEntry == null && il2cppLibraryNames.isEmpty()) return null
                 var parseErrors = 0
                 var truncated = false
                 val metadata = if (metadataEntry != null) {
@@ -127,24 +134,24 @@ object Il2CppScanner {
                     if (metadata?.magicValid == true) add("METADATA_MAGIC_VALID")
                     if (metadata?.typeDefinitions?.isNotEmpty() == true) add("TYPE_DEFINITIONS_RECONSTRUCTED")
                     if (metadata?.methodDefinitions?.isNotEmpty() == true) add("METHOD_DEFINITIONS_RECONSTRUCTED")
-                    if (il2cppLibs.isNotEmpty()) add("LIBIL2CPP_PRESENT")
+                    if (il2cppLibraryNames.isNotEmpty()) add("LIBIL2CPP_PRESENT")
                     if (apiSymbols.isNotEmpty()) add("IL2CPP_API_SYMBOLS_PRESENT")
                     if (apiSymbols.any { it.contains("class_from_name") }) add("CLASS_LOOKUP_API_PRESENT")
                     if (apiSymbols.any { it.contains("method_get") || it.contains("class_get_method") }) add("METHOD_INTROSPECTION_API_PRESENT")
                     if (registrationCandidates.isNotEmpty()) add("REGISTRATION_SYMBOL_CANDIDATES_PRESENT")
                 }
-                val detected = (metadata?.magicValid == true && il2cppLibs.isNotEmpty()) ||
-                    (metadataEntry != null && il2cppLibs.isNotEmpty()) || apiSymbols.size >= 3
+                val detected = (metadata?.magicValid == true && il2cppLibraryNames.isNotEmpty()) ||
+                    (metadataEntry != null && il2cppLibraryNames.isNotEmpty()) || apiSymbols.size >= 3
                 val confidence = when {
-                    metadata?.magicValid == true && il2cppLibs.isNotEmpty() -> "HIGH"
-                    metadataEntry != null && il2cppLibs.isNotEmpty() -> "MEDIUM"
+                    metadata?.magicValid == true && il2cppLibraryNames.isNotEmpty() -> "HIGH"
+                    metadataEntry != null && il2cppLibraryNames.isNotEmpty() -> "MEDIUM"
                     else -> "LOW"
                 }
                 Il2CppSummary(
                     detected = detected,
                     confidence = confidence,
                     metadata = metadata,
-                    libil2cppLibraries = il2cppLibs.map { it.entryName }.distinct().sorted(),
+                    libil2cppLibraries = il2cppLibraryNames.toList(),
                     il2cppApiSymbols = apiSymbols,
                     registrationIndicators = indicators,
                     registrationCandidates = registrationCandidates,
@@ -153,11 +160,11 @@ object Il2CppScanner {
                 )
             }
         } catch (_: ZipException) {
-            if (il2cppLibs.isEmpty()) null else Il2CppSummary(
+            if (il2cppLibraryNames.isEmpty()) null else Il2CppSummary(
                 detected = true,
                 confidence = "LOW",
                 metadata = null,
-                libil2cppLibraries = il2cppLibs.map { it.entryName },
+                libil2cppLibraries = il2cppLibraryNames.toList(),
                 il2cppApiSymbols = apiSymbols,
                 registrationIndicators = listOf("LIBIL2CPP_PRESENT"),
                 registrationCandidates = registrationCandidates,
@@ -575,3 +582,4 @@ object Il2CppScanner {
     private val UNITY_VERSION = Regex("20\\d{2}\\.\\d+\\.\\d+[abfp]\\d+(?:[A-Za-z0-9.-]*)?")
     private const val IL2CPP_METADATA_MAGIC = 0xFAB11BAFL
 }
+

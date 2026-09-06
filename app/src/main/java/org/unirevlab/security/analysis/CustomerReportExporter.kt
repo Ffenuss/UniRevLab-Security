@@ -7,10 +7,15 @@ import org.unirevlab.security.model.StaticAnalysisReport
 import java.time.Instant
 
 object CustomerReportExporter {
-    fun export(report: StaticAnalysisReport, gradleEvidence: GradleModuleEvidenceResult? = null, languageCode: String = "ru"): String =
-        if (languageCode == "en") exportEnglish(report, gradleEvidence) else exportRussian(report, gradleEvidence)
+    fun export(
+        report: StaticAnalysisReport,
+        gradleEvidence: GradleModuleEvidenceResult? = null,
+        languageCode: String = "ru",
+        realDump: RealIl2CppDumpEngine.Result? = null,
+    ): String = if (languageCode == "en") exportEnglish(report, gradleEvidence, realDump) else exportRussian(report, gradleEvidence, realDump)
 
-    private fun exportRussian(report: StaticAnalysisReport, gradleEvidence: GradleModuleEvidenceResult? = null): String {
+    private fun exportRussian(report: StaticAnalysisReport, gradleEvidence: GradleModuleEvidenceResult? = null, realDump: RealIl2CppDumpEngine.Result? = null): String {
+        val il2cppDetected = report.il2cpp?.detected == true || realDump?.pairLocated == true
         val modificationSurfaces = ModificationSurfaceClassifier.analyze(report)
         val resistance = if (report.il2cpp?.detected == true) {
             runCatching { Il2CppModdingResistanceEngine.analyze(report) }.getOrNull()
@@ -44,7 +49,7 @@ object CustomerReportExporter {
         appendLine("| Структура APK, manifest, ресурсы | ВЫПОЛНЕНО |")
         appendLine("| DEX и пассивный reverse-анализ | ВЫПОЛНЕНО |")
         appendLine("| Native ELF/JNI | ВЫПОЛНЕНО с указанными ниже ограничениями |")
-        appendLine("| IL2CPP | ${if (report.il2cpp?.detected == true) "ОБНАРУЖЕН" else "НЕ ОБНАРУЖЕН"} |")
+        appendLine("| IL2CPP | ${if (il2cppDetected) "ОБНАРУЖЕН" else "НЕ ОБНАРУЖЕН"} |")
         appendLine("| Динамические проверки | НЕ ВЫПОЛНЕНЫ${if (report.assessment.dynamicAnalysis) " (были запрошены)" else ""} |")
         appendLine("| Активное сетевое тестирование | НЕ ВЫПОЛНЕНО${if (report.assessment.networkTesting) " (было запрошено)" else ""} |")
         appendLine()
@@ -56,7 +61,7 @@ object CustomerReportExporter {
         appendLine("| Medium | ${report.findings.count { it.severity == Severity.MEDIUM }} |")
         appendLine("| DEX methods indexed | ${report.dex?.methodsIndexed ?: 0} |")
         appendLine("| Native libraries | ${report.native?.librariesScanned ?: 0} |")
-        appendLine("| IL2CPP | ${if (report.il2cpp?.detected == true) "обнаружен" else "не обнаружен"} |")
+        appendLine("| IL2CPP | ${if (il2cppDetected) "обнаружен" else "не обнаружен"} |")
         appendLine("| Предварительные modification-surface сигналы | ${modificationSurfaces.totalResolvedBeforeLimit + modificationSurfaces.totalUnresolvedBeforeLimit} |")
         gradleEvidence?.let {
             appendLine("| APK/Gradle modules | ${it.modulesDetected} |")
@@ -86,8 +91,8 @@ object CustomerReportExporter {
         appendLine()
         val il2cpp = report.il2cpp
         val metadata = il2cpp?.metadata
-        if (il2cpp?.detected == true) {
-            appendLine("- `libil2cpp.so`: ${il2cpp.libil2cppLibraries.size} файл(а).")
+        if (il2cppDetected) {
+            appendLine("- `libil2cpp.so`: ${il2cpp?.libil2cppLibraries?.size ?: realDump?.successfulAbis?.size ?: 0} файл(а).")
             appendLine("- `global-metadata.dat`: ${metadata?.entryName ?: "не определён"}.")
             appendLine("- Версия metadata: ${metadata?.metadataVersion ?: "не определена"}; magic: ${if (metadata?.magicValid == true) "корректный" else "не подтверждён"}.")
             appendLine("- Восстановлено типов: ${metadata?.typeDefinitions?.size ?: 0}; методов: ${metadata?.methodDefinitions?.size ?: 0}.")
@@ -143,7 +148,7 @@ object CustomerReportExporter {
         }
         appendLine("## Вывод о доверии к клиенту")
         appendLine()
-        if (report.il2cpp?.detected == true) {
+        if (il2cppDetected) {
             appendLine("Наличие IL2CPP не делает критическую клиентскую логику доверенной: `libil2cpp.so` и metadata автоматически обнаружены и отражены в evidence. Критические полномочия и ценные операции должны подтверждаться сервером.")
         } else {
             appendLine("Независимо от runtime, клиентская логика и локальное состояние не должны быть единственным источником истины для полномочий, оплаты, баланса или доверенного результата.")
@@ -196,7 +201,8 @@ object CustomerReportExporter {
         }
     }
 
-    private fun exportEnglish(report: StaticAnalysisReport, gradleEvidence: GradleModuleEvidenceResult?): String {
+    private fun exportEnglish(report: StaticAnalysisReport, gradleEvidence: GradleModuleEvidenceResult?, realDump: RealIl2CppDumpEngine.Result?): String {
+        val il2cppDetected = report.il2cpp?.detected == true || realDump?.pairLocated == true
         val limitations = report.findings.filter { it.category == "ANALYSIS" }
         val review = report.findings.filter { it.category != "ANALYSIS" && it.requiresManualReview }
         val confirmed = report.findings.filter { it.category != "ANALYSIS" && !it.requiresManualReview }
@@ -226,7 +232,7 @@ object CustomerReportExporter {
             appendLine("| Medium | ${report.findings.count { it.severity == Severity.MEDIUM }} |")
             appendLine("| DEX methods indexed | ${report.dex?.methodsIndexed ?: 0} |")
             appendLine("| Native libraries | ${report.native?.librariesScanned ?: 0} |")
-            appendLine("| IL2CPP detected | ${report.il2cpp?.detected == true} |")
+            appendLine("| IL2CPP detected | $il2cppDetected |")
             gradleEvidence?.let {
                 appendLine("| APK/Gradle modules | ${it.modulesDetected} |")
                 appendLine("| Dynamic features | ${it.dynamicFeaturesDetected} |")

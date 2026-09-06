@@ -2,7 +2,9 @@
 
 Open-source Android-first platform for **authorized** mobile application security assessment and reverse engineering.
 
-## Current milestone: v0.44.0-dump-first-pipeline
+## Current milestone: v0.45.0-il2cpp-truth-state
+
+IL2CPP detection now uses the actual APK/split central-directory entries and the real Rodroid pair result, so a large `libil2cpp.so` cannot disappear merely because the bounded detailed ELF inventory omitted it. The result card reports discovery and dump status separately.
 
 The Android client now exposes one primary workflow: save the customer profile once, confirm the
 scope for the current target, then select an installed application or APK. A persistent WorkManager

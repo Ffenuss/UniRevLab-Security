@@ -919,7 +919,9 @@ class LocalArtifactInspector(
     private fun inspectIl2Cpp(apk: File, native: NativeSummary?, archiveIndex: ApkArchiveIndex? = null): Il2CppSummary? =
         Il2CppScanner.scanApk(
             apk, native,
-            archiveEntryNames = archiveIndex?.runtimeArtifactEntries?.asSequence()?.map { it.name }?.toList(),
+            archiveEntryNames = archiveIndex
+                ?.takeUnless { it.runtimeArtifactTruncated }
+                ?.let { index -> (index.runtimeArtifactEntries.map { it.name } + index.nativeEntryNames).distinct() },
         )
 
     private fun inspectNativeLibraries(
@@ -1364,7 +1366,7 @@ class LocalArtifactInspector(
     )
 
     companion object {
-    const val ENGINE_VERSION = "0.44.0-dump-first-pipeline"
+    const val ENGINE_VERSION = "0.45.0-il2cpp-truth-state"
         private const val MAX_DEX_FILES = 32
         private const val MAX_SINGLE_DEX_BYTES = 96L * 1024L * 1024L
         private const val MAX_TOTAL_DEX_BYTES = 384L * 1024L * 1024L

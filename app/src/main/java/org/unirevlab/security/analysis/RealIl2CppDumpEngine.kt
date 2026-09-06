@@ -36,6 +36,7 @@ object RealIl2CppDumpEngine {
         val applicationSurfaceCount: Int = 0,
         val successfulAbis: List<String> = emptyList(),
         val failedAbis: List<String> = emptyList(),
+        val pairLocated: Boolean = true,
     )
 
     fun notAvailable(error: String): Result = Result(
@@ -55,6 +56,7 @@ object RealIl2CppDumpEngine {
         packageFile = null,
         manifestFile = null,
         generatedFiles = emptyList(),
+        pairLocated = false,
     )
 
     fun dump(metadataFile: File, libraryFile: File, outputDirectory: File): Result {

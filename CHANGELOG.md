@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.45.0-preview-il2cpp-truth-state
+
+- Fixed a false negative where `libil2cpp.so` existed in the APK central directory but was omitted from the bounded detailed ELF list.
+- The result card now derives IL2CPP presence from both archive evidence and the real Rodroid pair/dump result.
+- Added visible dump status, failure reason, successful ABIs, metadata version, and confirmed surface counts.
+- Missing output files are marked as not created instead of opening a broken export action.
+- Invalidated cached 0.44 scan results so affected installed applications are analyzed again.
+
 ## 0.44.0-preview-dump-first-pipeline
 
 - made the completed Rodroid dump the only source for exported IL2CPP method RVA and field offsets;

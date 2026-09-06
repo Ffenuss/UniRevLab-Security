@@ -117,8 +117,6 @@ class AuditWorker(
                 cancelled = { isStopped },
                 onProgress = { message -> update(jobId, AuditStage.GRADLE_MODULES, 92, if (language == "en") "Reading Gradle and module evidence" else message) },
             )
-            customerFile.writeText(CustomerReportExporter.export(report, gradleEvidence, language), Charsets.UTF_8)
-
             ensureActive()
             update(jobId, AuditStage.ARTIFACTS, 93, tr(language, "Автопоиск DEX, native и runtime-артефактов", "Automatically discovering DEX, native, and runtime artifacts"))
             val artifactResult = ArtifactBundleExporter.export(
@@ -139,6 +137,7 @@ class AuditWorker(
                 readableOffsetsDestination = readableOffsetsFile,
                 languageCode = language,
             )
+            customerFile.writeText(CustomerReportExporter.export(report, gradleEvidence, language, realDump), Charsets.UTF_8)
             customerFile.appendText(
                 if (language == "en") {
                     "\n\n## Real IL2CPP dump\n\n" + if (realDump?.complete == true) {
@@ -205,8 +204,19 @@ class AuditWorker(
                 medium = report.findings.count { it.severity == Severity.MEDIUM },
                 dexMethods = report.dex?.methodsIndexed ?: 0L,
                 nativeLibraries = report.native?.librariesScanned ?: 0,
-                il2cppDetected = report.il2cpp?.detected == true,
-                il2cppMetadataVersion = report.il2cpp?.metadata?.metadataVersion,
+                il2cppDetected = report.il2cpp?.detected == true || realDump?.pairLocated == true,
+                il2cppMetadataVersion = realDump?.metadataVersion?.toInt() ?: report.il2cpp?.metadata?.metadataVersion,
+                il2cppDetectionSource = when {
+                    realDump?.complete == true -> "REAL_DUMP_COMPLETE"
+                    realDump?.pairLocated == true -> "INPUT_PAIR_LOCATED"
+                    report.il2cpp?.detected == true -> "STATIC_SCANNER"
+                    else -> "NOT_DETECTED"
+                },
+                il2cppDumpStatus = realDump?.status,
+                il2cppDumpError = realDump?.error,
+                il2cppSuccessfulAbis = realDump?.successfulAbis.orEmpty(),
+                confirmedGameplaySurfaces = realDump?.gameplaySurfaceCount ?: 0,
+                confirmedApplicationSurfaces = realDump?.applicationSurfaceCount ?: 0,
                 exportedArtifactCount = artifactResult.includedEntries,
                 outputFiles = AuditJobRepository.OUTPUT_FILES.map { repository.outputFile(jobId, it) }.filter(File::isFile).map(File::getName).sorted(),
                 languageCode = language,

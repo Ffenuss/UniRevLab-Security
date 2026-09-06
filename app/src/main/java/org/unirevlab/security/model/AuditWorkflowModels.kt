@@ -110,6 +110,12 @@ data class AuditJobSummary(
     val nativeLibraries: Int,
     val il2cppDetected: Boolean,
     val il2cppMetadataVersion: Int?,
+    val il2cppDetectionSource: String = "NOT_DETECTED",
+    val il2cppDumpStatus: String? = null,
+    val il2cppDumpError: String? = null,
+    val il2cppSuccessfulAbis: List<String> = emptyList(),
+    val confirmedGameplaySurfaces: Int = 0,
+    val confirmedApplicationSurfaces: Int = 0,
     val exportedArtifactCount: Int,
     val outputFiles: List<String>,
     val languageCode: String = "ru",
@@ -183,6 +189,12 @@ object AuditWorkflowJson {
         .put("nativeLibraries", value.nativeLibraries)
         .put("il2cppDetected", value.il2cppDetected)
         .putNullable("il2cppMetadataVersion", value.il2cppMetadataVersion)
+        .put("il2cppDetectionSource", value.il2cppDetectionSource)
+        .putNullable("il2cppDumpStatus", value.il2cppDumpStatus)
+        .putNullable("il2cppDumpError", value.il2cppDumpError)
+        .put("il2cppSuccessfulAbis", JSONArray(value.il2cppSuccessfulAbis))
+        .put("confirmedGameplaySurfaces", value.confirmedGameplaySurfaces)
+        .put("confirmedApplicationSurfaces", value.confirmedApplicationSurfaces)
         .put("exportedArtifactCount", value.exportedArtifactCount)
         .put("outputFiles", JSONArray(value.outputFiles))
         .put("languageCode", value.languageCode)
@@ -205,6 +217,12 @@ object AuditWorkflowJson {
             nativeLibraries = json.getInt("nativeLibraries"),
             il2cppDetected = json.getBoolean("il2cppDetected"),
             il2cppMetadataVersion = json.intOrNull("il2cppMetadataVersion"),
+            il2cppDetectionSource = json.optString("il2cppDetectionSource", if (json.optBoolean("il2cppDetected")) "STATIC_SCANNER" else "NOT_DETECTED"),
+            il2cppDumpStatus = json.stringOrNull("il2cppDumpStatus"),
+            il2cppDumpError = json.stringOrNull("il2cppDumpError"),
+            il2cppSuccessfulAbis = json.optJSONArray("il2cppSuccessfulAbis")?.strings().orEmpty(),
+            confirmedGameplaySurfaces = json.optInt("confirmedGameplaySurfaces", 0),
+            confirmedApplicationSurfaces = json.optInt("confirmedApplicationSurfaces", 0),
             exportedArtifactCount = json.getInt("exportedArtifactCount"),
             outputFiles = json.getJSONArray("outputFiles").strings(),
             languageCode = json.optString("languageCode", "ru"),

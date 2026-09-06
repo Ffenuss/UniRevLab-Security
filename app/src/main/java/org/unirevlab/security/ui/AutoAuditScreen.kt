@@ -59,7 +59,7 @@ fun AutoAuditScreen(
             item {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Eyebrow("UNIREVLAB · AUTO AUDIT 0.44")
+                        Eyebrow("UNIREVLAB · AUTO AUDIT 0.45")
                         Text(language.text("Аудит в один выбор", "One-selection audit"), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
                     }
                     LanguageSelector(language, enabled = !isRunning, onLanguageChanged)
@@ -81,7 +81,7 @@ fun AutoAuditScreen(
             }
             if (summary != null && state?.stage == AuditStage.COMPLETE) {
                 item { ResultCard(language, summary) }
-                item { OutputCard(language, onExport) }
+                item { OutputCard(language, summary.outputFiles.toSet(), onExport) }
             }
             item { AiReportChatCard(language = language, isRunning = isRunning, onOpen = onOpenAiChat) }
             item {
@@ -232,18 +232,42 @@ private fun ResultCard(language: AppLanguage, summary: AuditJobSummary) {
             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = .3f))
             Text(
                 language.text(
-                    "Native: ${summary.nativeLibraries} · IL2CPP: ${if (summary.il2cppDetected) "да, metadata ${summary.il2cppMetadataVersion ?: "?"}" else "нет"} · Артефактов: ${summary.exportedArtifactCount}",
-                    "Native: ${summary.nativeLibraries} · IL2CPP: ${if (summary.il2cppDetected) "yes, metadata ${summary.il2cppMetadataVersion ?: "?"}" else "no"} · Artifacts: ${summary.exportedArtifactCount}",
+                    "Native: ${summary.nativeLibraries} · IL2CPP: ${if (summary.il2cppDetected) "обнаружен" else "не обнаружен"} · Артефактов: ${summary.exportedArtifactCount}",
+                    "Native: ${summary.nativeLibraries} · IL2CPP: ${if (summary.il2cppDetected) "detected" else "not detected"} · Artifacts: ${summary.exportedArtifactCount}",
                 ),
                 style = MaterialTheme.typography.bodySmall,
             )
+            if (summary.il2cppDetected || summary.il2cppDumpStatus != null) {
+                Text(
+                    buildString {
+                        append(language.text("Rodroid dump: ", "Rodroid dump: "))
+                        append(summary.il2cppDumpStatus ?: language.text("не запускался", "not run"))
+                        summary.il2cppMetadataVersion?.let { append(" · metadata v$it") }
+                        if (summary.il2cppSuccessfulAbis.isNotEmpty()) append(" · ${summary.il2cppSuccessfulAbis.joinToString()}")
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (summary.il2cppDumpStatus == "COMPLETE") MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.error,
+                )
+                summary.il2cppDumpError?.takeIf(String::isNotBlank)?.let {
+                    Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                }
+                if (summary.il2cppDumpStatus == "COMPLETE") {
+                    Text(
+                        language.text(
+                            "Подтверждённые поверхности: игровые ${summary.confirmedGameplaySurfaces}, приложения/монетизация ${summary.confirmedApplicationSurfaces}",
+                            "Confirmed surfaces: gameplay ${summary.confirmedGameplaySurfaces}, application/monetization ${summary.confirmedApplicationSurfaces}",
+                        ),
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+            }
             Text("SHA-256 ${summary.artifactSha256.take(16)}…", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
 
 @Composable
-private fun OutputCard(language: AppLanguage, onExport: (String) -> Unit) {
+private fun OutputCard(language: AppLanguage, availableFiles: Set<String>, onExport: (String) -> Unit) {
     val outputs = listOf(
         AuditJobRepository.SIGNED_EVIDENCE_PACKAGE to (language.text("Пакет заказчику", "Customer package") to language.text("Все результаты + подпись", "All results + signature")),
         AuditJobRepository.CUSTOMER_REPORT to (language.text("Отчёт .md", "Report .md") to language.text("Что найдено и как исправить", "Findings and remediation")),
@@ -259,8 +283,9 @@ private fun OutputCard(language: AppLanguage, onExport: (String) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
         Text(language.text("Результаты", "Results"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         outputs.forEach { (file, labels) ->
+            val available = file in availableFiles
             OutlinedCard(
-                Modifier.fillMaxWidth().clickable { onExport(file) },
+                Modifier.fillMaxWidth().clickable(enabled = available) { onExport(file) },
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = .45f)),
             ) {
                 Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -268,7 +293,11 @@ private fun OutputCard(language: AppLanguage, onExport: (String) -> Unit) {
                         Text(labels.first, fontWeight = FontWeight.SemiBold)
                         Text(labels.second, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    Text(language.text("Экспорт", "Export"), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        if (available) language.text("Экспорт", "Export") else language.text("Не создан", "Not created"),
+                        color = if (available) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelLarge,
+                    )
                 }
             }
         }
