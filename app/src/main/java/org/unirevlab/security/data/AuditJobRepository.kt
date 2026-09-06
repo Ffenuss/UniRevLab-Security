@@ -29,7 +29,7 @@ class AuditJobRepository(context: Context) {
         runCatching { AuditWorkflowJson.decodeProfile(raw) }.getOrNull()
     }
 
-    fun createJob(profile: AuditProfile, source: AuditSourceSpec): AuditJobSpec {
+    fun createJob(profile: AuditProfile, source: AuditSourceSpec, languageCode: String = "ru"): AuditJobSpec {
         require(profile.isValid) { "Сначала заполните профиль аудита" }
         validateSource(source)
         val spec = AuditJobSpec(
@@ -37,6 +37,7 @@ class AuditJobRepository(context: Context) {
             createdAtEpochMs = System.currentTimeMillis(),
             scope = profile.createScope(),
             source = source,
+            languageCode = languageCode,
         )
         val dir = jobDirectory(spec.jobId)
         require(dir.isDirectory || dir.mkdirs()) { "Не удалось создать каталог задания" }

@@ -103,12 +103,12 @@ object ConfirmedIl2CppSurfaceExporter {
 
     private data class Rule(val domain: String, val category: String, val markers: List<String>)
     private val RULES = listOf(
-        Rule("GAME", "HEALTH_DAMAGE", listOf("health", "hitpoint", "damage", "armor", "invincible", "godmode")),
-        Rule("GAME", "ECONOMY", listOf("currency", "coin", "gold", "gem", "diamond", "wallet", "balance", "reward", "inventory", "loot")),
-        Rule("GAME", "COMBAT", listOf("weapon", "ammo", "firerate", "attackspeed", "criticaldamage", "recoil")),
+        Rule("GAME", "HEALTH_DAMAGE", listOf("currenthealth", "maximumhealth", "maxhealth", "health", "hitpoints", "hitpoint", "currenthp", "maxhp", "hpvalue", "damage", "armor", "invincible", "godmode", "lifepoints")),
+        Rule("GAME", "ECONOMY", listOf("softcurrency", "hardcurrency", "currency", "coins", "coin", "money", "cash", "gold", "gems", "gem", "diamond", "wallet", "balance", "reward", "inventory", "loot")),
+        Rule("GAME", "COMBAT", listOf("weapon", "ammunition", "ammo", "firerate", "attackspeed", "attackpower", "criticaldamage", "criticalchance", "recoil")),
         Rule("GAME", "MOVEMENT", listOf("movespeed", "movementspeed", "walkspeed", "runspeed", "jumpspeed", "teleport", "gravity")),
-        Rule("GAME", "PROGRESSION", listOf("experience", "playerlevel", "levelup", "highscore", "achievement", "questreward", "cooldown", "stamina", "energy")),
-        Rule("MONETIZATION", "PREMIUM_SUBSCRIPTION", listOf("ispremium", "premiumuser", "isvip", "paiduser", "isproaccount", "entitlement", "subscriptionactive", "subscribed")),
+        Rule("GAME", "PROGRESSION", listOf("experiencepoints", "experience", "playerlevel", "accountlevel", "levelup", "highscore", "achievement", "questreward", "skillpoints", "cooldown", "stamina", "energy")),
+        Rule("MONETIZATION", "PREMIUM_SUBSCRIPTION", listOf("ispremium", "premiumuser", "premiumstatus", "isvip", "vipstatus", "paiduser", "isproaccount", "proaccount", "entitlement", "subscriptionactive", "subscriptionstatus", "subscribed")),
         Rule("MONETIZATION", "PURCHASE_BILLING", listOf("inapppurchase", "purchase", "billingclient", "checkout", "restorepurchase", "verifyreceipt", "validatereceipt")),
         Rule("APPLICATION", "AUTHORIZATION", listOf("authorization", "permissioncheck", "accesslevel", "hasaccess", "isadmin", "userrole")),
         Rule("APPLICATION", "FEATURE_QUOTA", listOf("featureenabled", "featureflag", "isunlocked", "paidfeature", "ratelimit", "dailylimit", "usagequota", "triallimit")),

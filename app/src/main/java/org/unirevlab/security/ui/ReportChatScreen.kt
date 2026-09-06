@@ -23,7 +23,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -66,7 +65,9 @@ import java.util.Locale
 
 @Composable
 fun ReportChatScreen(
+    language: AppLanguage,
     currentReport: File?,
+    currentDumpEvidence: File? = null,
     currentReportLabel: String?,
     onBack: () -> Unit,
 ) {
@@ -79,7 +80,12 @@ fun ReportChatScreen(
 
     val initialCurrent = remember(currentReport) {
         currentReport?.takeIf { it.isFile }?.let {
-            ImportedReport(it, currentReportLabel?.takeIf(String::isNotBlank) ?: it.name, it.length())
+            ImportedReport(
+                it,
+                currentReportLabel?.takeIf(String::isNotBlank) ?: it.name,
+                it.length(),
+                currentDumpEvidence?.takeIf { evidence -> evidence.isFile && evidence.length() > 0 },
+            )
         }
     }
     var report by remember(currentReport) { mutableStateOf(initialCurrent ?: importStore.current()) }
@@ -87,14 +93,12 @@ fun ReportChatScreen(
     var selectedModel by remember { mutableStateOf(OpenRouterModelCatalog.defaultModel()) }
     var keyDraft by remember { mutableStateOf("") }
     var keySaved by remember { mutableStateOf(secretStore.hasKey()) }
-    var consent by remember { mutableStateOf(false) }
     var allowTrainingProviders by remember { mutableStateOf(false) }
-    var trainingConsent by remember { mutableStateOf(false) }
     var privacyConflict by remember { mutableStateOf(false) }
     var messages by remember { mutableStateOf<List<OpenRouterChatMessage>>(emptyList()) }
     var question by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    var busyMessage by remember { mutableStateOf("Подготавливаю запрос…") }
+    var busyMessage by remember { mutableStateOf(language.text("Подготавливаю запрос…", "Preparing request…")) }
     var refreshingModels by remember { mutableStateOf(false) }
     var showModels by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
@@ -105,16 +109,16 @@ fun ReportChatScreen(
         scope.launch {
             refreshingModels = true
             error = null
-            val result = runCatching { withContext(Dispatchers.IO) { client.fetchFreeModels() } }
+            val result = runCatching { withContext(Dispatchers.IO) { client.fetchFreeModels(language.code) } }
             result.onSuccess { loaded ->
                 models = loaded
                 val savedId = secretStore.selectedModelId()
                 selectedModel = loaded.firstOrNull { it.id == savedId }
                     ?: loaded.firstOrNull { it.id == selectedModel.id }
                     ?: OpenRouterModelCatalog.defaultModel()
-                status = "Загружено бесплатных моделей: ${loaded.size}"
+                status = language.text("Загружено бесплатных моделей: ${loaded.size}", "Free models loaded: ${loaded.size}")
             }.onFailure { failure ->
-                error = failure.userMessage("Не удалось загрузить список моделей")
+                error = failure.userMessage(language.text("Не удалось загрузить список моделей", "Unable to load the model list"))
             }
             refreshingModels = false
         }
@@ -130,12 +134,10 @@ fun ReportChatScreen(
                 result.onSuccess { imported ->
                     report = imported
                     messages = emptyList()
-                    consent = false
                     allowTrainingProviders = false
-                    trainingConsent = false
                     privacyConflict = false
-                    status = "Полный отчёт загружен: ${formatBytes(imported.sizeBytes)}"
-                }.onFailure { failure -> error = failure.userMessage("Не удалось импортировать отчёт") }
+                    status = language.text("Полный отчёт загружен: ${formatBytes(imported.sizeBytes)}", "Full report loaded: ${formatBytes(imported.sizeBytes)}")
+                }.onFailure { failure -> error = failure.userMessage(language.text("Не удалось импортировать отчёт", "Unable to import report")) }
                 busy = false
             }
         }
@@ -155,23 +157,23 @@ fun ReportChatScreen(
             messages = messages + userMessage
             val result = runCatching {
                 val key = withContext(Dispatchers.IO) {
-                    requireNotNull(secretStore.loadKey()) { "Сначала сохраните API-ключ OpenRouter" }
+                    requireNotNull(secretStore.loadKey()) { language.text("Сначала сохраните API-ключ OpenRouter", "Save an OpenRouter API key first") }
                 }
                 val policy = if (allowTrainingProviders) {
                     OpenRouterDataPolicy.FREE_MODEL_COMPATIBLE
                 } else {
                     OpenRouterDataPolicy.STRICT
                 }
-                busyMessage = "Быстро индексирую полный отчёт ${formatBytes(selectedReport.sizeBytes)}…"
+                busyMessage = language.text("Быстро индексирую полный отчёт ${formatBytes(selectedReport.sizeBytes)}…", "Indexing the full ${formatBytes(selectedReport.sizeBytes)} report…")
                 val primaryContext = withContext(Dispatchers.IO) {
-                    ReportContextEngine.build(selectedReport.file, prompt, selectedModel.contextLength)
+                    buildReportAndDumpContext(selectedReport, prompt, selectedModel.contextLength)
                 }
-                busyMessage = "Контекст готов. Жду OpenRouter (не более 150 секунд)…"
+                busyMessage = language.text("Контекст готов. Жду OpenRouter (не более 150 секунд)…", "Context ready. Waiting for OpenRouter (up to 150 seconds)…")
                 try {
                     withContext(Dispatchers.IO) {
                         try {
                             ChatAttempt(
-                            answer = client.complete(key, selectedModel, primaryContext, historyBefore, prompt, policy),
+                            answer = client.complete(key, selectedModel, primaryContext, historyBefore, prompt, policy, language.code),
                             reportContext = primaryContext,
                             strictFallbackUsed = false,
                             )
@@ -185,14 +187,14 @@ fun ReportChatScreen(
                         selectedModel.id != OpenRouterModelCatalog.defaultModel().id
                     if (!canUseStrictFallback) throw failure
                     val fallback = OpenRouterModelCatalog.defaultModel()
-                    busyMessage = "Выбранная модель отклонена политикой. Готовлю безопасный fallback…"
+                    busyMessage = language.text("Выбранная модель отклонена политикой. Готовлю безопасный резервный маршрут…", "The selected model was rejected by policy. Preparing a safe fallback…")
                     val fallbackContext = withContext(Dispatchers.IO) {
-                        ReportContextEngine.build(selectedReport.file, prompt, fallback.contextLength)
+                        buildReportAndDumpContext(selectedReport, prompt, fallback.contextLength)
                     }
-                    busyMessage = "Жду безопасный fallback OpenRouter (не более 150 секунд)…"
+                    busyMessage = language.text("Жду безопасный резервный маршрут OpenRouter (не более 150 секунд)…", "Waiting for the safe OpenRouter fallback (up to 150 seconds)…")
                     withContext(Dispatchers.IO) {
                         ChatAttempt(
-                            answer = client.complete(key, fallback, fallbackContext, historyBefore, prompt, policy),
+                            answer = client.complete(key, fallback, fallbackContext, historyBefore, prompt, policy, language.code),
                             reportContext = fallbackContext,
                             strictFallbackUsed = true,
                         )
@@ -202,23 +204,23 @@ fun ReportChatScreen(
             result.onSuccess { attempt ->
                 messages = messages + OpenRouterChatMessage("assistant", attempt.answer.text, attempt.answer.modelId)
                 val privacyStatus = if (allowTrainingProviders) {
-                    "Режим совместимости"
+                    language.text("Режим совместимости", "Compatibility mode")
                 } else if (attempt.strictFallbackUsed) {
-                    "Строгий режим · выбранная модель недоступна, безопасно использована ${attempt.answer.modelId}"
+                    language.text("Строгий режим · выбранная модель недоступна, безопасно использована ${attempt.answer.modelId}", "Strict mode · selected model unavailable; safely used ${attempt.answer.modelId}")
                 } else {
-                    "Строгий режим"
+                    language.text("Строгий режим", "Strict mode")
                 }
                 status = if (attempt.reportContext.completeFileIncluded) {
-                    "$privacyStatus · модель получила весь файл целиком · ${formatBytes(attempt.reportContext.reportBytes)}"
+                    language.text("$privacyStatus · модель получила весь файл целиком · ${formatBytes(attempt.reportContext.reportBytes)}", "$privacyStatus · the complete file was supplied · ${formatBytes(attempt.reportContext.reportBytes)}")
                 } else {
-                    "$privacyStatus · весь файл проверен потоково · ${formatBytes(attempt.reportContext.reportBytes)} · передано релевантных частей: ${attempt.reportContext.includedChunks}/${attempt.reportContext.scannedChunks}"
+                    language.text("$privacyStatus · весь файл проверен потоково · ${formatBytes(attempt.reportContext.reportBytes)} · передано релевантных частей: ${attempt.reportContext.includedChunks}/${attempt.reportContext.scannedChunks}", "$privacyStatus · the whole file was scanned locally · ${formatBytes(attempt.reportContext.reportBytes)} · relevant chunks supplied: ${attempt.reportContext.includedChunks}/${attempt.reportContext.scannedChunks}")
                 }
             }.onFailure { failure ->
                 messages = historyBefore
                 question = prompt
                 privacyConflict = failure is OpenRouterApiException &&
                     failure.reason == OpenRouterFailureReason.DATA_POLICY_NO_ENDPOINT
-                error = failure.userMessage("Не удалось получить ответ")
+                error = failure.userMessage(language.text("Не удалось получить ответ", "Unable to get a response"))
             }
             busy = false
         }
@@ -232,10 +234,10 @@ fun ReportChatScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedButton(onClick = onBack, enabled = !busy) { Text("Назад") }
+                OutlinedButton(onClick = onBack, enabled = !busy) { Text(language.text("Назад", "Back")) }
                 Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                    Text("AI-чат по полному отчёту", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                    Text("OpenRouter · бесплатные модели", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                    Text(language.text("AI-чат по полному отчёту", "Full-report AI chat"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                    Text(language.text("OpenRouter · бесплатные модели", "OpenRouter · free models"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                 }
             }
 
@@ -245,15 +247,14 @@ fun ReportChatScreen(
             ) {
                 item {
                     ReportSourceCard(
+                        language = language,
                         report = report,
                         currentAvailable = initialCurrent != null,
                         busy = busy,
                         onUseCurrent = {
                             report = initialCurrent
                             messages = emptyList()
-                            consent = false
                             allowTrainingProviders = false
-                            trainingConsent = false
                             privacyConflict = false
                         },
                         onPick = { reportPicker.launch(arrayOf("application/json", "application/zip", "application/octet-stream")) },
@@ -261,6 +262,7 @@ fun ReportChatScreen(
                 }
                 item {
                     OpenRouterConfigurationCard(
+                        language = language,
                         keyDraft = keyDraft,
                         keySaved = keySaved,
                         onKeyChanged = { keyDraft = it.take(512) },
@@ -270,13 +272,13 @@ fun ReportChatScreen(
                                 keyDraft = ""
                                 keySaved = true
                                 error = null
-                                status = "API-ключ сохранён в защищённом хранилище Android"
-                            }.onFailure { error = it.userMessage("Не удалось сохранить ключ") }
+                                status = language.text("API-ключ сохранён в защищённом хранилище Android", "API key saved in Android secure storage")
+                            }.onFailure { error = it.userMessage(language.text("Не удалось сохранить ключ", "Unable to save key")) }
                         },
                         onClearKey = {
                             secretStore.clearKey()
                             keySaved = false
-                            status = "API-ключ удалён"
+                            status = language.text("API-ключ удалён", "API key removed")
                         },
                         selectedModel = selectedModel,
                         refreshing = refreshingModels,
@@ -286,35 +288,32 @@ fun ReportChatScreen(
                 }
                 item {
                     OpenRouterPrivacyCard(
+                        language = language,
                         allowTrainingProviders = allowTrainingProviders,
-                        trainingConsent = trainingConsent,
                         privacyConflict = privacyConflict,
                         busy = busy,
                         onAllowChanged = { allow ->
                             allowTrainingProviders = allow
-                            trainingConsent = false
                             privacyConflict = false
                             error = null
                         },
-                        onTrainingConsentChanged = { trainingConsent = it },
                         onSelectModel = { showModels = true },
                         onOpenPrivacySettings = {
                             runCatching {
                                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(OPENROUTER_PRIVACY_URL)))
-                            }.onFailure { error = it.userMessage("Не удалось открыть настройки OpenRouter") }
+                            }.onFailure { error = it.userMessage(language.text("Не удалось открыть настройки OpenRouter", "Unable to open OpenRouter settings")) }
                         },
                     )
                 }
                 item {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-                        Checkbox(checked = consent, onCheckedChange = { consent = it }, enabled = !busy)
-                        Text(
-                            "Разрешаю передавать OpenRouter вопрос и выбранные исходные фрагменты полного отчёта. Сам APK и analysis-artifacts.zip не отправляются.",
-                            modifier = Modifier.padding(top = 10.dp),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+                    Text(
+                        language.text(
+                            "При нажатии «Отправить» в OpenRouter передаются вопрос и выбранные фрагменты отчёта. APK и архив артефактов не отправляются.",
+                            "Pressing Send transmits the question and selected report excerpts to OpenRouter. The APK and artifact archive are not uploaded.",
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
                 if (error != null) {
                     item {
@@ -329,12 +328,15 @@ fun ReportChatScreen(
                 if (messages.isEmpty()) {
                     item {
                         Text(
-                            "Загрузите full-report.json или подписанный evidence-пакет и спросите, например: «Какие три риска важнее всего и как их закрыть?»",
+                            language.text(
+                                "Загрузите полный отчёт или подписанный пакет и спросите, например: «Какие три риска важнее всего и как их закрыть?»",
+                                "Load a full report or signed package and ask, for example: “Which three risks matter most and how should they be fixed?”",
+                            ),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
-                items(messages) { message -> ChatMessageCard(message) }
+                items(messages) { message -> ChatMessageCard(language, message) }
                 if (busy) {
                     item {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -349,22 +351,22 @@ fun ReportChatScreen(
                 value = question,
                 onValueChange = { question = it.take(8_000) },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Вопрос по отчёту") },
+                label = { Text(language.text("Вопрос по отчёту", "Question about the report")) },
                 minLines = 2,
                 maxLines = 5,
                 enabled = !busy,
             )
             Button(
                 onClick = ::send,
-                enabled = !busy && report != null && keySaved && consent && question.isNotBlank() &&
-                    (!allowTrainingProviders || trainingConsent),
+                enabled = !busy && report != null && keySaved && question.isNotBlank(),
                 modifier = Modifier.fillMaxWidth().height(52.dp),
-            ) { Text("Отправить модели") }
+            ) { Text(language.text("Отправить модели", "Send to model")) }
         }
     }
 
     if (showModels) {
         ModelSelectionDialog(
+            language = language,
             models = models,
             selected = selectedModel,
             onSelect = { model ->
@@ -373,9 +375,8 @@ fun ReportChatScreen(
                 showModels = false
                 messages = emptyList()
                 allowTrainingProviders = false
-                trainingConsent = false
                 privacyConflict = false
-                status = "Выбрана модель: ${model.name}"
+                status = language.text("Выбрана модель: ${model.name}", "Selected model: ${model.name}")
             },
             onDismiss = { showModels = false },
         )
@@ -384,12 +385,11 @@ fun ReportChatScreen(
 
 @Composable
 private fun OpenRouterPrivacyCard(
+    language: AppLanguage,
     allowTrainingProviders: Boolean,
-    trainingConsent: Boolean,
     privacyConflict: Boolean,
     busy: Boolean,
     onAllowChanged: (Boolean) -> Unit,
-    onTrainingConsentChanged: (Boolean) -> Unit,
     onSelectModel: () -> Unit,
     onOpenPrivacySettings: () -> Unit,
 ) {
@@ -404,10 +404,10 @@ private fun OpenRouterPrivacyCard(
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Совместимость с бесплатными моделями", fontWeight = FontWeight.SemiBold)
+                    Text(language.text("Совместимость с бесплатными моделями", "Free-model compatibility"), fontWeight = FontWeight.SemiBold)
                     Text(
-                        if (allowTrainingProviders) "Разрешены провайдеры со сбором данных"
-                        else "Строгий режим: сбор данных провайдером запрещён",
+                        if (allowTrainingProviders) language.text("Разрешены провайдеры со сбором данных", "Providers with data collection are allowed")
+                        else language.text("Строгий режим: сбор данных провайдером запрещён", "Strict mode: provider data collection is denied"),
                         style = MaterialTheme.typography.bodySmall,
                         color = if (allowTrainingProviders) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary,
                     )
@@ -416,36 +416,27 @@ private fun OpenRouterPrivacyCard(
             }
             if (allowTrainingProviders) {
                 Text(
-                    "Провайдер выбранной модели может хранить отправленные фрагменты отчёта и использовать их для обучения. Включайте это только с разрешения заказчика.",
+                    language.text(
+                        "Провайдер выбранной модели может хранить отправленные фрагменты отчёта и использовать их для обучения.",
+                        "The selected model provider may retain submitted report excerpts and use them for training.",
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                 )
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-                    Checkbox(
-                        checked = trainingConsent,
-                        onCheckedChange = onTrainingConsentChanged,
-                        enabled = !busy,
-                    )
-                    Text(
-                        "Подтверждаю разрешение заказчика на такую передачу данных.",
-                        modifier = Modifier.padding(top = 10.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
             }
             if (privacyConflict) {
                 Text(
                     if (allowTrainingProviders) {
-                        "Разрешение в приложении включено, но политика аккаунта OpenRouter всё ещё блокирует эту модель."
+                        language.text("Совместимость включена, но политика аккаунта OpenRouter всё ещё блокирует эту модель.", "Compatibility is enabled, but the OpenRouter account policy still blocks this model.")
                     } else {
-                        "Выбранная модель и безопасный бесплатный автовыбор недоступны без сбора данных. Выберите другую модель или явно включите совместимость."
+                        language.text("Выбранная модель и безопасный бесплатный автовыбор недоступны без сбора данных. Выберите другую модель или включите совместимость.", "The selected model and safe free auto-routing are unavailable without data collection. Select another model or enable compatibility.")
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                 )
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = onSelectModel, enabled = !busy) { Text("Другая модель") }
-                    TextButton(onClick = onOpenPrivacySettings, enabled = !busy) { Text("Настройки OpenRouter") }
+                    TextButton(onClick = onSelectModel, enabled = !busy) { Text(language.text("Другая модель", "Another model")) }
+                    TextButton(onClick = onOpenPrivacySettings, enabled = !busy) { Text(language.text("Настройки OpenRouter", "OpenRouter settings")) }
                 }
             }
         }
@@ -454,6 +445,7 @@ private fun OpenRouterPrivacyCard(
 
 @Composable
 private fun ReportSourceCard(
+    language: AppLanguage,
     report: ImportedReport?,
     currentAvailable: Boolean,
     busy: Boolean,
@@ -462,15 +454,15 @@ private fun ReportSourceCard(
 ) {
     OutlinedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Полный отчёт", fontWeight = FontWeight.SemiBold)
-            if (report == null) Text("Отчёт ещё не выбран", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(language.text("Полный отчёт", "Full report"), fontWeight = FontWeight.SemiBold)
+            if (report == null) Text(language.text("Отчёт ещё не выбран", "No report selected"), color = MaterialTheme.colorScheme.onSurfaceVariant)
             else {
                 Text(report.displayName, style = MaterialTheme.typography.bodyMedium)
                 Text(formatBytes(report.sizeBytes), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (currentAvailable) TextButton(onClick = onUseCurrent, enabled = !busy) { Text("Текущий анализ") }
-                TextButton(onClick = onPick, enabled = !busy) { Text("Выбрать JSON / ZIP") }
+                if (currentAvailable) TextButton(onClick = onUseCurrent, enabled = !busy) { Text(language.text("Текущий анализ", "Current analysis")) }
+                TextButton(onClick = onPick, enabled = !busy) { Text(language.text("Выбрать JSON / ZIP", "Select JSON / ZIP")) }
             }
         }
     }
@@ -478,6 +470,7 @@ private fun ReportSourceCard(
 
 @Composable
 private fun OpenRouterConfigurationCard(
+    language: AppLanguage,
     keyDraft: String,
     keySaved: Boolean,
     onKeyChanged: (String) -> Unit,
@@ -495,16 +488,16 @@ private fun OpenRouterConfigurationCard(
                 value = keyDraft,
                 onValueChange = onKeyChanged,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text(if (keySaved) "Ключ сохранён · введите для замены" else "API-ключ") },
+                label = { Text(if (keySaved) language.text("Ключ сохранён · введите для замены", "Key saved · enter to replace") else language.text("API-ключ", "API key")) },
                 visualTransformation = PasswordVisualTransformation(),
                 singleLine = true,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onSaveKey, enabled = keyDraft.isNotBlank()) { Text("Сохранить ключ") }
-                if (keySaved) TextButton(onClick = onClearKey) { Text("Удалить") }
+                TextButton(onClick = onSaveKey, enabled = keyDraft.isNotBlank()) { Text(language.text("Сохранить ключ", "Save key")) }
+                if (keySaved) TextButton(onClick = onClearKey) { Text(language.text("Удалить", "Delete")) }
             }
             HorizontalDivider()
-            Text("Модель", style = MaterialTheme.typography.labelMedium)
+            Text(language.text("Модель", "Model"), style = MaterialTheme.typography.labelMedium)
             OutlinedCard(Modifier.fillMaxWidth().clickable(onClick = onSelectModel)) {
                 Column(Modifier.padding(12.dp)) {
                     Text(selectedModel.name, fontWeight = FontWeight.SemiBold)
@@ -512,7 +505,7 @@ private fun OpenRouterConfigurationCard(
                 }
             }
             TextButton(onClick = onRefreshModels, enabled = !refreshing) {
-                Text(if (refreshing) "Загрузка моделей…" else "Обновить бесплатные модели")
+                Text(if (refreshing) language.text("Загрузка моделей…", "Loading models…") else language.text("Обновить бесплатные модели", "Refresh free models"))
             }
         }
     }
@@ -520,6 +513,7 @@ private fun OpenRouterConfigurationCard(
 
 @Composable
 private fun ModelSelectionDialog(
+    language: AppLanguage,
     models: List<OpenRouterModel>,
     selected: OpenRouterModel,
     onSelect: (OpenRouterModel) -> Unit,
@@ -527,7 +521,7 @@ private fun ModelSelectionDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Бесплатная модель") },
+        title = { Text(language.text("Бесплатная модель", "Free model")) },
         text = {
             LazyColumn(Modifier.fillMaxWidth().heightIn(max = 460.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(models) { model ->
@@ -550,12 +544,12 @@ private fun ModelSelectionDialog(
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Закрыть") } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(language.text("Закрыть", "Close")) } },
     )
 }
 
 @Composable
-private fun ChatMessageCard(message: OpenRouterChatMessage) {
+private fun ChatMessageCard(language: AppLanguage, message: OpenRouterChatMessage) {
     val assistant = message.role == "assistant"
     Card(
         modifier = Modifier.fillMaxWidth().padding(start = if (assistant) 0.dp else 28.dp, end = if (assistant) 28.dp else 0.dp),
@@ -564,7 +558,7 @@ private fun ChatMessageCard(message: OpenRouterChatMessage) {
         ),
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text(if (assistant) "AI · ${message.modelId.orEmpty()}" else "Вы", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
+            Text(if (assistant) "AI · ${message.modelId.orEmpty()}" else language.text("Вы", "You"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
             Text(message.text)
         }
     }
@@ -585,5 +579,26 @@ private data class ChatAttempt(
     val reportContext: org.unirevlab.security.ai.ReportContext,
     val strictFallbackUsed: Boolean,
 )
+
+private fun buildReportAndDumpContext(report: ImportedReport, query: String, modelContextLength: Int): org.unirevlab.security.ai.ReportContext {
+    val dumpEvidence = report.dumpEvidenceFile?.takeIf { it.isFile && it.length() > 0 }
+        ?: return ReportContextEngine.build(report.file, query, modelContextLength)
+    val reportBudget = (modelContextLength * 3 / 4).coerceAtLeast(32_000)
+    val dumpBudget = (modelContextLength / 4).coerceAtLeast(16_000)
+    val primary = ReportContextEngine.build(report.file, query, reportBudget)
+    val dump = ReportContextEngine.build(dumpEvidence, query, dumpBudget)
+    return org.unirevlab.security.ai.ReportContext(
+        text = buildString(primary.text.length + dump.text.length + 160) {
+            appendLine(primary.text)
+            appendLine("\n<confirmed-real-il2cpp-dump-evidence>")
+            appendLine(dump.text)
+            appendLine("</confirmed-real-il2cpp-dump-evidence>")
+        },
+        reportBytes = primary.reportBytes + dump.reportBytes,
+        scannedChunks = primary.scannedChunks + dump.scannedChunks,
+        includedChunks = primary.includedChunks + dump.includedChunks,
+        completeFileIncluded = primary.completeFileIncluded && dump.completeFileIncluded,
+    )
+}
 
 private const val OPENROUTER_PRIVACY_URL = "https://openrouter.ai/settings/privacy"

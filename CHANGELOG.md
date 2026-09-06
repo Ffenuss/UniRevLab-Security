@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.44.0-preview-dump-first-pipeline
+
+- made the completed Rodroid dump the only source for exported IL2CPP method RVA and field offsets;
+- added automatic multi-ABI dumping for every discovered `libil2cpp.so`, including libraries and metadata split across nested APK files;
+- added aggregate confirmed-offset JSON/CSV plus bilingual README files inside the complete dump package;
+- AI chat now receives the confirmed real-dump evidence alongside the full static report, including when importing a signed package;
+- added a persistent RU/EN switch for the active workflow, localized job status, AI chat, installed-app selection, notifications, and download names;
+- Russian downloads and signed-package entries use Russian names; English mode keeps canonical English names;
+- temporarily removed agreement, signer, company/owner/profile, and scope confirmation screens from the test workflow;
+- removed checkbox gates from the AI chat; sending the request itself is the explicit action, while the data-policy compatibility switch remains visible;
+- added a searchable human HTML that clearly separates method RVA from in-object field offsets and contains no heuristic addresses.
+
 ## 0.43.0-preview-real-il2cpp-dumper
 
 - replace the metadata-only C# approximation in the pair workspace with the pinned Rodroid IL2CPP Rust engine at commit `8bfb90229539833999e725c5cf6402a435b47f15`;

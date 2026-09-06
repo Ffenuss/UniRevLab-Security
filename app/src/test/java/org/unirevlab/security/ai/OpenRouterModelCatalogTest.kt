@@ -70,6 +70,8 @@ class OpenRouterModelCatalogTest {
 
         assertEquals("deny", strict.getJSONObject("provider").getString("data_collection"))
         assertEquals("allow", compatible.getJSONObject("provider").getString("data_collection"))
+        val english = client.buildPayload(model, context, emptyList(), "question", OpenRouterDataPolicy.STRICT, "en")
+        assertTrue(english.getJSONArray("messages").getJSONObject(0).getString("content").contains("Answer in English"))
         assertEquals(
             OpenRouterFailureReason.DATA_POLICY_NO_ENDPOINT,
             classifyOpenRouterFailure(404, "No endpoints found matching your data policy (Free model training)"),

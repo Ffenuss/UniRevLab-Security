@@ -33,12 +33,16 @@ openrouter_client = (ROOT / "app/src/main/java/org/unirevlab/security/ai/OpenRou
 openrouter_secret = (ROOT / "app/src/main/java/org/unirevlab/security/ai/OpenRouterSecretStore.kt").read_text(encoding="utf-8")
 report_context = (ROOT / "app/src/main/java/org/unirevlab/security/ai/ReportContextEngine.kt").read_text(encoding="utf-8")
 report_import = (ROOT / "app/src/main/java/org/unirevlab/security/ai/ReportImportStore.kt").read_text(encoding="utf-8")
+confirmed_dump_output = (ROOT / "app/src/main/java/org/unirevlab/security/analysis/ConfirmedDumpOutputExporter.kt").read_text(encoding="utf-8")
+real_dump = (ROOT / "app/src/main/java/org/unirevlab/security/analysis/RealIl2CppDumpEngine.kt").read_text(encoding="utf-8")
+input_locator = (ROOT / "app/src/main/java/org/unirevlab/security/analysis/Il2CppInputLocator.kt").read_text(encoding="utf-8")
+main_activity = (ROOT / "app/src/main/java/org/unirevlab/security/MainActivity.kt").read_text(encoding="utf-8")
 
 checks = [
     ("compileSdk 37.0", app, r"version\s*=\s*release\(37\)[\s\S]*minorApiLevel\s*=\s*0"),
     ("targetSdk 36", app, r"targetSdk\s*=\s*36"),
-    ("v0.43 preview versionCode", app, r"versionCode\s*=\s*57"),
-    ("v0.43 real dumper versionName", app, r'versionName\s*=\s*"0\.43\.0-preview-real-il2cpp-dumper"'),
+    ("v0.44 preview versionCode", app, r"versionCode\s*=\s*58"),
+    ("v0.44 dump-first versionName", app, r'versionName\s*=\s*"0\.44\.0-preview-dump-first-pipeline"'),
     ("release signing input gate", app, r'tasks\.register\("verifyReleaseSigningInputs"\)'),
     ("AGP 9.3.0", root_build, r'id\("com\.android\.application"\) version "9\.3\.0"'),
     ("Kotlin Compose 2.3.21", root_build, r'id\("org\.jetbrains\.kotlin\.plugin\.compose"\) version "2\.3\.21"'),
@@ -54,15 +58,19 @@ checks = [
     ("CI lint", workflow, r':app:lintDebug'),
     ("CI debug build", workflow, r':app:assembleDebug'),
     ("CI APK integrity verify", workflow, r'unzip -t .*APK'),
-    ("CI APK SHA-256", workflow, r'sha256sum .*UniRevLab-Security-v0\.43\.0-real-il2cpp-dumper-debug\.apk'),
+    ("CI APK SHA-256", workflow, r'sha256sum .*UniRevLab-Security-v0\.44\.0-dump-first-multiabi-debug\.apk'),
     ("CI artifact upload", workflow, r'actions/upload-artifact@v4'),
     ("WorkManager persistent audit", audit_worker, r'OneTimeWorkRequestBuilder<AuditWorker>'),
     ("full report streamed to disk", audit_worker, r'ReportJsonExporter\.write\(report, output\)'),
-    ("real IL2CPP dump streamed by file path", audit_worker, r'RealIl2CppDumpEngine\.dump\(metadata, library, outputDirectory\)'),
-    ("analysis cache invalidated for v0.43", inspector, r'ENGINE_VERSION\s*=\s*"0\.43\.0-real-il2cpp-dumper"'),
+    ("real IL2CPP multi-ABI dump by file path", audit_worker, r'RealIl2CppDumpEngine\.dumpMultiple\(metadata, libraries, outputDirectory\)'),
+    ("dumper reads original APK and installed splits", audit_worker + input_locator, r'Il2CppInputLocator\.locate[\s\S]*baseApkPath[\s\S]*splitApkPaths'),
+    ("dumper scans nested APK containers", input_locator, r'endsWith\("\.apk"[\s\S]*MAX_NESTED_APKS'),
+    ("analysis cache invalidated for v0.44", inspector, r'ENGINE_VERSION\s*=\s*"0\.44\.0-dump-first-pipeline"'),
     ("split IL2CPP evidence merger wired", inspector, r'Il2CppSummaryMerger\.merge\(values\)'),
     ("split IL2CPP metadata/library merge", il2cpp_merger, r'SPLIT_EVIDENCE_MERGED'),
-    ("human offset report streamed", audit_worker, r'OffsetReadableExporter\.write\(report, output\)'),
+    ("confirmed dump drives job offset exports", audit_worker, r'ConfirmedDumpOutputExporter\.write\(result, outputDirectory'),
+    ("human confirmed offset report", confirmed_dump_output, r'completed Rodroid dump only[\s\S]*FIELD_OFFSET'),
+    ("multi-ABI aggregate offset output", real_dump, r'confirmed-offsets-all-abi\.json[\s\S]*successfulAbis'),
     ("human offset search and filters", readable_offsets, r'function applyFilters\(\)'),
     ("human offset C++ name decoding", readable_offsets, r'readableSymbolName'),
     ("game/application surface classifier", modification_surfaces, r'GAME_LIKELY[\s\S]*APPLICATION_LIKELY'),
@@ -78,7 +86,7 @@ checks = [
     ("OpenRouter explicit provider data policy", openrouter_client, r'data_collection[^\n]*dataPolicy\.apiValue'),
     ("OpenRouter strict mode remains default", openrouter_client, r'dataPolicy:\s*OpenRouterDataPolicy\s*=\s*OpenRouterDataPolicy\.STRICT'),
     ("OpenRouter policy conflict has safe fallback", ai_chat, r'canUseStrictFallback[\s\S]*OpenRouterModelCatalog\.defaultModel'),
-    ("OpenRouter training policy requires customer consent", ai_chat, r'Подтверждаю разрешение заказчика'),
+    ("OpenRouter data policy remains visible", ai_chat, r'Free-model compatibility[\s\S]*data collection'),
     ("OpenRouter key encrypted with Android Keystore", openrouter_secret, r'AndroidKeyStore[\s\S]*AES/GCM/NoPadding'),
     ("full report context is streamed", report_context, r'InputStreamReader[\s\S]*MAX_SELECTED_CHUNKS'),
     ("large report import is bounded", report_import, r'MAX_REPORT_BYTES[\s\S]*copyBoundedTo|copyBoundedTo[\s\S]*MAX_REPORT_BYTES'),
@@ -94,6 +102,8 @@ checks = [
     ("pair UI shows resistance", pair_workspace, r'Modding Resistance Assessment'),
     ("real IL2CPP JNI dump", pair_engine, r'RealIl2CppDumpEngine\.dump'),
     ("real dump UI truth state", pair_workspace, r'REAL DUMP: COMPLETE'),
+    ("test workflow bypasses agreement/profile screens", main_activity, r'private enum class Route \{ HOME, INSTALLED_APPS, AI_CHAT \}'),
+    ("RU and EN selectable", main_activity, r'AppLanguageStore[\s\S]*onLanguageChanged'),
 ]
 
 failed = []

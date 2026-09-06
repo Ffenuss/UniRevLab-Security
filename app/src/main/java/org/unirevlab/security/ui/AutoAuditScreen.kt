@@ -19,21 +19,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -41,97 +34,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import org.unirevlab.security.data.AuditJobRepository
 import org.unirevlab.security.model.AuditJobSummary
-import org.unirevlab.security.model.AuditProfile
 import org.unirevlab.security.model.AuditStage
 import org.unirevlab.security.model.PersistedAuditState
 
 @Composable
-fun AuditProfileScreen(
-    initial: AuditProfile?,
-    onSave: (AuditProfile) -> Unit,
-) {
-    var project by remember(initial) { mutableStateOf(initial?.projectName.orEmpty()) }
-    var organization by remember(initial) { mutableStateOf(initial?.organization.orEmpty()) }
-    var purpose by remember(initial) { mutableStateOf(initial?.purpose ?: "Авторизованный аудит безопасности Android-приложения") }
-    var dynamic by remember(initial) { mutableStateOf(initial?.dynamicAnalysis ?: false) }
-    var network by remember(initial) { mutableStateOf(initial?.networkTesting ?: false) }
-    val profile = AuditProfile(
-        projectName = project,
-        organization = organization,
-        purpose = purpose,
-        dynamicAnalysis = dynamic,
-        networkTesting = network,
-    )
-
-    Surface(Modifier.fillMaxSize()) {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 20.dp, vertical = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            item {
-                Eyebrow("НАСТРОЙКА · ОДИН РАЗ")
-                Text("Профиль аудита", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.SemiBold)
-                Text(
-                    "Эти данные попадут во все отчёты. После сохранения для нового задания потребуется только выбрать приложение.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            item {
-                OutlinedTextField(
-                    value = project,
-                    onValueChange = { project = it.take(160) },
-                    label = { Text("Проект") },
-                    placeholder = { Text("Например, Mobile Security Review") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-            item {
-                OutlinedTextField(
-                    value = organization,
-                    onValueChange = { organization = it.take(160) },
-                    label = { Text("Заказчик / владелец") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-            item {
-                OutlinedTextField(
-                    value = purpose,
-                    onValueChange = { purpose = it.take(500) },
-                    label = { Text("Цель и основание") },
-                    minLines = 3,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-            item {
-                ProfileToggle("Динамические проверки разрешены контрактом", dynamic) { dynamic = it }
-                ProfileToggle("Сетевые проверки разрешены контрактом", network) { network = it }
-            }
-            item {
-                Button(
-                    onClick = { onSave(profile) },
-                    enabled = profile.isValid,
-                    modifier = Modifier.fillMaxWidth().height(54.dp),
-                ) { Text("Сохранить профиль") }
-            }
-        }
-    }
-}
-
-@Composable
 fun AutoAuditScreen(
-    profile: AuditProfile,
-    authorityConfirmed: Boolean,
+    language: AppLanguage,
     state: PersistedAuditState?,
     summary: AuditJobSummary?,
     isRunning: Boolean,
     error: String?,
-    onAuthorityChanged: (Boolean) -> Unit,
+    onLanguageChanged: (AppLanguage) -> Unit,
     onPickInstalled: () -> Unit,
     onPickFile: () -> Unit,
     onCancel: () -> Unit,
-    onEditProfile: () -> Unit,
     onOpenAiChat: () -> Unit,
     onExport: (String) -> Unit,
 ) {
@@ -143,38 +59,33 @@ fun AutoAuditScreen(
             item {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Eyebrow("UNIREVLAB · AUTO AUDIT 0.42.1")
-                        Text("Аудит в один выбор", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+                        Eyebrow("UNIREVLAB · AUTO AUDIT 0.44")
+                        Text(language.text("Аудит в один выбор", "One-selection audit"), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
                     }
-                    OutlinedButton(onClick = onEditProfile, enabled = !isRunning) { Text("Профиль") }
+                    LanguageSelector(language, enabled = !isRunning, onLanguageChanged)
                 }
-            }
-            item {
-                ProfileCard(profile)
             }
             if (error != null) {
                 item { ErrorCard(error) }
             }
             item {
-                AuthorityCard(authorityConfirmed, isRunning, onAuthorityChanged)
-            }
-            item {
                 TargetPickerCard(
-                    enabled = authorityConfirmed && !isRunning,
+                    language = language,
+                    enabled = !isRunning,
                     onPickInstalled = onPickInstalled,
                     onPickFile = onPickFile,
                 )
             }
             if (state != null) {
-                item { ProgressCard(state, isRunning, onCancel) }
+                item { ProgressCard(language, state, isRunning, onCancel) }
             }
             if (summary != null && state?.stage == AuditStage.COMPLETE) {
-                item { ResultCard(summary) }
-                item { OutputCard(onExport) }
+                item { ResultCard(language, summary) }
+                item { OutputCard(language, onExport) }
             }
-            item { AiReportChatCard(isRunning = isRunning, onOpen = onOpenAiChat) }
+            item { AiReportChatCard(language = language, isRunning = isRunning, onOpen = onOpenAiChat) }
             item {
-                MethodBoundaryCard()
+                MethodBoundaryCard(language)
                 Spacer(Modifier.height(12.dp))
             }
         }
@@ -182,73 +93,48 @@ fun AutoAuditScreen(
 }
 
 @Composable
-private fun AiReportChatCard(isRunning: Boolean, onOpen: () -> Unit) {
+private fun AiReportChatCard(language: AppLanguage, isRunning: Boolean, onOpen: () -> Unit) {
     Card(
         Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = .55f)),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Eyebrow("AI · OPENROUTER")
-            Text("Чат по полному отчёту", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(language.text("Чат по полному отчёту", "Full-report AI chat"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(
-                "Откройте текущий full-report.json или импортируйте ранее скачанный отчёт / подписанный пакет. Список бесплатных моделей загружается автоматически.",
+                language.text(
+                    "Откройте текущий полный отчёт или импортируйте ранее скачанный отчёт / подписанный пакет. Список бесплатных моделей загружается автоматически.",
+                    "Open the current full report or import a previously saved report / signed package. Free models are loaded automatically.",
+                ),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Button(onClick = onOpen, enabled = !isRunning, modifier = Modifier.fillMaxWidth()) {
-                Text("Открыть AI-чат")
+                Text(language.text("Открыть AI-чат", "Open AI chat"))
             }
         }
     }
 }
 
 @Composable
-private fun ProfileCard(profile: AuditProfile) {
-    OutlinedCard(Modifier.fillMaxWidth(), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = .45f))) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(profile.projectName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text(profile.organization, color = MaterialTheme.colorScheme.secondary)
-            Text(profile.purpose, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
-@Composable
-private fun AuthorityCard(checked: Boolean, locked: Boolean, onChanged: (Boolean) -> Unit) {
-    Card(
-        Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .55f)),
-    ) {
-        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(checked = checked, onCheckedChange = onChanged, enabled = !locked)
-            Column(Modifier.padding(start = 8.dp)) {
-                Text("Scope подтверждён", fontWeight = FontWeight.SemiBold)
-                Text(
-                    "Я владелец цели или имею явное разрешение заказчика на выбранные виды анализа.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun TargetPickerCard(enabled: Boolean, onPickInstalled: () -> Unit, onPickFile: () -> Unit) {
+private fun TargetPickerCard(language: AppLanguage, enabled: Boolean, onPickInstalled: () -> Unit, onPickFile: () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("Новая цель", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Text(language.text("Новая цель", "New target"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Button(
             onClick = onPickInstalled,
             enabled = enabled,
             modifier = Modifier.fillMaxWidth().height(56.dp),
-        ) { Text("Выбрать установленное приложение") }
+        ) { Text(language.text("Выбрать установленное приложение", "Select installed application")) }
         OutlinedButton(
             onClick = onPickFile,
             enabled = enabled,
             modifier = Modifier.fillMaxWidth().height(52.dp),
-        ) { Text("Открыть APK / архив") }
+        ) { Text(language.text("Открыть APK / архив", "Open APK / archive")) }
         Text(
-            "Дальше процесс идёт в фоне: APK-набор → DEX/native/runtime → offsets → отчёт → подпись.",
+            language.text(
+                "Дальше процесс идёт в фоне: APK-набор → DEX/native/runtime → настоящий IL2CPP dump по всем ABI → подтверждённые офсеты → отчёт → подпись.",
+                "The rest runs in background: APK set → DEX/native/runtime → real IL2CPP dump for every ABI → confirmed offsets → report → signature.",
+            ),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -256,7 +142,7 @@ private fun TargetPickerCard(enabled: Boolean, onPickInstalled: () -> Unit, onPi
 }
 
 @Composable
-private fun ProgressCard(state: PersistedAuditState, running: Boolean, onCancel: () -> Unit) {
+private fun ProgressCard(language: AppLanguage, state: PersistedAuditState, running: Boolean, onCancel: () -> Unit) {
     Card(
         Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .55f)),
@@ -264,7 +150,7 @@ private fun ProgressCard(state: PersistedAuditState, running: Boolean, onCancel:
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(state.stage.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text(state.stage.localizedTitle(language), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Text(state.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Text("${state.progress}%", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
@@ -273,7 +159,7 @@ private fun ProgressCard(state: PersistedAuditState, running: Boolean, onCancel:
                 progress = { state.progress / 100f },
                 modifier = Modifier.fillMaxWidth().height(6.dp),
             )
-            StageRail(state.stage)
+            StageRail(language, state.stage)
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             if (running) {
                 val cancellationRequested = state.stage == AuditStage.CANCELLING
@@ -281,14 +167,14 @@ private fun ProgressCard(state: PersistedAuditState, running: Boolean, onCancel:
                     onClick = onCancel,
                     enabled = !cancellationRequested,
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text(if (cancellationRequested) "Остановка запрошена…" else "Остановить") }
+                ) { Text(if (cancellationRequested) language.text("Остановка запрошена…", "Stopping…") else language.text("Остановить", "Stop")) }
             }
         }
     }
 }
 
 @Composable
-private fun StageRail(current: AuditStage) {
+private fun StageRail(language: AppLanguage, current: AuditStage) {
     val stages = listOf(
         AuditStage.ARCHIVE,
         AuditStage.MANIFEST,
@@ -317,7 +203,7 @@ private fun StageRail(current: AuditStage) {
                     ) {}
                 }
                 Text(
-                    stage.title,
+                    stage.localizedTitle(language),
                     modifier = Modifier.padding(start = 9.dp),
                     style = MaterialTheme.typography.labelMedium,
                     color = if (active) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -328,24 +214,27 @@ private fun StageRail(current: AuditStage) {
 }
 
 @Composable
-private fun ResultCard(summary: AuditJobSummary) {
+private fun ResultCard(language: AppLanguage, summary: AuditJobSummary) {
     Card(
         Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF102A22)),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Eyebrow("АНАЛИЗ ЗАВЕРШЁН")
+            Eyebrow(language.text("АНАЛИЗ ЗАВЕРШЁН", "ANALYSIS COMPLETE"))
             Text(summary.displayName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             summary.packageName?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Metric("Findings", summary.findings.toString())
-                Metric("Critical", summary.critical.toString())
-                Metric("High", summary.high.toString())
-                Metric("DEX methods", summary.dexMethods.toString())
+                Metric(language.text("Находки", "Findings"), summary.findings.toString())
+                Metric(language.text("Критичные", "Critical"), summary.critical.toString())
+                Metric(language.text("Высокие", "High"), summary.high.toString())
+                Metric(language.text("DEX-методы", "DEX methods"), summary.dexMethods.toString())
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = .3f))
             Text(
-                "Native: ${summary.nativeLibraries} · IL2CPP: ${if (summary.il2cppDetected) "да, metadata ${summary.il2cppMetadataVersion ?: "?"}" else "нет"} · Артефактов: ${summary.exportedArtifactCount}",
+                language.text(
+                    "Native: ${summary.nativeLibraries} · IL2CPP: ${if (summary.il2cppDetected) "да, metadata ${summary.il2cppMetadataVersion ?: "?"}" else "нет"} · Артефактов: ${summary.exportedArtifactCount}",
+                    "Native: ${summary.nativeLibraries} · IL2CPP: ${if (summary.il2cppDetected) "yes, metadata ${summary.il2cppMetadataVersion ?: "?"}" else "no"} · Artifacts: ${summary.exportedArtifactCount}",
+                ),
                 style = MaterialTheme.typography.bodySmall,
             )
             Text("SHA-256 ${summary.artifactSha256.take(16)}…", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -354,20 +243,21 @@ private fun ResultCard(summary: AuditJobSummary) {
 }
 
 @Composable
-private fun OutputCard(onExport: (String) -> Unit) {
+private fun OutputCard(language: AppLanguage, onExport: (String) -> Unit) {
     val outputs = listOf(
-        AuditJobRepository.SIGNED_EVIDENCE_PACKAGE to ("Пакет заказчику" to "Все результаты + подпись"),
-        AuditJobRepository.CUSTOMER_REPORT to ("Отчёт .md" to "Что найдено и как исправить"),
-        AuditJobRepository.OFFSET_READABLE to ("Офсеты — понятный отчёт" to "HTML: поиск, фильтры, имена и пояснения"),
-        AuditJobRepository.OFFSET_EVIDENCE to ("Офсеты JSON" to "Технические RVA, metadata offsets и tokens"),
-        AuditJobRepository.IL2CPP_DUMP to ("IL2CPP dump" to "Восстановленные types, fields, methods"),
-        AuditJobRepository.GRADLE_MODULE_EVIDENCE to ("Gradle-модули" to "Base, split, dynamic-feature и build metadata"),
-        AuditJobRepository.VERIFICATION_PLAN to ("План проверок" to "Безопасные тесты owner-build"),
-        AuditJobRepository.REPORT_JSON to ("Полный JSON" to "Все evidence и findings"),
-        AuditJobRepository.ARTIFACT_BUNDLE to ("Артефакты" to "DEX, ELF, metadata, runtime"),
+        AuditJobRepository.SIGNED_EVIDENCE_PACKAGE to (language.text("Пакет заказчику", "Customer package") to language.text("Все результаты + подпись", "All results + signature")),
+        AuditJobRepository.CUSTOMER_REPORT to (language.text("Отчёт .md", "Report .md") to language.text("Что найдено и как исправить", "Findings and remediation")),
+        AuditJobRepository.OFFSET_READABLE to (language.text("Офсеты — понятный отчёт", "Offsets — readable report") to language.text("HTML: поиск, фильтры, имена и пояснения", "HTML: search, filters, names and explanations")),
+        AuditJobRepository.OFFSET_EVIDENCE to (language.text("Офсеты JSON", "Offsets JSON") to language.text("Технические RVA, metadata offsets и tokens", "Technical RVA, metadata offsets and tokens")),
+        AuditJobRepository.IL2CPP_DUMP to ("IL2CPP dump" to language.text("Типы, поля и методы из настоящего dump", "Types, fields and methods from the real dump")),
+        AuditJobRepository.IL2CPP_DUMP_PACKAGE to (language.text("Полный IL2CPP-пакет", "Complete IL2CPP package") to language.text("Все ABI, script, строки, headers и индексы", "All ABIs, script, strings, headers and indexes")),
+        AuditJobRepository.GRADLE_MODULE_EVIDENCE to (language.text("Gradle-модули", "Gradle modules") to language.text("Base, split, dynamic-feature и build metadata", "Base, split, dynamic-feature and build metadata")),
+        AuditJobRepository.VERIFICATION_PLAN to (language.text("План проверок", "Verification plan") to language.text("Безопасные тесты сборки владельца", "Safe owner-build tests")),
+        AuditJobRepository.REPORT_JSON to (language.text("Полный JSON", "Full JSON") to language.text("Все доказательства и находки", "All evidence and findings")),
+        AuditJobRepository.ARTIFACT_BUNDLE to (language.text("Артефакты", "Artifacts") to "DEX, ELF, metadata, runtime"),
     )
     Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-        Text("Результаты", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Text(language.text("Результаты", "Results"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         outputs.forEach { (file, labels) ->
             OutlinedCard(
                 Modifier.fillMaxWidth().clickable { onExport(file) },
@@ -378,7 +268,7 @@ private fun OutputCard(onExport: (String) -> Unit) {
                         Text(labels.first, fontWeight = FontWeight.SemiBold)
                         Text(labels.second, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    Text("Экспорт", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                    Text(language.text("Экспорт", "Export"), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
                 }
             }
         }
@@ -386,17 +276,23 @@ private fun OutputCard(onExport: (String) -> Unit) {
 }
 
 @Composable
-private fun MethodBoundaryCard() {
+private fun MethodBoundaryCard(language: AppLanguage) {
     OutlinedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Что делает автоматизация", fontWeight = FontWeight.SemiBold)
+            Text(language.text("Что делает автоматизация", "What automation does"), fontWeight = FontWeight.SemiBold)
             Text(
-                "Пассивно извлекает и анализирует артефакты, готовит воспроизводимые offsets/evidence и полный remediation-отчёт. Целевой APK не запускается и не перепаковывается.",
+                language.text(
+                    "Пассивно извлекает и анализирует артефакты, десериализует IL2CPP metadata настоящим Rodroid-движком, строит dumps и подтверждённые offsets/evidence. Целевой APK не запускается.",
+                    "Passively extracts and analyzes artifacts, deserializes IL2CPP metadata with the real Rodroid engine, and builds dumps plus confirmed offsets/evidence. The target APK is not executed.",
+                ),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                "Активная проверка выполняется по verification-plan в отдельной тестовой сборке владельца, подписанной его ключом.",
+                language.text(
+                    "Обфусцированные исходные имена не выдумываются: семантические метки и гипотезы экспортируются отдельно от подтверждённых данных.",
+                    "Obfuscated original names are never invented: semantic labels and hypotheses are exported separately from confirmed data.",
+                ),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.tertiary,
             )
@@ -420,14 +316,6 @@ private fun Metric(label: String, value: String) {
 }
 
 @Composable
-private fun ProfileToggle(label: String, checked: Boolean, onChecked: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-        Switch(checked = checked, onCheckedChange = onChecked)
-    }
-}
-
-@Composable
 private fun Eyebrow(text: String) {
     Text(
         text,
@@ -436,3 +324,38 @@ private fun Eyebrow(text: String) {
         fontWeight = FontWeight.Bold,
     )
 }
+
+@Composable
+private fun LanguageSelector(language: AppLanguage, enabled: Boolean, onChanged: (AppLanguage) -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (language == AppLanguage.RUSSIAN) {
+            Button(onClick = {}, enabled = enabled) { Text("RU") }
+            OutlinedButton(onClick = { onChanged(AppLanguage.ENGLISH) }, enabled = enabled) { Text("EN") }
+        } else {
+            OutlinedButton(onClick = { onChanged(AppLanguage.RUSSIAN) }, enabled = enabled) { Text("RU") }
+            Button(onClick = {}, enabled = enabled) { Text("EN") }
+        }
+    }
+}
+
+private fun AuditStage.localizedTitle(language: AppLanguage): String = language.text(
+    title,
+    when (this) {
+        AuditStage.QUEUED -> "Queued"
+        AuditStage.PREPARING -> "Preparing input"
+        AuditStage.ARCHIVE -> "APK structure and signature"
+        AuditStage.MANIFEST -> "Manifest and resources"
+        AuditStage.DEX -> "DEX calls and trust surfaces"
+        AuditStage.NATIVE -> "Native ELF and JNI"
+        AuditStage.IL2CPP -> "IL2CPP and runtime metadata"
+        AuditStage.SUPPLY_CHAIN -> "Components and dependencies"
+        AuditStage.GRADLE_MODULES -> "Gradle and application modules"
+        AuditStage.REPORT -> "Report and recommendations"
+        AuditStage.ARTIFACTS -> "Artifacts and confirmed RVA"
+        AuditStage.SIGNING -> "Evidence package signature"
+        AuditStage.COMPLETE -> "Complete"
+        AuditStage.CANCELLING -> "Stopping analysis"
+        AuditStage.CANCELLED -> "Cancelled"
+        AuditStage.FAILED -> "Failed"
+    },
+)

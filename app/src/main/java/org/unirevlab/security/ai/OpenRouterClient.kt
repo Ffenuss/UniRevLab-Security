@@ -15,10 +15,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 class OpenRouterClient(
     private val baseUrl: String = "https://openrouter.ai/api/v1",
 ) {
-    fun fetchFreeModels(): List<OpenRouterModel> {
+    fun fetchFreeModels(responseLanguage: String = "ru"): List<OpenRouterModel> {
         val connection = open("$baseUrl/models", "GET")
         return connection.useResponse { status, body ->
-            if (status !in 200..299) throw apiFailure(status, body)
+            if (status !in 200..299) throw apiFailure(status, body, responseLanguage)
             OpenRouterModelCatalog.parseFreeModels(body)
         }
     }
@@ -30,10 +30,11 @@ class OpenRouterClient(
         history: List<OpenRouterChatMessage>,
         question: String,
         dataPolicy: OpenRouterDataPolicy = OpenRouterDataPolicy.STRICT,
+        responseLanguage: String = "ru",
     ): OpenRouterChatResult {
         require(apiKey.isNotBlank()) { "API-ключ OpenRouter не сохранён" }
         require(question.isNotBlank()) { "Введите вопрос" }
-        val payload = buildPayload(model, reportContext, history, question, dataPolicy)
+        val payload = buildPayload(model, reportContext, history, question, dataPolicy, responseLanguage)
 
         val connection = open("$baseUrl/chat/completions", "POST").apply {
             setRequestProperty("Authorization", "Bearer $apiKey")
@@ -52,12 +53,17 @@ class OpenRouterClient(
             connection.setFixedLengthStreamingMode(bytes.size)
             connection.outputStream.buffered().use { it.write(bytes) }
             connection.useResponse { status, body ->
-                if (status !in 200..299) throw apiFailure(status, body)
+                if (status !in 200..299) throw apiFailure(status, body, responseLanguage)
                 OpenRouterModelCatalog.parseChatResult(body, model.id)
             }
         } catch (error: IOException) {
             if (timedOut.get()) {
-                throw IOException("OpenRouter не завершил запрос за ${TOTAL_REQUEST_TIMEOUT_MS / 1_000} секунд. Выберите другую бесплатную модель или повторите позже.", error)
+                val message = if (responseLanguage == "en") {
+                    "OpenRouter did not complete the request within ${TOTAL_REQUEST_TIMEOUT_MS / 1_000} seconds. Select another free model or try again later."
+                } else {
+                    "OpenRouter не завершил запрос за ${TOTAL_REQUEST_TIMEOUT_MS / 1_000} секунд. Выберите другую бесплатную модель или повторите позже."
+                }
+                throw IOException(message, error)
             }
             throw error
         } finally {
@@ -72,11 +78,12 @@ class OpenRouterClient(
         history: List<OpenRouterChatMessage>,
         question: String,
         dataPolicy: OpenRouterDataPolicy,
+        responseLanguage: String = "ru",
     ): JSONObject {
         val messages = JSONArray().put(
             JSONObject()
                 .put("role", "system")
-                .put("content", SYSTEM_PROMPT)
+                .put("content", systemPrompt(responseLanguage))
         )
         history.takeLast(MAX_HISTORY_MESSAGES).forEach { message ->
             if (message.role == "user" || message.role == "assistant") {
@@ -123,13 +130,22 @@ class OpenRouterClient(
             setRequestProperty("Accept", "application/json")
         }
 
-    private fun apiFailure(status: Int, body: String): OpenRouterApiException {
+    private fun apiFailure(status: Int, body: String, language: String): OpenRouterApiException {
         val detail = OpenRouterModelCatalog.parseError(body)
         val reason = classifyOpenRouterFailure(status, detail)
+        val english = language == "en"
         val message = if (reason == OpenRouterFailureReason.DATA_POLICY_NO_ENDPOINT) {
-            "Для модели нет endpoint, совместимого с текущей политикой данных"
+            if (english) "No endpoint for this model matches the current data policy" else "Для модели нет endpoint, совместимого с текущей политикой данных"
         } else {
-            val friendly = when (status) {
+            val friendly = if (english) when (status) {
+                401, 403 -> "OpenRouter rejected the API key"
+                402 -> "Insufficient free quota or credits for this request"
+                408 -> "OpenRouter did not process the request in time"
+                413 -> "The report context is too large for the selected model"
+                429 -> "OpenRouter free request limit reached; try again later"
+                in 500..599 -> "OpenRouter or the model provider is temporarily unavailable"
+                else -> "OpenRouter HTTP $status"
+            } else when (status) {
                 401, 403 -> "OpenRouter отклонил API-ключ"
                 402 -> "Для этого запроса недостаточно бесплатного лимита или кредитов"
                 408 -> "OpenRouter не успел обработать запрос"
@@ -179,13 +195,24 @@ class OpenRouterClient(
         private val WATCHDOG = Executors.newSingleThreadScheduledExecutor { runnable ->
             Thread(runnable, "openrouter-timeout").apply { isDaemon = true }
         }
-        private val SYSTEM_PROMPT = """
-            Ты — помощник по авторизованному аудиту безопасности Android-приложений.
-            Отвечай на русском языке и опирайся только на переданный отчёт. Чётко разделяй подтверждённые факты,
-            эвристические кандидаты и то, чего в evidence недостаточно. Для каждой проблемы объясняй риск,
-            доказательство и конкретное защитное исправление. Не выдавай metadata token за native RVA.
-            Не придумывай отсутствующие адреса, классы или методы. Не создавай инструкции для пиратства,
-            обхода оплаты, вмешательства в чужие сервисы или несанкционированной эксплуатации.
-        """.trimIndent()
+        private fun systemPrompt(language: String): String = if (language == "en") {
+            """
+                You assist with authorized Android application security assessments.
+                Answer in English and rely only on the supplied report. Clearly separate confirmed facts,
+                heuristic candidates, and missing evidence. For each issue, explain risk, evidence, and a concrete
+                defensive fix. Never present a metadata token as a native RVA. Do not invent absent addresses,
+                classes, or methods, and do not provide instructions for piracy, payment bypass, unauthorized
+                service interference, or exploitation.
+            """.trimIndent()
+        } else {
+            """
+                Ты — помощник по авторизованному аудиту безопасности Android-приложений.
+                Отвечай на русском языке и опирайся только на переданный отчёт. Чётко разделяй подтверждённые факты,
+                эвристические кандидаты и то, чего в evidence недостаточно. Для каждой проблемы объясняй риск,
+                доказательство и конкретное защитное исправление. Не выдавай metadata token за native RVA.
+                Не придумывай отсутствующие адреса, классы или методы. Не создавай инструкции для пиратства,
+                обхода оплаты, вмешательства в чужие сервисы или несанкционированной эксплуатации.
+            """.trimIndent()
+        }
     }
 }

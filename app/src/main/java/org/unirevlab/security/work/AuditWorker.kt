@@ -15,21 +15,21 @@ import androidx.work.WorkManager
 import androidx.work.Worker
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
-import org.unirevlab.security.R
 import org.unirevlab.security.analysis.ArtifactBundleExporter
 import org.unirevlab.security.analysis.CustomerReportExporter
+import org.unirevlab.security.analysis.ConfirmedDumpOutputExporter
 import org.unirevlab.security.analysis.EvidencePackageSigner
 import org.unirevlab.security.analysis.GradleModuleEvidenceExporter
 import org.unirevlab.security.analysis.InspectionControl
+import org.unirevlab.security.analysis.Il2CppInputLocator
 import org.unirevlab.security.analysis.LocalArtifactInspector
-import org.unirevlab.security.analysis.OffsetEvidenceExporter
-import org.unirevlab.security.analysis.OffsetReadableExporter
 import org.unirevlab.security.analysis.RealIl2CppDumpEngine
 import org.unirevlab.security.analysis.ReportJsonExporter
 import org.unirevlab.security.analysis.VerificationPlanExporter
-import org.unirevlab.security.data.AgreementStore
 import org.unirevlab.security.data.AuditJobRepository
+import org.unirevlab.security.data.AuditOutputNames
 import org.unirevlab.security.model.AuditJobSummary
+import org.unirevlab.security.model.AuditSourceSpec
 import org.unirevlab.security.model.AuditSourceKind
 import org.unirevlab.security.model.AuditStage
 import org.unirevlab.security.model.InstalledAppDescriptor
@@ -38,7 +38,6 @@ import org.unirevlab.security.model.Severity
 import org.unirevlab.security.model.StaticAnalysisReport
 import java.io.File
 import java.util.concurrent.CancellationException
-import java.util.zip.ZipFile
 
 class AuditWorker(
     appContext: Context,
@@ -47,17 +46,17 @@ class AuditWorker(
     private val repository = AuditJobRepository(appContext)
     private val notifications = appContext.getSystemService(NotificationManager::class.java)
     private var notificationSequence = 0
+    private var jobLanguage = "ru"
 
     override fun doWork(): Result {
         val jobId = inputData.getString(KEY_JOB_ID) ?: return Result.failure(errorData("Не указан job ID"))
         return try {
-            require(AgreementStore(applicationContext).isAccepted()) { "Соглашение об авторизованном использовании не подписано" }
-            createNotificationChannel()
-            update(jobId, AuditStage.PREPARING, 3, "Подготовка автономного анализа")
-            setForegroundAsync(foreground(jobId, 3, "Подготовка анализа")).get()
-
             val spec = repository.loadSpec(jobId)
-            require(spec.scope.confirmsAuthority) { "В scope отсутствует подтверждение полномочий" }
+            val language = spec.languageCode
+            jobLanguage = language
+            createNotificationChannel(language)
+            update(jobId, AuditStage.PREPARING, 3, tr(language, "Подготовка автономного анализа", "Preparing autonomous analysis"))
+            setForegroundAsync(foreground(jobId, 3, tr(language, "Подготовка анализа", "Preparing analysis"))).get()
             val inspector = LocalArtifactInspector(applicationContext)
             val inspectionControl = InspectionControl(
                 progressSink = { event ->
@@ -66,7 +65,7 @@ class AuditWorker(
                         jobId = jobId,
                         stage = event.stage.toAuditStage(),
                         progress = scaledProgress.coerceAtMost(88),
-                        message = event.message,
+                        message = if (language == "en") englishStageMessage(event.stage, event.current, event.total) else event.message,
                         current = event.current,
                         total = event.total,
                     )
@@ -97,7 +96,7 @@ class AuditWorker(
             }
 
             ensureActive()
-            update(jobId, AuditStage.REPORT, 89, "Потоковая запись полного JSON без дублирования в памяти")
+            update(jobId, AuditStage.REPORT, 89, tr(language, "Потоковая запись полного JSON без дублирования в памяти", "Streaming the full JSON without duplicating it in memory"))
             val reportFile = repository.outputFile(jobId, AuditJobRepository.REPORT_JSON)
             val customerFile = repository.outputFile(jobId, AuditJobRepository.CUSTOMER_REPORT)
             val offsetsFile = repository.outputFile(jobId, AuditJobRepository.OFFSET_EVIDENCE)
@@ -106,54 +105,67 @@ class AuditWorker(
             val gradleEvidenceFile = repository.outputFile(jobId, AuditJobRepository.GRADLE_MODULE_EVIDENCE)
             val planFile = repository.outputFile(jobId, AuditJobRepository.VERIFICATION_PLAN)
             writeTextAtomically(reportFile) { output -> ReportJsonExporter.write(report, output) }
-            update(jobId, AuditStage.REPORT, 90, "Полный JSON записан; готовим offsets и план проверок")
-            offsetsFile.writeText(OffsetEvidenceExporter.export(report), Charsets.UTF_8)
-            writeTextAtomically(readableOffsetsFile) { output -> OffsetReadableExporter.write(report, output) }
+            update(jobId, AuditStage.REPORT, 90, tr(language, "Полный JSON записан; готовим офсеты и план проверок", "Full JSON written; preparing offsets and verification plan"))
             planFile.writeText(VerificationPlanExporter.export(report), Charsets.UTF_8)
 
             ensureActive()
-            update(jobId, AuditStage.GRADLE_MODULES, 91, "Поиск Gradle metadata, base/split и dynamic-feature модулей")
+            update(jobId, AuditStage.GRADLE_MODULES, 91, tr(language, "Поиск Gradle metadata, base/split и dynamic-feature модулей", "Discovering Gradle metadata, base/split, and dynamic-feature modules"))
             val gradleEvidence = GradleModuleEvidenceExporter.export(
                 context = applicationContext,
                 source = spec.source,
                 destination = gradleEvidenceFile,
                 cancelled = { isStopped },
-                onProgress = { message -> update(jobId, AuditStage.GRADLE_MODULES, 92, message) },
+                onProgress = { message -> update(jobId, AuditStage.GRADLE_MODULES, 92, if (language == "en") "Reading Gradle and module evidence" else message) },
             )
-            customerFile.writeText(CustomerReportExporter.export(report, gradleEvidence), Charsets.UTF_8)
+            customerFile.writeText(CustomerReportExporter.export(report, gradleEvidence, language), Charsets.UTF_8)
 
             ensureActive()
-            update(jobId, AuditStage.ARTIFACTS, 93, "Автопоиск DEX, native и runtime-артефактов")
+            update(jobId, AuditStage.ARTIFACTS, 93, tr(language, "Автопоиск DEX, native и runtime-артефактов", "Automatically discovering DEX, native, and runtime artifacts"))
             val artifactResult = ArtifactBundleExporter.export(
                 context = applicationContext,
                 source = spec.source,
                 destination = repository.outputFile(jobId, AuditJobRepository.ARTIFACT_BUNDLE),
                 cancelled = { isStopped },
                 onProgress = { count, name ->
-                    update(jobId, AuditStage.ARTIFACTS, (93 + count / 24).coerceAtMost(97), name)
+                    update(jobId, AuditStage.ARTIFACTS, (93 + count / 24).coerceAtMost(97), if (language == "en") "Artifact: $name" else name)
                 },
             )
             val realDump = writeRealManagedDump(
                 jobId = jobId,
-                artifactBundle = repository.outputFile(jobId, AuditJobRepository.ARTIFACT_BUNDLE),
+                source = spec.source,
                 destination = managedDumpFile,
                 packageDestination = repository.outputFile(jobId, AuditJobRepository.IL2CPP_DUMP_PACKAGE),
+                offsetsDestination = offsetsFile,
+                readableOffsetsDestination = readableOffsetsFile,
+                languageCode = language,
             )
             customerFile.appendText(
-                "\n\n## Настоящий IL2CPP dump\n\n" +
-                    if (realDump?.complete == true) {
-                        "- Статус: COMPLETE\n- Engine: ${realDump.engine}\n- Metadata: v${realDump.metadataVersion}\n" +
-                            "- CodeRegistration: ${realDump.codeRegistration}\n- MetadataRegistration: ${realDump.metadataRegistration}\n" +
+                if (language == "en") {
+                    "\n\n## Real IL2CPP dump\n\n" + if (realDump?.complete == true) {
+                        "- Status: COMPLETE\n- Engine: ${realDump.engine}\n- Metadata: v${realDump.metadataVersion}\n" +
+                            "- Successful ABIs: ${realDump.successfulAbis.joinToString()}\n- Failed ABIs: ${realDump.failedAbis.joinToString().ifBlank { "none" }}\n" +
+                            "- CodeRegistration (primary ABI): ${realDump.codeRegistration}\n- MetadataRegistration (primary ABI): ${realDump.metadataRegistration}\n" +
+                            "- Confirmed gameplay surfaces: ${realDump.gameplaySurfaceCount}\n- Application/monetization surfaces: ${realDump.applicationSurfaceCount}\n"
+                    } else {
+                        "- Status: NOT_AVAILABLE\n- Reason: ${realDump?.error ?: "matching global-metadata.dat/libil2cpp.so pair not found"}\n" +
+                            "- No offsets were created or guessed.\n"
+                    }
+                } else {
+                    "\n\n## Настоящий IL2CPP dump\n\n" + if (realDump?.complete == true) {
+                        "- Статус: COMPLETE\n- Движок: ${realDump.engine}\n- Metadata: v${realDump.metadataVersion}\n" +
+                            "- Успешные ABI: ${realDump.successfulAbis.joinToString()}\n- Неуспешные ABI: ${realDump.failedAbis.joinToString().ifBlank { "нет" }}\n" +
+                            "- CodeRegistration (основной ABI): ${realDump.codeRegistration}\n- MetadataRegistration (основной ABI): ${realDump.metadataRegistration}\n" +
                             "- Игровые поверхности: ${realDump.gameplaySurfaceCount}\n- Приложение/монетизация: ${realDump.applicationSurfaceCount}\n"
                     } else {
-                        "- Статус: NOT_AVAILABLE\n- Причина: ${realDump?.error ?: "matching global-metadata.dat/libil2cpp.so pair not found"}\n" +
+                        "- Статус: NOT_AVAILABLE\n- Причина: ${realDump?.error ?: "не найдена совместимая пара global-metadata.dat/libil2cpp.so"}\n" +
                             "- Офсеты не создавались и не угадывались.\n"
-                    },
+                    }
+                },
                 Charsets.UTF_8,
             )
 
             ensureActive()
-            update(jobId, AuditStage.SIGNING, 98, "Подпись целостности evidence-пакета")
+            update(jobId, AuditStage.SIGNING, 98, tr(language, "Подпись целостности пакета доказательств", "Signing evidence package integrity"))
             val signedInputs = listOf(
                 reportFile,
                 customerFile,
@@ -172,6 +184,10 @@ class AuditWorker(
                 packageFile = repository.outputFile(jobId, AuditJobRepository.SIGNED_EVIDENCE_PACKAGE),
                 assessmentId = report.assessment.assessmentId,
                 artifactSha256 = report.artifact.sha256,
+                packageEntryNames = (signedInputs +
+                    repository.outputFile(jobId, AuditJobRepository.EVIDENCE_MANIFEST) +
+                    repository.outputFile(jobId, AuditJobRepository.EVIDENCE_SIGNATURE))
+                    .associate { it.name to AuditOutputNames.localized(it.name, language) },
                 cancelled = { isStopped },
             )
 
@@ -193,23 +209,25 @@ class AuditWorker(
                 il2cppMetadataVersion = report.il2cpp?.metadata?.metadataVersion,
                 exportedArtifactCount = artifactResult.includedEntries,
                 outputFiles = AuditJobRepository.OUTPUT_FILES.map { repository.outputFile(jobId, it) }.filter(File::isFile).map(File::getName).sorted(),
+                languageCode = language,
             )
             repository.writeSummary(summary)
-            update(jobId, AuditStage.COMPLETE, 100, "Готово: evidence-пакет и отчёт сформированы")
+            update(jobId, AuditStage.COMPLETE, 100, tr(language, "Готово: пакет доказательств и отчёт сформированы", "Complete: evidence package and report generated"))
             Result.success(workDataOf(KEY_JOB_ID to jobId))
         } catch (cancelled: CancellationException) {
-            persistTerminal(jobId, AuditStage.CANCELLED, "Анализ отменён", null)
-            Result.failure(errorData("Анализ отменён"))
+            val message = tr(jobLanguage, "Анализ отменён", "Analysis cancelled")
+            persistTerminal(jobId, AuditStage.CANCELLED, message, null)
+            Result.failure(errorData(message))
         } catch (error: Throwable) {
             val message = sanitizeError(error)
-            persistTerminal(jobId, AuditStage.FAILED, "Не удалось завершить анализ", message)
+            persistTerminal(jobId, AuditStage.FAILED, tr(jobLanguage, "Не удалось завершить анализ", "Unable to complete analysis"), message)
             Result.failure(errorData(message))
         }
     }
 
     override fun onStopped() {
         val jobId = inputData.getString(KEY_JOB_ID)
-        if (jobId != null) persistTerminal(jobId, AuditStage.CANCELLED, "Анализ остановлен", null)
+        if (jobId != null) persistTerminal(jobId, AuditStage.CANCELLED, tr(jobLanguage, "Анализ остановлен", "Analysis stopped"), null)
         super.onStopped()
     }
 
@@ -254,12 +272,12 @@ class AuditWorker(
         val cancel = WorkManager.getInstance(applicationContext).createCancelPendingIntent(id)
         val notification = Notification.Builder(applicationContext, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download)
-            .setContentTitle(applicationContext.getString(R.string.audit_notification_title))
+            .setContentTitle(tr(jobLanguage, "UniRevLab: анализ приложения", "UniRevLab: application analysis"))
             .setContentText(message.take(MAX_MESSAGE_LENGTH))
             .setProgress(100, progress.coerceIn(0, 100), false)
             .setOnlyAlertOnce(true)
             .setOngoing(progress < 100)
-            .addAction(0, applicationContext.getString(R.string.audit_notification_cancel), cancel)
+            .addAction(0, tr(jobLanguage, "Остановить", "Stop"), cancel)
             .setSubText(jobId.take(8))
             .build()
         return if (Build.VERSION.SDK_INT >= 29) {
@@ -269,15 +287,15 @@ class AuditWorker(
         }
     }
 
-    private fun createNotificationChannel() {
+    private fun createNotificationChannel(languageCode: String) {
         if (Build.VERSION.SDK_INT >= 26) {
             notifications.createNotificationChannel(
                 NotificationChannel(
                     CHANNEL_ID,
-                    applicationContext.getString(R.string.audit_notification_channel),
+                    tr(languageCode, "Автоматический аудит", "Automatic audit"),
                     NotificationManager.IMPORTANCE_LOW,
                 ).apply {
-                    description = applicationContext.getString(R.string.audit_notification_channel_description)
+                    description = tr(languageCode, "Ход фонового анализа приложения", "Background application analysis progress")
                 }
             )
         }
@@ -296,117 +314,74 @@ class AuditWorker(
 
     private fun writeRealManagedDump(
         jobId: String,
-        artifactBundle: File,
+        source: AuditSourceSpec,
         destination: File,
         packageDestination: File,
+        offsetsDestination: File,
+        readableOffsetsDestination: File,
+        languageCode: String,
     ): RealIl2CppDumpEngine.Result? {
-        var metadataFile: File? = null
-        var libraryFile: File? = null
-        var nestedApkFile: File? = null
         val outputDirectory = File(destination.parentFile, ".real-il2cpp-$id")
+        var located: Il2CppInputLocator.Result? = null
         try {
-            if (artifactBundle.isFile) {
-                ZipFile(artifactBundle).use { zip ->
-                    val entries = zip.entries().asSequence().filterNot { it.isDirectory }.toList()
-                    val metadata = entries.firstOrNull { it.name.substringAfterLast('/').equals("global-metadata.dat", ignoreCase = true) }
-                    val library = entries.filter { it.name.substringAfterLast('/').equals("libil2cpp.so", ignoreCase = true) }
-                        .sortedBy { if (it.name.contains("arm64-v8a", ignoreCase = true)) 0 else 1 }
-                        .firstOrNull()
-                    if (metadata != null && metadata.size in 1..MAX_METADATA_FOR_DUMP_BYTES) {
-                        metadataFile = copyZipEntryBounded(
-                            zip,
-                            metadata,
-                            File(destination.parentFile, ".global-metadata-${id}.tmp"),
-                            MAX_METADATA_FOR_DUMP_BYTES,
-                        )
-                    }
-                    if (library != null && library.size in 1..MAX_LIBRARY_FOR_DUMP_BYTES) {
-                        libraryFile = copyZipEntryBounded(
-                            zip,
-                            library,
-                            File(destination.parentFile, ".libil2cpp-$id.so"),
-                            MAX_LIBRARY_FOR_DUMP_BYTES,
-                        )
-                    }
-                    if (metadataFile == null || libraryFile == null) {
-                        val nestedApk = entries.asSequence()
-                            .firstOrNull { it.name.endsWith(".apk", ignoreCase = true) && it.size in 1..MAX_NESTED_APK_FOR_DUMP_BYTES }
-                        if (nestedApk != null) {
-                            nestedApkFile = copyZipEntryBounded(
-                                zip,
-                                nestedApk,
-                                File(destination.parentFile, ".nested-${id}.apk"),
-                                MAX_NESTED_APK_FOR_DUMP_BYTES,
-                            )
-                            ZipFile(requireNotNull(nestedApkFile)).use { nestedZip ->
-                                val nestedEntries = nestedZip.entries().asSequence().filterNot { it.isDirectory }.toList()
-                                val nestedMetadata = nestedEntries.asSequence()
-                                    .firstOrNull { it.name.substringAfterLast('/').equals("global-metadata.dat", ignoreCase = true) }
-                                val nestedLibrary = nestedEntries.asSequence()
-                                    .filter { it.name.substringAfterLast('/').equals("libil2cpp.so", ignoreCase = true) }
-                                    .sortedBy { if (it.name.contains("arm64-v8a", ignoreCase = true)) 0 else 1 }
-                                    .firstOrNull()
-                                if (nestedMetadata != null && nestedMetadata.size in 1..MAX_METADATA_FOR_DUMP_BYTES) {
-                                    metadataFile = copyZipEntryBounded(
-                                        nestedZip,
-                                        nestedMetadata,
-                                        File(destination.parentFile, ".global-metadata-${id}.tmp"),
-                                        MAX_METADATA_FOR_DUMP_BYTES,
-                                    )
-                                }
-                                if (nestedLibrary != null && nestedLibrary.size in 1..MAX_LIBRARY_FOR_DUMP_BYTES) {
-                                    libraryFile = copyZipEntryBounded(
-                                        nestedZip,
-                                        nestedLibrary,
-                                        File(destination.parentFile, ".libil2cpp-$id.so"),
-                                        MAX_LIBRARY_FOR_DUMP_BYTES,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
+            located = Il2CppInputLocator.locate(
+                context = applicationContext,
+                source = source,
+                workingDirectory = requireNotNull(destination.parentFile),
+                token = id.toString(),
+                cancelled = { isStopped },
+            )
+            val metadata = located.metadataFile
+            val libraries = located.libraries
+            val result = if (metadata == null || libraries.isEmpty()) {
+                val missing = buildList {
+                    if (metadata == null) add("global-metadata.dat")
+                    if (libraries.isEmpty()) add("libil2cpp.so")
+                }.joinToString(" + ")
+                val details = located.diagnostics.joinToString("; ").take(500)
+                RealIl2CppDumpEngine.notAvailable(
+                    tr(languageCode, "Не найдено напрямую во входном APK/APKS: $missing", "Not found directly in the input APK/APKS: $missing") +
+                        details.takeIf(String::isNotBlank)?.let { ". $it" }.orEmpty()
+                )
+            } else {
+                update(
+                    jobId,
+                    AuditStage.IL2CPP,
+                    97,
+                    tr(languageCode, "Настоящий IL2CPP dump для ABI: ${libraries.joinToString { it.abi }}", "Real IL2CPP dump for ABIs: ${libraries.joinToString { it.abi }}"),
+                )
+                RealIl2CppDumpEngine.dumpMultiple(metadata, libraries, outputDirectory)
             }
-            val metadata = metadataFile ?: return null
-            val library = libraryFile ?: return null
-            update(jobId, AuditStage.IL2CPP, 97, "Настоящий IL2CPP dump: регистрации, методы, поля и RVA")
-            val result = RealIl2CppDumpEngine.dump(metadata, library, outputDirectory)
-            if (result.complete) {
+            if (result?.complete == true) {
                 requireNotNull(result.dumpCsFile).copyTo(destination, overwrite = true)
                 requireNotNull(result.packageFile).copyTo(packageDestination, overwrite = true)
             }
+            ConfirmedDumpOutputExporter.write(result, outputDirectory, offsetsDestination, readableOffsetsDestination, languageCode)
             return result
         } finally {
-            metadataFile?.delete()
-            libraryFile?.delete()
-            nestedApkFile?.delete()
+            located?.cleanup()
             outputDirectory.deleteRecursively()
             File(outputDirectory.parentFile, "${outputDirectory.name}-real-il2cpp-dump.zip").delete()
         }
     }
 
-    private fun copyZipEntryBounded(
-        zip: ZipFile,
-        entry: java.util.zip.ZipEntry,
-        destination: File,
-        maxBytes: Long,
-    ): File {
-        var copied = 0L
-        zip.getInputStream(entry).buffered().use { input ->
-            destination.outputStream().buffered().use { output ->
-                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                while (true) {
-                    ensureActive()
-                    val read = input.read(buffer)
-                    if (read <= 0) break
-                    copied += read
-                    require(copied <= maxBytes) { "Вложенный IL2CPP-артефакт превышает лимит dump" }
-                    output.write(buffer, 0, read)
-                }
-            }
+    private fun tr(languageCode: String, russian: String, english: String): String =
+        if (languageCode == "en") english else russian
+
+    private fun englishStageMessage(stage: String, current: Int?, total: Int?): String {
+        val base = when (stage.lowercase()) {
+            "archive" -> "Reading APK/archive structure and signatures"
+            "manifest" -> "Parsing manifest and resources"
+            "dex", "reachability" -> "Indexing DEX calls and trust surfaces"
+            "native" -> "Analyzing native ELF and JNI"
+            "il2cpp", "runtime" -> "Locating IL2CPP and runtime metadata"
+            "supply_chain" -> "Building component and dependency inventory"
+            "report", "findings", "saving", "complete" -> "Preparing findings and report evidence"
+            else -> "Preparing analysis input"
         }
-        return destination
+        return if (current != null && total != null && total > 0) "$base · $current/$total" else base
     }
+
 
     private fun writeTextAtomically(destination: File, block: (Appendable) -> Unit) {
         require(destination.parentFile?.isDirectory == true || destination.parentFile?.mkdirs() == true) {
@@ -487,9 +462,6 @@ class AuditWorker(
         private const val NOTIFICATION_UPDATE_INTERVAL = 3
         private const val MAX_MESSAGE_LENGTH = 180
         private const val MAX_ERROR_LENGTH = 500
-        private const val MAX_METADATA_FOR_DUMP_BYTES = 128L * 1024L * 1024L
-        private const val MAX_LIBRARY_FOR_DUMP_BYTES = 256L * 1024L * 1024L
-        private const val MAX_NESTED_APK_FOR_DUMP_BYTES = 256L * 1024L * 1024L
         private const val REPORT_STREAM_BUFFER_BYTES = 128 * 1024
         private const val STREAM_CANCELLATION_INTERVAL = 256
     }

@@ -28,6 +28,7 @@ class AuditWorkflowModelsTest {
                 versionName = "1.2.3",
                 versionCode = 12,
             ),
+            languageCode = "en",
         )
 
         assertEquals(expected, AuditWorkflowJson.decodeSpec(AuditWorkflowJson.encodeSpec(expected)))
@@ -43,5 +44,12 @@ class AuditWorkflowModelsTest {
         assertTrue(scope.reverseEngineering)
         assertTrue(scope.dynamicAnalysis)
         assertTrue(scope.networkTesting)
+    }
+
+    @Test
+    fun testModeProfileNeedsNoUserIdentityFields() {
+        val profile = AuditProfile.testMode("ru")
+        assertTrue(profile.isValid)
+        assertEquals("Локальный тестовый режим", profile.organization)
     }
 }

@@ -13,6 +13,7 @@ data class ImportedReport(
     val file: File,
     val displayName: String,
     val sizeBytes: Long,
+    val dumpEvidenceFile: File? = null,
 )
 
 class ReportImportStore(context: Context) {
@@ -25,7 +26,8 @@ class ReportImportStore(context: Context) {
         val file = File(root, REPORT_FILE)
         if (!file.isFile || file.length() <= 0) return null
         val name = File(root, NAME_FILE).takeIf(File::isFile)?.readText(Charsets.UTF_8)?.trim().orEmpty()
-        return ImportedReport(file, name.ifBlank { REPORT_FILE }, file.length())
+        val dumpEvidence = File(root, DUMP_EVIDENCE_FILE).takeIf { it.isFile && it.length() > 0 }
+        return ImportedReport(file, name.ifBlank { REPORT_FILE }, file.length(), dumpEvidence)
     }
 
     fun import(uri: Uri): ImportedReport {
@@ -38,33 +40,48 @@ class ReportImportStore(context: Context) {
 
         val destination = File(root, REPORT_FILE)
         val temporary = File(root, TEMP_REPORT_FILE)
+        val evidenceDestination = File(root, DUMP_EVIDENCE_FILE)
+        val evidenceTemporary = File(root, TEMP_DUMP_EVIDENCE_FILE)
         try {
-            if (staging.isZip()) extractFullReport(staging, temporary) else staging.inputStream().use { input ->
+            evidenceTemporary.delete()
+            if (staging.isZip()) {
+                extractReportBundle(staging, temporary, evidenceTemporary)
+            } else staging.inputStream().use { input ->
                 FileOutputStream(temporary, false).use { output -> input.copyBoundedTo(output, MAX_REPORT_BYTES) }
             }
             validateJsonObject(temporary)
             replaceAtomically(temporary, destination)
+            if (evidenceTemporary.isFile) {
+                validateJsonObject(evidenceTemporary)
+                replaceAtomically(evidenceTemporary, evidenceDestination)
+            } else {
+                evidenceDestination.delete()
+            }
             File(root, NAME_FILE).writeText(originalName.take(240), Charsets.UTF_8)
-            return ImportedReport(destination, originalName, destination.length())
+            return ImportedReport(destination, originalName, destination.length(), evidenceDestination.takeIf(File::isFile))
         } finally {
             staging.delete()
             temporary.delete()
+            evidenceTemporary.delete()
         }
     }
 
-    private fun extractFullReport(archive: File, destination: File) {
+    private fun extractReportBundle(archive: File, destination: File, evidenceDestination: File) {
+        var reportFound = false
         ZipInputStream(BufferedInputStream(FileInputStream(archive))).use { zip ->
             while (true) {
                 val entry = zip.nextEntry ?: break
                 val normalized = entry.name.replace('\\', '/').substringAfterLast('/')
-                if (!entry.isDirectory && normalized == FULL_REPORT_ENTRY) {
+                if (!entry.isDirectory && normalized in FULL_REPORT_ENTRIES) {
                     FileOutputStream(destination, false).use { output -> zip.copyBoundedTo(output, MAX_REPORT_BYTES) }
-                    return
+                    reportFound = true
+                } else if (!entry.isDirectory && normalized in DUMP_EVIDENCE_ENTRIES) {
+                    FileOutputStream(evidenceDestination, false).use { output -> zip.copyBoundedTo(output, MAX_DUMP_EVIDENCE_BYTES) }
                 }
                 zip.closeEntry()
             }
         }
-        error("В архиве нет $FULL_REPORT_ENTRY")
+        require(reportFound) { "В архиве нет full-report.json / полный-отчёт.json" }
     }
 
     private fun validateJsonObject(file: File) {
@@ -118,9 +135,13 @@ class ReportImportStore(context: Context) {
         private const val NAME_FILE = "imported-report-name.txt"
         private const val STAGING_FILE = ".selected-report.bin"
         private const val TEMP_REPORT_FILE = ".full-report.tmp"
-        private const val FULL_REPORT_ENTRY = "full-report.json"
+        private const val DUMP_EVIDENCE_FILE = "imported-offset-evidence.json"
+        private const val TEMP_DUMP_EVIDENCE_FILE = ".offset-evidence.tmp"
+        private val FULL_REPORT_ENTRIES = setOf("full-report.json", "полный-отчёт.json")
+        private val DUMP_EVIDENCE_ENTRIES = setOf("offset-evidence.json", "подтверждённые-офсеты.json")
         private const val BUFFER_BYTES = 64 * 1024
         private const val MAX_REPORT_BYTES = 1_073_741_824L
         private const val MAX_CONTAINER_BYTES = 1_288_490_188L
+        private const val MAX_DUMP_EVIDENCE_BYTES = 64L * 1024L * 1024L
     }
 }

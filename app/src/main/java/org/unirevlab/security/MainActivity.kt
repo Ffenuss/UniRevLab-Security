@@ -27,16 +27,16 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.unirevlab.security.data.AgreementStore
 import org.unirevlab.security.data.AuditJobRepository
+import org.unirevlab.security.data.AuditOutputNames
 import org.unirevlab.security.data.InstalledAppRepository
 import org.unirevlab.security.model.AuditProfile
 import org.unirevlab.security.model.AuditSourceKind
 import org.unirevlab.security.model.AuditSourceSpec
 import org.unirevlab.security.model.AuditStage
 import org.unirevlab.security.model.InstalledAppDescriptor
-import org.unirevlab.security.ui.AgreementScreen
-import org.unirevlab.security.ui.AuditProfileScreen
+import org.unirevlab.security.ui.AppLanguage
+import org.unirevlab.security.ui.AppLanguageStore
 import org.unirevlab.security.ui.AutoAuditScreen
 import org.unirevlab.security.ui.InstalledAppsScreen
 import org.unirevlab.security.ui.ReportChatScreen
@@ -53,27 +53,19 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Route { AGREEMENT, PROFILE, HOME, INSTALLED_APPS, AI_CHAT }
+private enum class Route { HOME, INSTALLED_APPS, AI_CHAT }
 
 @Composable
 private fun UniRevLabApp() {
     val context = LocalContext.current
     val appContext = context.applicationContext
-    val agreementStore = remember { AgreementStore(appContext) }
+    val languageStore = remember { AppLanguageStore(appContext) }
     val jobs = remember { AuditJobRepository(appContext) }
     val installedRepository = remember { InstalledAppRepository(appContext) }
     val workManager = remember { WorkManager.getInstance(appContext) }
-    var profile by remember { mutableStateOf(jobs.loadProfile()) }
-    var route by remember {
-        mutableStateOf(
-            when {
-                !agreementStore.isAccepted() -> Route.AGREEMENT
-                profile == null -> Route.PROFILE
-                else -> Route.HOME
-            }
-        )
-    }
-    var authorityConfirmed by remember { mutableStateOf(false) }
+    var language by remember { mutableStateOf(languageStore.load()) }
+    val profile = remember(language) { AuditProfile.testMode(language.code) }
+    var route by remember { mutableStateOf(Route.HOME) }
     var jobId by remember { mutableStateOf(jobs.currentJobId()) }
     var workId by remember { mutableStateOf(jobs.currentWorkId()) }
     var auditState by remember { mutableStateOf(jobId?.let(jobs::loadState)) }
@@ -95,13 +87,8 @@ private fun UniRevLabApp() {
     }
 
     fun start(source: AuditSourceSpec) {
-        val currentProfile = profile
-        if (!authorityConfirmed || currentProfile == null) {
-            error = "Подтвердите полномочия и заполните профиль аудита"
-            return
-        }
         val result = runCatching {
-            val spec = jobs.createJob(currentProfile, source)
+            val spec = jobs.createJob(profile, source, language.code)
             val request = AuditScheduler.enqueue(appContext, spec.jobId)
             jobs.rememberWork(spec.jobId, request.id)
             spec.jobId to request.id
@@ -116,7 +103,7 @@ private fun UniRevLabApp() {
             error = null
             route = Route.HOME
         }.onFailure { failure ->
-            error = failure.message ?: "Не удалось создать задание"
+            error = failure.message ?: language.text("Не удалось создать задание", "Unable to create analysis job")
         }
     }
 
@@ -146,7 +133,7 @@ private fun UniRevLabApp() {
                 if (info?.state == WorkInfo.State.CANCELLED && observedJobId != null && auditState?.stage?.isTerminal() != true) {
                     val cancelled = (auditState ?: jobs.loadState(observedJobId))?.copy(
                         stage = AuditStage.CANCELLED,
-                        message = "Анализ остановлен",
+                        message = language.text("Анализ остановлен", "Analysis stopped"),
                         updatedAtEpochMs = System.currentTimeMillis(),
                     )
                     if (cancelled != null) {
@@ -155,7 +142,6 @@ private fun UniRevLabApp() {
                     }
                 }
                 isRunning = false
-                authorityConfirmed = false
                 info?.outputData?.getString(org.unirevlab.security.work.AuditWorker.KEY_ERROR)?.let { error = it }
                 break
             }
@@ -188,9 +174,9 @@ private fun UniRevLabApp() {
                 val result = runCatching {
                     withContext(Dispatchers.IO) {
                         val source = jobs.outputFile(currentJob, selection.first)
-                        require(source.isFile) { "Результат ещё не сформирован" }
+                        require(source.isFile) { language.text("Результат ещё не сформирован", "The result has not been generated yet") }
                         context.contentResolver.openOutputStream(uri, "wt").use { output ->
-                            requireNotNull(output) { "Не удалось открыть файл назначения" }
+                            requireNotNull(output) { language.text("Не удалось открыть файл назначения", "Unable to open destination file") }
                             source.inputStream().buffered().use { input -> input.copyTo(output) }
                         }
                     }
@@ -201,20 +187,8 @@ private fun UniRevLabApp() {
     }
 
     when (route) {
-        Route.AGREEMENT -> AgreementScreen(error = error) { signerName ->
-            val result = runCatching { agreementStore.accept(signerName) }
-            error = result.exceptionOrNull()?.message
-            if (result.isSuccess) route = if (profile == null) Route.PROFILE else Route.HOME
-        }
-        Route.PROFILE -> AuditProfileScreen(initial = profile) { updated ->
-            val result = runCatching { jobs.saveProfile(updated) }
-            result.onSuccess {
-                profile = updated
-                error = null
-                route = Route.HOME
-            }.onFailure { error = it.message }
-        }
         Route.INSTALLED_APPS -> InstalledAppsScreen(
+            language = language,
             apps = installedApps,
             isLoading = installedLoading,
             error = installedError,
@@ -242,19 +216,28 @@ private fun UniRevLabApp() {
                     ?.takeIf { it.isFile && it.length() > 0 }
             }
             ReportChatScreen(
+                language = language,
                 currentReport = currentReport,
-                currentReportLabel = summary?.displayName?.let { "$it · full-report.json" },
+                currentDumpEvidence = jobId?.let { currentJobId ->
+                    runCatching { jobs.outputFile(currentJobId, AuditJobRepository.OFFSET_EVIDENCE) }
+                        .getOrNull()?.takeIf { it.isFile && it.length() > 0 }
+                },
+                currentReportLabel = summary?.displayName?.let {
+                    "$it · ${language.text("полный-отчёт.json", "full-report.json")}" 
+                },
                 onBack = { route = Route.HOME },
             )
         }
         Route.HOME -> AutoAuditScreen(
-            profile = requireNotNull(profile),
-            authorityConfirmed = authorityConfirmed,
+            language = language,
             state = auditState,
             summary = summary,
             isRunning = isRunning,
             error = error,
-            onAuthorityChanged = { authorityConfirmed = it },
+            onLanguageChanged = { selected ->
+                languageStore.save(selected)
+                language = selected
+            },
             onPickInstalled = {
                 route = Route.INSTALLED_APPS
                 reloadInstalledApps()
@@ -274,7 +257,7 @@ private fun UniRevLabApp() {
                 if (currentJob != null && currentState != null && currentState.stage != AuditStage.CANCELLING) {
                     val cancelling = currentState.copy(
                         stage = AuditStage.CANCELLING,
-                        message = "Запрос на остановку отправлен. Завершаем текущую безопасную операцию…",
+                        message = language.text("Запрос на остановку отправлен. Завершаем текущую безопасную операцию…", "Stop requested. Finishing the current safe operation…"),
                         updatedAtEpochMs = System.currentTimeMillis(),
                     )
                     jobs.writeState(cancelling)
@@ -282,10 +265,10 @@ private fun UniRevLabApp() {
                     workId?.let { AuditScheduler.cancel(appContext, it) }
                 }
             },
-            onEditProfile = { route = Route.PROFILE },
             onOpenAiChat = { route = Route.AI_CHAT },
             onExport = { fileName ->
-                val fileLabel = exportName(fileName, summary?.displayName)
+                val exportLanguage = AppLanguage.fromCode(summary?.languageCode ?: language.code)
+                val fileLabel = exportName(fileName, summary?.displayName, exportLanguage)
                 pendingExport = fileName to fileLabel
                 fileSaver.launch(fileLabel)
             },
@@ -305,14 +288,15 @@ private fun displayName(context: android.content.Context, uri: Uri): String {
     return fromProvider?.takeIf { it.isNotBlank() } ?: uri.lastPathSegment?.substringAfterLast('/') ?: "selected-artifact.apk"
 }
 
-private fun exportName(fileName: String, displayName: String?): String {
+private fun exportName(fileName: String, displayName: String?, language: AppLanguage): String {
     val safeTarget = displayName.orEmpty()
         .substringBeforeLast('.')
         .replace(Regex("[^A-Za-z0-9А-Яа-я._-]+"), "-")
         .trim('-')
         .take(48)
         .ifBlank { "audit" }
-    return "$safeTarget-$fileName"
+    val localized = AuditOutputNames.localized(fileName, language.code)
+    return "$safeTarget-$localized"
 }
 
 private const val WORK_POLL_INTERVAL_MS = 650L

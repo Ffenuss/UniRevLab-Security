@@ -2,7 +2,7 @@
 
 Open-source Android-first platform for **authorized** mobile application security assessment and reverse engineering.
 
-## Current milestone: v0.43.0-real-il2cpp-dumper
+## Current milestone: v0.44.0-dump-first-pipeline
 
 The Android client now exposes one primary workflow: save the customer profile once, confirm the
 scope for the current target, then select an installed application or APK. A persistent WorkManager

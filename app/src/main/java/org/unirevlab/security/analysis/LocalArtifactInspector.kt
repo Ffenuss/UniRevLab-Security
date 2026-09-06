@@ -1364,7 +1364,7 @@ class LocalArtifactInspector(
     )
 
     companion object {
-    const val ENGINE_VERSION = "0.43.0-real-il2cpp-dumper"
+    const val ENGINE_VERSION = "0.44.0-dump-first-pipeline"
         private const val MAX_DEX_FILES = 32
         private const val MAX_SINGLE_DEX_BYTES = 96L * 1024L * 1024L
         private const val MAX_TOTAL_DEX_BYTES = 384L * 1024L * 1024L

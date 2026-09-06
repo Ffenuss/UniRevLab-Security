@@ -55,6 +55,22 @@ data class AuditProfile(
         dynamicAnalysis = dynamicAnalysis,
         networkTesting = networkTesting,
     )
+
+    companion object {
+        fun testMode(languageCode: String): AuditProfile = if (languageCode == "en") {
+            AuditProfile(
+                projectName = "Automatic Android audit",
+                organization = "Local test mode",
+                purpose = "Static security assessment and evidence export",
+            )
+        } else {
+            AuditProfile(
+                projectName = "Автоматический аудит Android",
+                organization = "Локальный тестовый режим",
+                purpose = "Статический анализ безопасности и экспорт доказательств",
+            )
+        }
+    }
 }
 
 data class AuditSourceSpec(
@@ -75,6 +91,7 @@ data class AuditJobSpec(
     val createdAtEpochMs: Long,
     val scope: AssessmentScope,
     val source: AuditSourceSpec,
+    val languageCode: String = "ru",
 )
 
 data class AuditJobSummary(
@@ -95,6 +112,7 @@ data class AuditJobSummary(
     val il2cppMetadataVersion: Int?,
     val exportedArtifactCount: Int,
     val outputFiles: List<String>,
+    val languageCode: String = "ru",
 )
 
 data class PersistedAuditState(
@@ -135,6 +153,7 @@ object AuditWorkflowJson {
         .put("createdAtEpochMs", value.createdAtEpochMs)
         .put("scope", encodeScope(value.scope))
         .put("source", encodeSource(value.source))
+        .put("languageCode", value.languageCode)
         .toString(2)
 
     fun decodeSpec(value: String): AuditJobSpec = JSONObject(value).let { json ->
@@ -144,6 +163,7 @@ object AuditWorkflowJson {
             createdAtEpochMs = json.getLong("createdAtEpochMs"),
             scope = decodeScope(json.getJSONObject("scope")),
             source = decodeSource(json.getJSONObject("source")),
+            languageCode = json.optString("languageCode", "ru"),
         )
     }
 
@@ -165,6 +185,7 @@ object AuditWorkflowJson {
         .putNullable("il2cppMetadataVersion", value.il2cppMetadataVersion)
         .put("exportedArtifactCount", value.exportedArtifactCount)
         .put("outputFiles", JSONArray(value.outputFiles))
+        .put("languageCode", value.languageCode)
         .toString(2)
 
     fun decodeSummary(value: String): AuditJobSummary = JSONObject(value).let { json ->
@@ -186,6 +207,7 @@ object AuditWorkflowJson {
             il2cppMetadataVersion = json.intOrNull("il2cppMetadataVersion"),
             exportedArtifactCount = json.getInt("exportedArtifactCount"),
             outputFiles = json.getJSONArray("outputFiles").strings(),
+            languageCode = json.optString("languageCode", "ru"),
         )
     }
 

@@ -29,6 +29,7 @@ object EvidencePackageSigner {
         packageFile: File,
         assessmentId: String,
         artifactSha256: String,
+        packageEntryNames: Map<String, String> = emptyMap(),
         cancelled: () -> Boolean = { false },
     ): SignedEvidenceResult {
         require(inputs.isNotEmpty()) { "Нет файлов для evidence-пакета" }
@@ -38,8 +39,10 @@ object EvidencePackageSigner {
         val orderedInputs = inputs.sortedBy(File::getName)
         val fileRecords = orderedInputs.map { file ->
             ensureActive(cancelled)
+            val exportedName = packageEntryNames[file.name] ?: file.name
             JSONObject()
-                .put("name", file.name)
+                .put("name", exportedName)
+                .put("canonicalName", file.name)
                 .put("sizeBytes", file.length())
                 .put("sha256", sha256(file, cancelled))
         }
@@ -56,6 +59,7 @@ object EvidencePackageSigner {
 
         val manifestSha256 = sha256(manifest)
         val signature = sign(manifest)
+        val manifestEntryName = packageEntryNames[manifestFile.name] ?: manifestFile.name
         val certificate = androidKeyStore().getCertificate(KEY_ALIAS)
             ?: error("Сертификат evidence-подписи недоступен")
         signatureFile.writeText(
@@ -63,13 +67,13 @@ object EvidencePackageSigner {
                 .put("schemaVersion", "1.0")
                 .put("algorithm", SIGNATURE_ALGORITHM)
                 .put("keyAlias", KEY_ALIAS)
-                .put("manifest", manifestFile.name)
+                .put("manifest", manifestEntryName)
                 .put("manifestSha256", manifestSha256)
                 .put("publicKeySha256", sha256(certificate.publicKey.encoded))
                 .put("publicKeyFormat", certificate.publicKey.format)
                 .put("publicKeyDerBase64", Base64.encodeToString(certificate.publicKey.encoded, Base64.NO_WRAP))
                 .put("signatureBase64", Base64.encodeToString(signature, Base64.NO_WRAP))
-                .put("verification", "Verify SHA-256 of evidence-manifest.json, decode the X.509 public key, then verify signatureBase64 with SHA256withECDSA.")
+                .put("verification", "Verify SHA-256 of $manifestEntryName, decode the X.509 public key, then verify signatureBase64 with SHA256withECDSA.")
                 .toString(2),
             Charsets.UTF_8,
         )
@@ -79,7 +83,7 @@ object EvidencePackageSigner {
             ZipOutputStream(raw).use { zip ->
                 packaged.forEach { file ->
                     ensureActive(cancelled)
-                    zip.putNextEntry(ZipEntry(file.name).apply { time = 0L })
+                    zip.putNextEntry(ZipEntry(packageEntryNames[file.name] ?: file.name).apply { time = 0L })
                     file.inputStream().buffered().use { input ->
                         val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                         while (true) {

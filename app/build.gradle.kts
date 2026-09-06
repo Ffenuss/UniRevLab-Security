@@ -15,8 +15,8 @@ android {
         applicationId = "org.unirevlab.security"
         minSdk = 26
         targetSdk = 36
-        versionCode = 57
-        versionName = "0.43.0-preview-real-il2cpp-dumper"
+        versionCode = 58
+        versionName = "0.44.0-preview-dump-first-pipeline"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

@@ -7,7 +7,10 @@ import org.unirevlab.security.model.StaticAnalysisReport
 import java.time.Instant
 
 object CustomerReportExporter {
-    fun export(report: StaticAnalysisReport, gradleEvidence: GradleModuleEvidenceResult? = null): String {
+    fun export(report: StaticAnalysisReport, gradleEvidence: GradleModuleEvidenceResult? = null, languageCode: String = "ru"): String =
+        if (languageCode == "en") exportEnglish(report, gradleEvidence) else exportRussian(report, gradleEvidence)
+
+    private fun exportRussian(report: StaticAnalysisReport, gradleEvidence: GradleModuleEvidenceResult? = null): String {
         val modificationSurfaces = ModificationSurfaceClassifier.analyze(report)
         val resistance = if (report.il2cpp?.detected == true) {
             runCatching { Il2CppModdingResistanceEngine.analyze(report) }.getOrNull()
@@ -54,8 +57,7 @@ object CustomerReportExporter {
         appendLine("| DEX methods indexed | ${report.dex?.methodsIndexed ?: 0} |")
         appendLine("| Native libraries | ${report.native?.librariesScanned ?: 0} |")
         appendLine("| IL2CPP | ${if (report.il2cpp?.detected == true) "обнаружен" else "не обнаружен"} |")
-        appendLine("| Приоритетные modification-surface RVA | ${modificationSurfaces.totalResolvedBeforeLimit} |")
-        appendLine("| Semantic-кандидаты без RVA | ${modificationSurfaces.totalUnresolvedBeforeLimit} |")
+        appendLine("| Предварительные modification-surface сигналы | ${modificationSurfaces.totalResolvedBeforeLimit + modificationSurfaces.totalUnresolvedBeforeLimit} |")
         gradleEvidence?.let {
             appendLine("| APK/Gradle modules | ${it.modulesDetected} |")
             appendLine("| Dynamic features | ${it.dynamicFeaturesDetected} |")
@@ -98,23 +100,23 @@ object CustomerReportExporter {
         appendLine()
         appendLine("Metadata token, ELF-символ и подтверждённый native RVA метода — разные сущности. `offsets-readable.html` показывает их раздельно и не выдаёт сырой символ за готовый hook-offset.")
         appendLine()
-        appendLine("## Приоритетные поверхности, которые обычно проверяют при модификации клиента")
+        appendLine("## Предварительные поверхности для проверки после настоящего dump")
         appendLine()
         appendLine("- Профиль цели: **${targetProfileLabel(modificationSurfaces.targetProfile)}**; уверенность: ${profileConfidenceLabel(modificationSurfaces.profileConfidence)}.")
         modificationSurfaces.profileReasons.forEach { appendLine("- ${safe(it)}") }
-        appendLine("- Кандидатов с реальным статическим RVA: ${modificationSurfaces.totalResolvedBeforeLimit}; managed-кандидатов только с metadata token: ${modificationSurfaces.totalUnresolvedBeforeLimit}.")
+        appendLine("- Статических кандидатов: ${modificationSurfaces.totalResolvedBeforeLimit}; managed-кандидатов только с metadata token: ${modificationSurfaces.totalUnresolvedBeforeLimit}.")
         appendLine()
-        appendLine("Классификация показывает места для защитной проверки: игровую экономику, состояние игрока, таймеры и прогресс либо premium, подписки, рекламу, authorization и feature gates обычного приложения. Совпадение по имени не доказывает, что изменение создаст работающий мод или bypass.")
+        appendLine("Это только предварительная навигация по общему статическому отчёту. Она не попадает в итоговый экспорт подтверждённых офсетов: тот создаётся позднее исключительно из успешно завершённого Rodroid dump.")
         appendLine()
         if (modificationSurfaces.resolvedOffsets.isNotEmpty()) {
-            appendLine("| Приоритет | Область | Категория | Источник | Identity | Библиотека | RVA |")
+            appendLine("| Приоритет | Область | Категория | Источник | Identity | Библиотека | Предварительный адрес |")
             appendLine("|---|---|---|---|---|---|---|")
             modificationSurfaces.resolvedOffsets.take(MAX_MODIFICATION_TARGETS).forEach { candidate ->
                 appendLine("| ${candidate.priority} | ${surfaceDomainLabel(candidate.domain)} | ${surfaceCategoryLabel(candidate.category)} | ${candidate.source} | `${safe(candidate.displayName)}` | `${safe(candidate.libraryEntry ?: "—")}` | `${candidate.rva?.let { "0x${it.toString(16)}" } ?: "—"}` |")
             }
             appendLine()
             if (modificationSurfaces.totalResolvedBeforeLimit > MAX_MODIFICATION_TARGETS) {
-                appendLine("Полный список и объяснение каждого совпадения находятся в `offsets-readable.html` и `offset-evidence.json`.")
+                appendLine("Итоговые `offsets-readable.html` и `offset-evidence.json` не копируют эту таблицу: они строятся только из реального dump.")
                 appendLine()
             }
         } else {
@@ -122,7 +124,7 @@ object CustomerReportExporter {
             appendLine()
         }
         if (modificationSurfaces.unresolvedManagedCandidates.isNotEmpty()) {
-            appendLine("Найдены ${modificationSurfaces.totalUnresolvedBeforeLimit} подходящих managed identity без доказанного native RVA. Они вынесены отдельно в `offsets-readable.html`; metadata token нельзя использовать как native-оффсет.")
+            appendLine("Найдены ${modificationSurfaces.totalUnresolvedBeforeLimit} managed identity без доказанного native RVA. Они остаются гипотезами и не включаются в итоговые файлы офсетов.")
             appendLine()
         }
         report.supplyChain?.let { supply ->
@@ -178,9 +180,10 @@ object CustomerReportExporter {
         appendLine()
         appendLine("- `full-report.json` — полный структурированный отчёт.")
         appendLine("- `customer-report.md` — этот отчёт.")
-        appendLine("- `offsets-readable.html` — человекочитаемая таблица офсетов с поиском, фильтрами, ABI и пояснениями.")
-        appendLine("- `offset-evidence.json` — полный технический набор RVA, metadata offsets и tokens.")
-        appendLine("- `il2cpp-dump.cs` — автоматически восстановленные IL2CPP types, fields и methods, если metadata доступна.")
+        appendLine("- `offsets-readable.html` — таблица подтверждённых офсетов, построенная только из завершённого Rodroid dump.")
+        appendLine("- `offset-evidence.json` — подтверждённые method RVA и field offsets по всем успешно обработанным ABI; гипотезы исключены.")
+        appendLine("- `il2cpp-dump.cs` — настоящий dump типов, полей и методов для основного ABI.")
+        appendLine("- `il2cpp-real-dump.zip` — полные Rodroid-результаты для всех ABI, script, строки, headers и сводные индексы.")
         appendLine("- `gradle-module-evidence.json` — Gradle/AGP metadata и карта base, split и dynamic-feature модулей.")
         appendLine("- `analysis-artifacts.zip` — выбранные анализатором DEX/native/runtime inputs; это не полная копия всех записей исходного APK.")
         appendLine("- `verification-plan.json` — план и статусы выполнения, а не результаты тестов.")
@@ -190,6 +193,96 @@ object CustomerReportExporter {
         appendLine("## Ограничение метода")
         appendLine()
         appendLine("Отчёт не помечает проверку выполненной, если она фактически не запускалась. Статический сигнал не объявляется эксплуатацией без подтверждения достижимости и влияния.")
+        }
+    }
+
+    private fun exportEnglish(report: StaticAnalysisReport, gradleEvidence: GradleModuleEvidenceResult?): String {
+        val limitations = report.findings.filter { it.category == "ANALYSIS" }
+        val review = report.findings.filter { it.category != "ANALYSIS" && it.requiresManualReview }
+        val confirmed = report.findings.filter { it.category != "ANALYSIS" && !it.requiresManualReview }
+        return buildString {
+            appendLine("# Authorized application security assessment")
+            appendLine()
+            appendLine("- Project: ${scopeField(report.assessment.projectName)}")
+            appendLine("- Customer / owner: ${scopeField(report.assessment.organization)}")
+            appendLine("- Purpose: ${scopeField(report.assessment.purpose)}")
+            appendLine("- Assessment ID: `${report.assessment.assessmentId}`")
+            appendLine("- Artifact: ${safe(report.artifact.displayName)}")
+            appendLine("- Package: `${report.manifest?.packageName ?: report.artifact.sourcePackageName ?: "unknown"}`")
+            appendLine("- SHA-256: `${report.artifact.sha256}`")
+            appendLine("- Generated: ${Instant.now()}")
+            appendLine("- Engine: `${report.engineVersion}`")
+            appendLine()
+            appendLine("## Summary")
+            appendLine()
+            appendLine("Confirmed static facts: **${confirmed.size}**; signals requiring reachability/impact review: **${review.size}**; analyzer limitations: **${limitations.size}**.")
+            appendLine("Strings, imported APIs, and exported components are not treated as proof of exploitation on their own.")
+            appendLine()
+            appendLine("| Metric | Value |")
+            appendLine("|---|---:|")
+            appendLine("| Findings | ${report.findings.size} |")
+            appendLine("| Critical | ${report.findings.count { it.severity == Severity.CRITICAL }} |")
+            appendLine("| High | ${report.findings.count { it.severity == Severity.HIGH }} |")
+            appendLine("| Medium | ${report.findings.count { it.severity == Severity.MEDIUM }} |")
+            appendLine("| DEX methods indexed | ${report.dex?.methodsIndexed ?: 0} |")
+            appendLine("| Native libraries | ${report.native?.librariesScanned ?: 0} |")
+            appendLine("| IL2CPP detected | ${report.il2cpp?.detected == true} |")
+            gradleEvidence?.let {
+                appendLine("| APK/Gradle modules | ${it.modulesDetected} |")
+                appendLine("| Dynamic features | ${it.dynamicFeaturesDetected} |")
+                appendLine("| Asset packs | ${it.assetPacksDetected} |")
+                appendLine("| Configuration splits | ${it.configurationSplitsDetected} |")
+            }
+            appendLine()
+            appendLine("## IL2CPP evidence boundary")
+            appendLine()
+            appendLine("The general static scan provides discovery hints only. Final offset exports are generated later and exclusively from a successfully completed Rodroid dump for each ABI. Metadata tokens and heuristic names are never promoted to native RVA.")
+            appendLine()
+            appendEnglishFindingSection("Confirmed configurations and technical facts", confirmed)
+            appendEnglishFindingSection("Signals requiring manual confirmation", review)
+            appendEnglishFindingSection("Analyzer coverage limitations", limitations)
+            appendLine("## Evidence package contents")
+            appendLine()
+            appendLine("- `full-report.json`: complete machine-readable evidence.")
+            appendLine("- `customer-report.md`: this report plus the real dump status appended by the pipeline.")
+            appendLine("- `offsets-readable.html`: searchable confirmed offsets from completed dumps only.")
+            appendLine("- `offset-evidence.json`: confirmed method RVA and field offsets for every successful ABI.")
+            appendLine("- `il2cpp-dump.cs`: real managed dump for the primary ABI.")
+            appendLine("- `il2cpp-real-dump.zip`: all per-ABI Rodroid outputs, scripts, strings, headers, and aggregate indexes.")
+            appendLine("- `gradle-module-evidence.json`: base, split, dynamic-feature, and build metadata evidence.")
+            appendLine("- `analysis-artifacts.zip`: bounded passive analysis inputs.")
+            appendLine("- `verification-plan.json`: proposed verification steps, not fabricated test results.")
+            appendLine()
+            appendLine("## Method limitation")
+            appendLine()
+            appendLine("A check is not marked complete unless it actually ran. Static signals are not called exploitable without reachability and impact evidence.")
+        }
+    }
+
+    private fun StringBuilder.appendEnglishFindingSection(title: String, findings: List<Finding>) {
+        appendLine("## $title")
+        appendLine()
+        if (findings.isEmpty()) {
+            appendLine("No entries.")
+            appendLine()
+            return
+        }
+        findings.take(MAX_FINDINGS).forEachIndexed { index, finding ->
+            appendLine("### ${index + 1}. ${safe(finding.title)}")
+            appendLine()
+            appendLine("- ID: `${finding.id}`")
+            appendLine("- Status: **${if (finding.category == "ANALYSIS") "ANALYZER LIMITATION" else if (finding.requiresManualReview) "REQUIRES CONFIRMATION" else "STATICALLY CONFIRMED"}**")
+            appendLine("- Severity: **${finding.severity}**")
+            appendLine("- Confidence: ${finding.confidence}")
+            appendLine("- Category: ${safe(finding.category)}")
+            appendLine()
+            appendLine(safe(finding.description))
+            appendLine()
+            finding.evidence.take(MAX_EVIDENCE_PER_FINDING).forEach { evidence ->
+                appendLine("- Evidence: `${safe(evidence.source)}` · `${safe(evidence.location)}` · ${safe(evidence.value)}")
+            }
+            appendLine("- Remediation: ${safe(finding.remediation)}")
+            appendLine()
         }
     }
 
