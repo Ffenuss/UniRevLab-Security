@@ -1,17 +1,18 @@
 package org.unirevlab.security.analysis
 
 import java.io.File
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertFalse
-import kotlin.test.assertTrue
+import kotlin.io.path.createTempDirectory
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
 import org.json.JSONArray
 import org.json.JSONObject
 
 class ConfirmedDumpOutputExporterTest {
     @Test
     fun completedExportUsesOnlyAggregateProducedByRealDump() {
-        val root = createTempDir(prefix = "confirmed-dump-")
+        val root = createTempDirectory("confirmed-dump-").toFile()
         try {
             val row = JSONObject()
                 .put("abi", "arm64-v8a")
@@ -45,7 +46,7 @@ class ConfirmedDumpOutputExporterTest {
 
     @Test
     fun failedDumpExportsNoAddresses() {
-        val root = createTempDir(prefix = "failed-dump-")
+        val root = createTempDirectory("failed-dump-").toFile()
         try {
             val jsonOutput = File(root, "job-offsets.json")
             val htmlOutput = File(root, "job-offsets.html")

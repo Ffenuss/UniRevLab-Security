@@ -32,8 +32,12 @@ class OpenRouterClient(
         dataPolicy: OpenRouterDataPolicy = OpenRouterDataPolicy.STRICT,
         responseLanguage: String = "ru",
     ): OpenRouterChatResult {
-        require(apiKey.isNotBlank()) { "API-ключ OpenRouter не сохранён" }
-        require(question.isNotBlank()) { "Введите вопрос" }
+        require(apiKey.isNotBlank()) {
+            if (responseLanguage == "en") "OpenRouter API key is not saved" else "API-ключ OpenRouter не сохранён"
+        }
+        require(question.isNotBlank()) {
+            if (responseLanguage == "en") "Enter a question" else "Введите вопрос"
+        }
         val payload = buildPayload(model, reportContext, history, question, dataPolicy, responseLanguage)
 
         val connection = open("$baseUrl/chat/completions", "POST").apply {
@@ -100,9 +104,12 @@ class OpenRouterClient(
                 .put(
                     "content",
                     buildString(reportContext.text.length + question.length + 512) {
-                        appendLine("Ниже контекст из выбранного пользователем полного отчёта UniRevLab.")
+                        appendLine(
+                            if (responseLanguage == "en") "Below is context from the complete UniRevLab report selected by the user."
+                            else "Ниже контекст из выбранного пользователем полного отчёта UniRevLab."
+                        )
                         appendLine(reportContext.text)
-                        appendLine("\nВопрос пользователя:")
+                        appendLine(if (responseLanguage == "en") "\nUser question:" else "\nВопрос пользователя:")
                         append(question.take(MAX_QUESTION_CHARS))
                     }
                 )
