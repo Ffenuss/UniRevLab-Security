@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.unirevlab.security.model.ComponentExposure
+import org.unirevlab.security.model.DeepLinkDeclaration
 import org.unirevlab.security.model.ManifestSummary
 import org.unirevlab.security.model.Severity
 
@@ -47,6 +48,26 @@ class ManifestRuleEngineTest {
         assertTrue(findings.none { it.id == "ANDROID-MANIFEST-CLEARTEXT" })
     }
 
+    @Test
+    fun reportsLiteralAppLinkPlaceholder() {
+        val findings = ManifestRuleEngine.evaluate(
+            manifest(
+                deepLinks = listOf(
+                    DeepLinkDeclaration(
+                        componentName = "MainActivity",
+                        schemes = listOf("https"),
+                        hosts = listOf("{link_domain}"),
+                        autoVerify = true,
+                        browsable = true,
+                        viewAction = true,
+                    ),
+                ),
+            ),
+        )
+
+        assertTrue(findings.any { it.id == "ANDROID-APP-LINK-PLACEHOLDER-HOST" && it.confidence.name == "CONFIRMED" })
+    }
+
     private fun manifest(
         debuggable: Boolean = false,
         allowBackup: Boolean = false,
@@ -54,6 +75,7 @@ class ManifestRuleEngineTest {
         networkSecurityConfigConfigured: Boolean = false,
         dangerousPermissions: List<String> = emptyList(),
         components: List<ComponentExposure> = emptyList(),
+        deepLinks: List<DeepLinkDeclaration> = emptyList(),
     ) = ManifestSummary(
         packageName = "org.example.target",
         versionName = "1.0",
@@ -69,6 +91,7 @@ class ManifestRuleEngineTest {
         requestedPermissions = emptyList(),
         dangerousPermissions = dangerousPermissions,
         components = components,
+        deepLinks = deepLinks,
         signingCertificateSha256 = emptyList(),
     )
 }

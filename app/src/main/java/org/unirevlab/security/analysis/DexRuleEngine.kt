@@ -2,6 +2,7 @@ package org.unirevlab.security.analysis
 
 import org.unirevlab.security.model.Confidence
 import org.unirevlab.security.model.DexSummary
+import org.unirevlab.security.model.DexStringReference
 import org.unirevlab.security.model.Evidence
 import org.unirevlab.security.model.Finding
 import org.unirevlab.security.model.SecurityReference
@@ -9,7 +10,8 @@ import org.unirevlab.security.model.Severity
 
 object DexRuleEngine {
     fun evaluate(dex: DexSummary): List<Finding> = buildList {
-        if (dex.httpUrls.isNotEmpty()) add(hardcodedHttpFinding(dex))
+        val actionableHttpUrls = dex.httpUrls.filter { isActionableCleartextUrl(it.value) }
+        if (actionableHttpUrls.isNotEmpty()) add(hardcodedHttpFinding(actionableHttpUrls))
         if (dex.secretCandidates.isNotEmpty()) add(secretCandidateReview(dex))
 
         val dynamicLoading = ArrayList<org.unirevlab.security.model.DexMethodCallXref>(minOf(50, dex.callXrefs.size))
@@ -42,14 +44,14 @@ object DexRuleEngine {
         if (dex.truncated || dex.parseErrors > 0) add(partialDexAnalysisFinding(dex))
     }
 
-    private fun hardcodedHttpFinding(dex: DexSummary) = Finding(
+    private fun hardcodedHttpFinding(urls: List<DexStringReference>) = Finding(
         id = "DEX-HARDCODED-HTTP-URL",
         title = "Hardcoded HTTP URL strings are present in DEX",
         severity = Severity.MEDIUM,
         confidence = Confidence.HIGH,
         category = "NETWORK",
         description = "The DEX string table contains one or more hardcoded cleartext HTTP URLs. String presence is strong static evidence of an embedded endpoint but code-level reachability still needs confirmation for precise impact.",
-        evidence = dex.httpUrls.take(50).map {
+        evidence = urls.take(50).map {
             Evidence(it.dexEntry, "string_id[${it.stringIndex}]", it.value)
         },
         remediation = "Use HTTPS endpoints and remove obsolete cleartext URLs from production code/resources. Trace each string to its callers and confirm that no runtime path transmits sensitive data over cleartext transport.",
@@ -83,12 +85,11 @@ object DexRuleEngine {
     )
 
     private fun isDynamicLoadingCall(x: org.unirevlab.security.model.DexMethodCallXref): Boolean =
-        x.calleeClass in setOf(
-            "Ldalvik/system/DexClassLoader;",
-            "Ldalvik/system/PathClassLoader;",
-            "Ldalvik/system/InMemoryDexClassLoader;",
-            "Ljava/lang/System;",
-        ) && (x.calleeName == "<init>" || x.calleeName == "load" || x.calleeName == "loadLibrary")
+        x.calleeName == "<init>" && when (x.calleeClass) {
+            "Ldalvik/system/DexClassLoader;", "Ldalvik/system/InMemoryDexClassLoader;" -> true
+            "Ldalvik/system/PathClassLoader;" -> !x.callerClass.startsWith("Lcom/google/android/gms/dynamite/")
+            else -> false
+        }
 
     private fun isProcessExecutionCall(x: org.unirevlab.security.model.DexMethodCallXref): Boolean =
         (x.calleeClass == "Ljava/lang/Runtime;" && x.calleeName == "exec") ||
@@ -191,15 +192,42 @@ object DexRuleEngine {
 
     private fun partialDexAnalysisFinding(dex: DexSummary) = Finding(
         id = "ANALYSIS-DEX-PARTIAL",
-        title = "DEX string analysis reached a defensive limit",
+        title = "DEX analysis is partial",
         severity = Severity.INFORMATIONAL,
         confidence = Confidence.CONFIRMED,
         category = "ANALYSIS",
-        description = "One or more defensive limits were reached while enumerating DEX files, strings, URL evidence, or candidate secrets. Results remain useful but are not exhaustive.",
+        description = "At least one DEX parser or bounded code/xref collection reached a defensive limit. The evidence below states string coverage separately, so a complete string count is not misreported as a truncated string scan.",
         evidence = listOf(
-            Evidence("analysis", "DEX", "files=${dex.dexFilesScanned}/${dex.dexFilesDiscovered}; strings=${dex.stringsScanned}/${dex.stringsDeclared}; parseErrors=${dex.parseErrors}")
+            Evidence(
+                "analysis",
+                "DEX",
+                "files=${dex.dexFilesScanned}/${dex.dexFilesDiscovered}; strings=${dex.stringsScanned}/${dex.stringsDeclared}; parseErrors=${dex.parseErrors}; " +
+                    "boundedCollections=codeMethods:${dex.codeMethods.size},callXrefs:${dex.callXrefs.size},stringXrefs:${dex.stringXrefs.size}," +
+                    "typeXrefs:${dex.typeXrefs.size},fieldXrefs:${dex.fieldXrefs.size},basicBlocks:${dex.basicBlocks.size}," +
+                    "constants:${dex.constants.size},invokeObservations:${dex.invokeObservations.size}",
+            ),
         ),
         remediation = "Run the artifact in a self-hosted worker profile with appropriately increased resource limits after validating available memory/disk capacity, or inspect the remaining DEX files manually.",
         requiresManualReview = false,
+    )
+
+    private fun isActionableCleartextUrl(raw: String): Boolean {
+        val value = raw.trim()
+        if (!value.startsWith("http://", ignoreCase = true)) return false
+        val lower = value.lowercase()
+        if (CLEAR_TEXT_REFERENCE_PREFIXES.any(lower::startsWith)) return false
+        if ('%' in value || '{' in value || '}' in value) return false
+        return true
+    }
+
+    private val CLEAR_TEXT_REFERENCE_PREFIXES = listOf(
+        "http://schemas.android.com/",
+        "http://www.w3.org/",
+        "http://xml.org/",
+        "http://www.omg.org/",
+        "http://purl.org/",
+        "http://localhost",
+        "http://127.0.0.1",
+        "http://[::1]",
     )
 }

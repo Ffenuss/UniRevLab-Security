@@ -1,29 +1,121 @@
 # Changelog
 
-## 0.22.0-dev-performance-ux
+## 0.46.0-preview-actionable-offset-context
+
+- Split every confirmed dump surface into namespace, class, member, declared type and managed signature.
+- Added distinct method RVA, ELF file offset, dump VA and in-object field offset properties to JSON/CSV.
+- Added an ABI-aware runtime address formula and an explicit prerequisite for resolving each address.
+- Rebuilt the human HTML table around these structured fields instead of one opaque managed-identity string.
+- Kept runtime absolute addresses null when offline evidence cannot truthfully determine them because of ASLR or a missing live object instance.
+
+## 0.45.0-preview-il2cpp-truth-state
+
+- Fixed a false negative where `libil2cpp.so` existed in the APK central directory but was omitted from the bounded detailed ELF list.
+- The result card now derives IL2CPP presence from both archive evidence and the real Rodroid pair/dump result.
+- Added visible dump status, failure reason, successful ABIs, metadata version, and confirmed surface counts.
+- Missing output files are marked as not created instead of opening a broken export action.
+- Invalidated cached 0.44 scan results so affected installed applications are analyzed again.
+
+## 0.44.0-preview-dump-first-pipeline
+
+- made the completed Rodroid dump the only source for exported IL2CPP method RVA and field offsets;
+- added automatic multi-ABI dumping for every discovered `libil2cpp.so`, including libraries and metadata split across nested APK files;
+- added aggregate confirmed-offset JSON/CSV plus bilingual README files inside the complete dump package;
+- AI chat now receives the confirmed real-dump evidence alongside the full static report, including when importing a signed package;
+- added a persistent RU/EN switch for the active workflow, localized job status, AI chat, installed-app selection, notifications, and download names;
+- Russian downloads and signed-package entries use Russian names; English mode keeps canonical English names;
+- temporarily removed agreement, signer, company/owner/profile, and scope confirmation screens from the test workflow;
+- removed checkbox gates from the AI chat; sending the request itself is the explicit action, while the data-policy compatibility switch remains visible;
+- added a searchable human HTML that clearly separates method RVA from in-object field offsets and contains no heuristic addresses.
+
+## 0.43.0-preview-real-il2cpp-dumper
+
+- replace the metadata-only C# approximation in the pair workspace with the pinned Rodroid IL2CPP Rust engine at commit `8bfb90229539833999e725c5cf6402a435b47f15`;
+- automatically locate and validate CodeRegistration/MetadataRegistration from normal Android ELF inputs, with symbol-table and ARM32 fallbacks;
+- generate a real `dump.cs`, `script.json`, `stringliteral.json`, native headers and a provenance manifest, then export them as one ZIP;
+- stream 100+ MB pair files by path across JNI and when saving results to avoid the prior Java-heap allocation failure;
+- refuse to emit offsets when metadata is protected, the pair does not match, registrations are unresolved or engine output is incomplete;
+- retain gameplay, economy, subscription, premium and purchase trust-boundary classification as defensive triage over confirmed engine output.
+- replace the per-term multi-scan of very large AI reports with one compiled query pass per chunk, show separate indexing/network stages and enforce a 150-second total OpenRouter watchdog.
+
+## 0.42.1-preview-openrouter-privacy-fix
+
+- recognize OpenRouter's `No endpoints found matching your data policy (Free model training)` response and replace the raw HTTP 404 with a clear in-app explanation;
+- keep `data_collection=deny` as the default and automatically retry the privacy-compatible free-model router when the selected free model has no compliant endpoint;
+- add an explicit, non-persistent compatibility switch for providers that may retain or train on submitted excerpts, gated by a separate customer-authorization confirmation;
+- link directly to the OpenRouter privacy settings when account-wide policy still blocks a free model;
+- reset the permissive choice whenever the report or model changes and add regression coverage for both request policies and error classification.
+
+## 0.42.0-preview-report-ai-chat
+
+- add an in-app OpenRouter chat that can use the current `full-report.json`, an imported report, or a signed evidence ZIP;
+- load the current free text-model catalog dynamically and let the user select and persist a model;
+- protect the user-supplied API key with Android Keystore AES-GCM and never embed a shared key in the APK;
+- stream-scan the entire report for every question; include small reports verbatim and select evidence from all chunks when a report exceeds model context;
+- keep the APK and `analysis-artifacts.zip` local, require explicit per-session consent before sending report excerpts, and request providers with `data_collection=deny`;
+- add bounded imports, bounded network responses, friendly 401/402/413/429/5xx errors and regression tests for free-model filtering and large-report retrieval.
+
+## 0.41.0-preview-prioritized-surfaces
+
+- classify each analyzed target as likely game or likely ordinary application using runtime and recovered semantic evidence;
+- rank resolved IL2CPP, JNI and ELF RVAs commonly associated with gameplay, monetization, feature gates, authorization, quotas, licensing and client-integrity checks;
+- keep metadata-only managed candidates in a separate list so tokens are never presented as native offsets;
+- add a dedicated mobile-friendly prioritization section to `offsets-readable.html` and the customer report;
+- add machine-readable `modificationSurfacePrioritization` to `offset-evidence.json` with profile confidence, reasons, priority, source and evidence semantics;
+- add regression coverage for game and ordinary-application classification and invalidate older analysis cache entries.
+
+## 0.40.0-preview-trustworthy-report
+
+- distinguish asset packs, dynamic features and configuration splits from their packaged distribution manifests;
+- merge split IL2CPP evidence from v0.39 and invalidate older cached reports;
+- classify native paths inside split containers correctly;
+- remove HTTPS, XML namespace, localhost and format-template noise from cleartext URL findings;
+- require Mono runtime or valid CLI assemblies before reporting Unity Mono;
+- export native symbols fairly across libraries instead of exhausting a global alphabetical cap;
+- make customer-report explicit about completed work, manual-review signals, analyzer limitations and advisory-feed status;
+- add evidence excerpts and a finding-linked verification plan;
+- document selective artifact-bundle coverage and preserve real split source labels.
+
+## 0.39.0-preview-readable-offsets
 
 ### Added
-- app launcher/round icon resources and in-app UniRevLab visual identity;
-- dark Material 3 product theme, redesigned assessment/dashboard/installed-app/agreement surfaces;
-- dedicated `Справка и функции` screen describing file analysis, installed-app analysis, RE Browser, Ghidra, advisory feeds, coordinator sync, version diff and each export action;
-- real analysis cancellation from the dashboard via interruptible IO;
-- app-private normalized whole-analysis cache keyed by artifact SHA-256 and engine version.
+- `offsets-readable.html`: a mobile-friendly searchable and filterable report with demangled C++ names, library, ABI, Build ID, RVA, token, size and plain-language evidence categories;
+- a separate UI export action for the readable report while retaining the complete machine-readable JSON.
 
-### Performance
-- shared DEX structural index between inventory and code/xref analysis;
-- SHA-256 content dedup for repeated DEX/native payloads inside base+split assessments;
-- bounded two-worker DEX/native parallelism with a process-wide executor;
-- single bounded APK central-directory classification index reused by downstream analyzers;
-- streaming/bounded merge collectors and one-pass DEX/native rule classification;
-- background RE Browser index construction plus debounce/early-stop search;
-- IL2CPP symbol inventory and cross-runtime matching avoid repeated normalization/full-list passes.
+### Fixed
+- merge `global-metadata.dat` and `libil2cpp.so` evidence across different base/split APKs before dump generation;
+- allow a managed dump whenever parsed metadata is available, even if the library-presence confidence flag is incomplete;
+- invalidate the previous analysis cache so affected APK sets are scanned again.
+
+## 0.38.1-preview-auto-audit-memory-fix
+
+### Fixed
+- stream the complete JSON report and reconstructed IL2CPP managed dump directly to disk, avoiding artifact-sized duplicate `String` allocations on Android;
+- keep streamed writes atomic and cancellation-aware so partial output is not exposed as a completed report;
+- invalidate older analysis-cache entries so the first v0.38.1 run performs a fresh scan;
+- distinguish the earlier native ELF scan of `libil2cpp.so` from the later metadata/registration correlation stage and report concrete coverage counts.
 
 ### Verification
-- current `classes7.dex` shared-index parity benchmark: PASS; cold code scan 1452.43 ms vs shared-index 759.16 ms (~1.91x) in this container;
-- analysis-cache Java serialization round-trip and engine-version invalidation: PASS;
-- static-core + report schema validation: PASS; M2.4: PASS; M2.5 + SBOM validation: PASS;
-- compile-only Compose/API stub typecheck for redesigned UI: PASS;
-- real Android Gradle build is still not claimed locally because the runtime cannot resolve/download the Android/Gradle toolchain.
+- CI preflight rejects a worker that returns to the legacy in-memory full-report or IL2CPP-dump exporters.
+
+## 0.26.0-auto-audit
+
+### Added
+- one-selection installed-app/APK audit flow with persisted customer profile and per-target authority confirmation;
+- persistent WorkManager foreground pipeline with stage progress, cancellation and result recovery;
+- bounded automatic DEX/native/IL2CPP/managed/runtime evidence bundle;
+- static RVA/metadata offset export, defensive verification plan and Russian customer report;
+- device-keystore ECDSA manifest signature and all-in-one evidence ZIP.
+
+### Changed
+- replaced the previous manual dashboard/import sequence with an Auto Audit home screen;
+- retained the v0.22 content-addressed cache, shared archive index and bounded parallel DEX/native analysis;
+- engine/version provenance advanced to `0.26.0-auto-audit` (versionCode 30).
+
+### Safety
+- the target archive remains immutable and non-executing input;
+- no hook implementation, bypass patch, injected mod menu, target re-signing or modified APK is produced;
+- active checks are expressed as a verification plan for an owner-supplied test/source build.
 
 ## 0.21.0-dev-range-rbac-attestation
 
@@ -272,4 +364,3 @@
 - Added in-session version diff for the same package: permissions, exported components, deep links, findings, dependencies, DEX methods/classes, native libraries/exports, and signer changes.
 - Added structured X.509 signing certificate identity/lineage metadata (subject, issuer, serial, validity, algorithms, key size, current signer).
 - Static report schema advanced to 1.11.
-

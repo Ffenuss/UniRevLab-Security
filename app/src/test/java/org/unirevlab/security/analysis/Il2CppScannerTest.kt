@@ -14,6 +14,28 @@ import org.unirevlab.security.model.NativeSymbolReference
 
 class Il2CppScannerTest {
     @Test
+    fun detectsPairFromArchiveIndexWhenDetailedElfListOmittedLibrary() {
+        val apk = fixtureApk()
+        try {
+            val result = requireNotNull(
+                Il2CppScanner.scanApk(
+                    apk = apk,
+                    native = null,
+                    archiveEntryNames = listOf(
+                        "assets/bin/Data/Managed/Metadata/global-metadata.dat",
+                        "lib/arm64-v8a/libil2cpp.so",
+                    ),
+                )
+            )
+            assertTrue(result.detected)
+            assertEquals("HIGH", result.confidence)
+            assertEquals(listOf("lib/arm64-v8a/libil2cpp.so"), result.libil2cppLibraries)
+        } finally {
+            apk.delete()
+        }
+    }
+
+    @Test
     fun detectsStandardMetadataAndNativePairWithoutExecution() {
         val apk = fixtureApk()
         try {

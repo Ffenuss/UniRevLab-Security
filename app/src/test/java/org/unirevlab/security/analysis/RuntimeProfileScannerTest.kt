@@ -4,9 +4,51 @@ import java.io.File
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
 import org.junit.Test
+import org.unirevlab.security.model.NativeLibrarySummary
+import org.unirevlab.security.model.NativeSummary
 
 class RuntimeProfileScannerTest {
+    @Test
+    fun libunityAloneDoesNotIdentifyMono() {
+        val apk = File.createTempFile("runtime-profiles-unity-only", ".apk")
+        try {
+            ZipOutputStream(apk.outputStream()).use { }
+            val lib = NativeLibrarySummary(
+                entryName = "lib/arm64-v8a/libunity.so",
+                abi = "arm64-v8a",
+                elfClass = "ELF64",
+                machine = "AARCH64",
+                fileType = "DYN",
+                sizeBytes = 1,
+                buildId = null,
+                neededLibraries = emptyList(),
+                importedSymbols = emptyList(),
+                exportedSymbols = emptyList(),
+                jniSymbols = emptyList(),
+                hasJniOnLoad = false,
+                registerNativesIndicator = false,
+                executableStack = false,
+                hasGnuRelro = true,
+                bindNow = true,
+                hasStackCanaryImport = true,
+                stripped = true,
+                httpUrls = emptyList(),
+            )
+            val result = RuntimeProfileScanner.scanApk(
+                apk,
+                null,
+                NativeSummary(1, 1, listOf(lib), parseErrors = 0, truncated = false),
+                null,
+            )
+
+            assertFalse(result?.profiles.orEmpty().any { it.kind == "UNITY_MONO" })
+        } finally {
+            apk.delete()
+        }
+    }
+
     @Test
     fun detectsPassiveFrameworkMarkersWithoutExecutingArtifact() {
         val apk = File.createTempFile("runtime-profiles", ".apk")

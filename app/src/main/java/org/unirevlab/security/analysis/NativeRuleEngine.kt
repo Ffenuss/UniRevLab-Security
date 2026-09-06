@@ -30,6 +30,7 @@ object NativeRuleEngine {
 
             if (http.size < 50) {
                 for (url in lib.httpUrls) {
+                    if (!isActionableCleartextUrl(url)) continue
                     http += lib.entryName to url
                     if (http.size >= 50) break
                 }
@@ -210,17 +211,36 @@ object NativeRuleEngine {
 
     private fun partial(native: NativeSummary) = Finding(
         id = "ANALYSIS-NATIVE-PARTIAL",
-        title = "Native analysis reached a defensive limit or parse error",
+        title = "Native analysis is partial",
         severity = Severity.INFORMATIONAL,
         confidence = Confidence.CONFIRMED,
         category = "ANALYSIS",
-        description = "Not every discovered native library or symbol/string record was exhaustively enumerated. Results are intentionally bounded because APK content is treated as untrusted input.",
-        evidence = listOf(Evidence("analysis", "native", "libraries=${native.librariesScanned}/${native.librariesDiscovered}; parseErrors=${native.parseErrors}; truncated=${native.truncated}")),
+        description = "At least one discovered native library, symbol table, or string table was not exhaustively analyzed. This is an analyzer coverage limitation, not an application vulnerability.",
+        evidence = listOf(Evidence("analysis", "native", "librariesScanned=${native.librariesScanned}; librariesDiscovered=${native.librariesDiscovered}; unscanned=${(native.librariesDiscovered - native.librariesScanned).coerceAtLeast(0)}; parseErrors=${native.parseErrors}; boundedOutput=${native.truncated}")),
         remediation = "Use the isolated self-hosted worker profile with explicitly increased resource limits for large artifacts, and manually inspect libraries that failed parsing.",
     )
+
+    private fun isActionableCleartextUrl(raw: String): Boolean {
+        val value = raw.trim()
+        if (!value.startsWith("http://", ignoreCase = true)) return false
+        val lower = value.lowercase()
+        if (CLEAR_TEXT_REFERENCE_PREFIXES.any(lower::startsWith)) return false
+        if ('%' in value || '{' in value || '}' in value) return false
+        return true
+    }
 
     private val PROCESS_EXECUTION_IMPORTS = setOf(
         "system", "popen", "execl", "execle", "execlp", "execv", "execve", "execvp", "execvpe", "posix_spawn", "posix_spawnp",
     )
     private val DYNAMIC_LOADING_IMPORTS = setOf("dlopen", "android_dlopen_ext", "dlsym")
+    private val CLEAR_TEXT_REFERENCE_PREFIXES = listOf(
+        "http://schemas.android.com/",
+        "http://www.w3.org/",
+        "http://xml.org/",
+        "http://www.omg.org/",
+        "http://purl.org/",
+        "http://localhost",
+        "http://127.0.0.1",
+        "http://[::1]",
+    )
 }

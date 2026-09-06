@@ -82,9 +82,27 @@ fun Il2CppPairWorkspaceScreen(
             coroutineScope.launch {
                 val save = runCatching {
                     withContext(Dispatchers.IO) {
+                        val source = requireNotNull(current.realDump.dumpCsFile) { "Настоящий dump.cs не создан" }
                         context.contentResolver.openOutputStream(uri, "wt").use { output ->
                             requireNotNull(output) { "Не удалось открыть файл назначения" }
-                            output.write(current.managedDump.toByteArray(Charsets.UTF_8))
+                            source.inputStream().buffered(128 * 1024).use { it.copyTo(output, 128 * 1024) }
+                            output.flush()
+                        }
+                    }
+                }
+                error = save.exceptionOrNull()?.message
+            }
+        }
+    }
+    val packageSaver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        val source = result?.realDump?.packageFile
+        if (uri != null && source != null) {
+            coroutineScope.launch {
+                val save = runCatching {
+                    withContext(Dispatchers.IO) {
+                        context.contentResolver.openOutputStream(uri, "wt").use { output ->
+                            requireNotNull(output) { "Не удалось открыть файл назначения" }
+                            source.inputStream().buffered(128 * 1024).use { it.copyTo(output, 128 * 1024) }
                             output.flush()
                         }
                     }
@@ -151,11 +169,13 @@ fun Il2CppPairWorkspaceScreen(
                                     try {
                                         copyUriBounded(context, meta, metadataFile, MAX_METADATA_BYTES)
                                         copyUriBounded(context, lib, libraryFile, MAX_LIBRARY_BYTES)
+                                        val dumpOutput = File(context.cacheDir, "real-il2cpp-dump-${System.nanoTime()}")
                                         Il2CppPairAssessmentEngine.analyze(
                                             metadataFile = metadataFile,
                                             libraryFile = libraryFile,
                                             projectName = scope.projectName,
                                             organization = scope.organization,
+                                            dumpOutputDirectory = dumpOutput,
                                         )
                                     } finally {
                                         work.deleteRecursively()
@@ -186,10 +206,16 @@ fun Il2CppPairWorkspaceScreen(
                 HorizontalDivider()
                 Il2CppPairResultPanel(current)
                 ModdingResistancePanel(current.moddingResistance)
-                OutlinedButton(
-                    onClick = { dumpSaver.launch("unirevlab-il2cpp-dump-${current.aggregateSha256.take(8)}.cs") },
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("Сохранить C#-подобный dump") }
+                if (current.realDump.complete) {
+                    OutlinedButton(
+                        onClick = { dumpSaver.launch("unirevlab-il2cpp-dump-${current.aggregateSha256.take(8)}.cs") },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Сохранить настоящий dump.cs") }
+                    Button(
+                        onClick = { packageSaver.launch("unirevlab-il2cpp-artifacts-${current.aggregateSha256.take(8)}.zip") },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Сохранить весь IL2CPP dump") }
+                }
 
                 OutlinedTextField(
                     value = query,
@@ -241,6 +267,18 @@ private fun Il2CppPairResultPanel(current: Il2CppPairAssessmentEngine.Result) {
     Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
         Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             Text("IL2CPP reconstruction", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(
+                if (current.realDump.complete) "REAL DUMP: COMPLETE" else "REAL DUMP: ${current.realDump.status}",
+                fontWeight = FontWeight.Bold,
+                color = if (current.realDump.complete) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+            )
+            current.realDump.error?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            if (current.realDump.complete) {
+                Text("${current.realDump.engine} · metadata v${current.realDump.metadataVersion} · ${current.realDump.architecture}")
+                Text("CodeRegistration ${current.realDump.codeRegistration} · MetadataRegistration ${current.realDump.metadataRegistration}", style = MaterialTheme.typography.bodySmall)
+                Text("${current.realDump.typeCount} types · ${current.realDump.methodCount} methods · ${current.realDump.registrationStrategy}", style = MaterialTheme.typography.bodySmall)
+                Text("Подтверждённые поверхности: игровые ${current.realDump.gameplaySurfaceCount} · приложения/монетизация ${current.realDump.applicationSurfaceCount}", style = MaterialTheme.typography.bodySmall)
+            }
             Text("Posture: ${risk.posture}", fontWeight = FontWeight.Bold)
             Text("Metadata v${risk.metadataVersion ?: "?"} · types ${risk.typeCount} · methods ${risk.methodCount} · fields ${risk.fieldCount}")
             Text("Monetization ${risk.monetizationCandidates} · validation ${risk.validationCandidates} · client-state ${risk.clientStateCandidates}")

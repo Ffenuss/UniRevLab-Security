@@ -2,12 +2,26 @@
 
 Open-source Android-first platform for **authorized** mobile application security assessment and reverse engineering.
 
-## Current milestone: v0.22.0-dev-performance-ux
+## Current milestone: v0.46.0-actionable-offset-context
+
+Confirmed Rodroid offsets are now exported with namespace, class, member name, declared type, full managed signature, address kind, method RVA/file offset/VA or field offset, ABI-aware address formula, runtime prerequisite and confidence. Offline analysis cannot truthfully emit a stable absolute runtime address because ASLR changes module bases and field addresses require a live object instance; the report now makes that distinction explicit instead of presenting a bare number.
+
+The Android client now exposes one primary workflow: save the customer profile once, confirm the
+scope for the current target, then select an installed application or APK. A persistent WorkManager
+job performs the bounded analysis and prepares a signed customer evidence package without further
+file hunting or manual result assembly.
 
 Implemented now:
 
-- performance-first Android pipeline with shared DEX indexing, bounded DEX/native parallelism, SHA-256 content dedup and versioned whole-analysis warm cache;
-- redesigned dark Material 3 UI with launcher icon, separate action controls, cancellable analysis and a dedicated Russian `Справка и функции` screen;
+- real on-device IL2CPP reconstruction through a pinned Rodroid Rust engine: automatic ELF registration discovery, validated method/field RVAs, `dump.cs`, `script.json`, C/C++ headers and a machine-readable provenance manifest;
+- strict failure semantics: protected/mismatched pairs never produce a placeholder dump or guessed offsets, and large inputs cross JNI by file path instead of a Java byte array;
+- optional in-app OpenRouter chat over the current or imported full report, with a dynamically loaded free-model catalog and Android-Keystore-protected user key;
+- streaming full-report retrieval that avoids loading hundreds of megabytes into memory and clearly reports whether the complete file or selected source chunks were sent;
+- persistent one-selection Auto Audit workflow with progress, cancellation and recovery after UI/process recreation;
+- automatic base/split APK discovery for installed applications;
+- automatic evidence extraction for AndroidManifest/resources, DEX, ELF/native libraries, IL2CPP `global-metadata.dat`, managed assemblies and supported runtime containers;
+- `offset-evidence.json` with static ELF RVA evidence, IL2CPP metadata table offsets/tokens and attached Ghidra evidence when available;
+- Russian customer report, defensive verification plan and an independently verifiable ECDSA-signed evidence package;
 - Android client with first-run authorized-use agreement and signed local acceptance receipt;
 - explicit per-assessment scope and authority confirmation;
 - Storage Access Framework artifact selection (no broad storage permission);
@@ -50,7 +64,9 @@ A standard Gradle Wrapper should be generated once from a trusted Gradle 9.5.0 i
 
 ## Safety boundary
 
-The official project is designed for systems the user owns or is explicitly authorized to assess. Target APK/DEX/ELF/IL2CPP/HBC/managed inputs are treated as hostile data and are not executed by the local static analyzer. Active testing must be tied to an assessment scope. The official codebase will not include stealth persistence, credential theft, hidden remote control, indiscriminate exploitation, malware payload delivery, or security-product evasion.
+The official project is designed for systems the user owns or is explicitly authorized to assess. Target APK/DEX/ELF/IL2CPP/HBC/managed inputs are treated as hostile data and are not executed by the local static analyzer. Active testing must be tied to an assessment scope. The official client does not rewrite/re-sign a third-party target APK and does not generate executable hooks, bypass patches or injected mod-menu payloads. Those actions are replaced with static evidence and a defensive verification plan for an owner-supplied test build. The official codebase will not include stealth persistence, credential theft, hidden remote control, indiscriminate exploitation, malware payload delivery, or security-product evasion.
+
+See [V026_AUTO_AUDIT_PIPELINE.md](V026_AUTO_AUDIT_PIPELINE.md) for the workflow and output contract.
 
 ## Current M3/M3.1 work
 

@@ -19,5 +19,15 @@ class ArchiveClassifierTest {
         assertTrue(ArchiveClassifier.isNativeLibrary("assets/libexample.so"))
         assertFalse(ArchiveClassifier.isStandardNativeLibraryPath("assets/libexample.so"))
         assertTrue(ArchiveClassifier.isStandardNativeLibraryPath("lib/arm64-v8a/libexample.so"))
+        assertTrue(
+            ArchiveClassifier.isStandardNativeLibraryPath(
+                "split:split_config.arm64_v8a.apk!/lib/arm64-v8a/libexample.so",
+            ),
+        )
+        assertFalse(
+            ArchiveClassifier.isStandardNativeLibraryPath(
+                "split:feature.apk!/assets/libexample.so",
+            ),
+        )
     }
 }

@@ -55,6 +55,11 @@ object ManifestRuleEngine {
         }
         if (unverifiedWebLinks.isNotEmpty()) add(unverifiedAppLinksFinding(unverifiedWebLinks))
 
+        val placeholderHosts = manifest.deepLinks.filter { link ->
+            link.hosts.any(::looksLikeUnresolvedPlaceholder)
+        }
+        if (placeholderHosts.isNotEmpty()) add(unresolvedAppLinkHostFinding(placeholderHosts))
+
         val customSchemes = manifest.deepLinks.filter { link ->
             link.schemes.any { !it.equals("http", true) && !it.equals("https", true) }
         }
@@ -253,6 +258,30 @@ object ManifestRuleEngine {
         ),
     )
 
+    private fun unresolvedAppLinkHostFinding(links: List<DeepLinkDeclaration>) = Finding(
+        id = "ANDROID-APP-LINK-PLACEHOLDER-HOST",
+        title = "Packaged App Link host contains an unresolved build placeholder",
+        severity = Severity.MEDIUM,
+        confidence = Confidence.CONFIRMED,
+        category = "PLATFORM",
+        description = "A host value containing placeholder syntax was packaged literally in AndroidManifest.xml. Android cannot verify domain ownership for that literal placeholder, so the corresponding App Link route may fail verification or routing.",
+        evidence = links.take(50).map { link ->
+            Evidence(
+                "AndroidManifest.xml",
+                "activity:${link.componentName}",
+                "hosts=${link.hosts.filter(::looksLikeUnresolvedPlaceholder).joinToString()}; autoVerify=${link.autoVerify}",
+            )
+        },
+        remediation = "Provide the real host through the release build configuration, fail CI when a manifest placeholder remains unresolved, and verify the installed package with Android App Links tooling.",
+        references = listOf(
+            SecurityReference("OWASP MASTG", "MASTG-TEST-0393"),
+            SecurityReference("Android", "Verify App Links"),
+        ),
+    )
+
+    private fun looksLikeUnresolvedPlaceholder(host: String): Boolean =
+        host.any { it == '{' || it == '}' || it == '$' }
+
     private fun customSchemeReviewFinding(links: List<DeepLinkDeclaration>) = Finding(
         id = "ANDROID-CUSTOM-SCHEME-REVIEW",
         title = "Custom URL scheme handlers require untrusted-input review",
@@ -296,10 +325,10 @@ object ManifestRuleEngine {
     ) = Finding(
         id = "ANDROID-NETWORK-CONFIG-CLEARTEXT",
         title = "Network Security Config explicitly permits cleartext traffic",
-        severity = Severity.HIGH,
+        severity = Severity.MEDIUM,
         confidence = Confidence.CONFIRMED,
         category = "NETWORK",
-        description = "The packaged Network Security Config contains an explicit cleartextTrafficPermitted=true policy at the base or domain-config level.",
+        description = "The packaged Network Security Config contains an explicit cleartextTrafficPermitted=true policy. The configuration is confirmed, but final impact depends on whether reachable production code sends sensitive data to a cleartext endpoint.",
         evidence = buildList {
             if (baseEnabled) add(Evidence("Network Security Config", "base-config", "cleartextTrafficPermitted=true"))
             domains.take(20).forEach { domain ->
@@ -311,6 +340,7 @@ object ManifestRuleEngine {
             SecurityReference("OWASP MASVS", "MASVS-NETWORK"),
             SecurityReference("Android", "Network Security Configuration"),
         ),
+        requiresManualReview = true,
     )
 
     private fun userTrustAnchorFinding(count: Int) = Finding(

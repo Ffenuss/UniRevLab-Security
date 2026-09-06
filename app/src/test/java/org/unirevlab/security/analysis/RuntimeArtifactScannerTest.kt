@@ -7,12 +7,33 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.unirevlab.security.model.NativeLibrarySummary
 import org.unirevlab.security.model.NativeSummary
 
 class RuntimeArtifactScannerTest {
+    @Test
+    fun libunityAloneDoesNotClaimUnityMono() {
+        val apk = File.createTempFile("runtime-artifact-unity-only", ".apk")
+        try {
+            ZipOutputStream(apk.outputStream()).use { }
+            val all = nativeSummary()
+            val unityOnly = all.copy(
+                librariesDiscovered = 1,
+                librariesScanned = 1,
+                libraries = all.libraries.filter { it.entryName.endsWith("/libunity.so") },
+            )
+
+            val result = RuntimeArtifactScanner.scanApk(apk, unityOnly)
+
+            assertNull(result?.unityMono)
+        } finally {
+            apk.delete()
+        }
+    }
+
     @Test
     fun inventoriesFlutterHermesUnityMonoAndUnrealWithoutExecution() {
         val apk = fixtureApk()

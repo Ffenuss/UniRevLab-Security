@@ -1,0 +1,105 @@
+name: Build UniRevLab v0.46 Actionable Offset Context APK
+
+on:
+  push:
+    branches: [ codex/v0.38-auto-audit ]
+    paths:
+      - 'app/**'
+      - 'native-core/**'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle.properties'
+      - 'scripts/**'
+      - '.github/workflows/v038-auto-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v0460-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-debug-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android 17 SDK 37.0 and NDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager "platforms;android-37.0" "build-tools;36.0.0" "ndk;28.2.13676358"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+
+      - name: Install pinned cargo-ndk
+        run: cargo install cargo-ndk --version 4.1.2 --locked
+
+      - name: Build Rust JNI libraries
+        working-directory: native-core
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/28.2.13676358
+          ANDROID_NDK_ROOT: ${{ env.ANDROID_HOME }}/ndk/28.2.13676358
+        run: |
+          set -euo pipefail
+          rm -rf ../app/src/main/jniLibs
+          cargo ndk \
+            -t arm64-v8a -t armeabi-v7a -t x86_64 -t x86 \
+            -o ../app/src/main/jniLibs \
+            build --release
+
+      - name: Set up Gradle 9.5
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+
+      - name: Preflight
+        run: |
+          python scripts/validate_schemas.py
+          python scripts/check_secrets.py .
+          python scripts/check_android_build_config.py
+
+      - name: Build native fixtures
+        run: |
+          bash test-corpus/native/build-fixtures.sh
+          bash test-corpus/native/build-multiabi-fixtures.sh
+
+      - name: Unit tests, lint and APK
+        run: gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+
+      - name: Verify and name APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          test -n "${APK}"
+          test -s "${APK}"
+          unzip -t "${APK}" >/dev/null
+          "${ANDROID_HOME}/build-tools/36.0.0/zipalign" -c -P 16 -v 4 "${APK}" >/dev/null
+          cp "${APK}" UniRevLab-Security-v0.46.0-actionable-offset-context-debug.apk
+          sha256sum UniRevLab-Security-v0.46.0-actionable-offset-context-debug.apk | tee UniRevLab-Security-v0.46.0-actionable-offset-context-debug.apk.sha256
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: UniRevLab-Security-v0.46.0-actionable-offset-context-debug
+          path: |
+            UniRevLab-Security-v0.46.0-actionable-offset-context-debug.apk
+            UniRevLab-Security-v0.46.0-actionable-offset-context-debug.apk.sha256
+          if-no-files-found: error
