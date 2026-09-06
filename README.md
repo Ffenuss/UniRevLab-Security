@@ -2,9 +2,9 @@
 
 Open-source Android-first platform for **authorized** mobile application security assessment and reverse engineering.
 
-## Current milestone: v0.45.0-il2cpp-truth-state
+## Current milestone: v0.46.0-actionable-offset-context
 
-IL2CPP detection now uses the actual APK/split central-directory entries and the real Rodroid pair result, so a large `libil2cpp.so` cannot disappear merely because the bounded detailed ELF inventory omitted it. The result card reports discovery and dump status separately.
+Confirmed Rodroid offsets are now exported with namespace, class, member name, declared type, full managed signature, address kind, method RVA/file offset/VA or field offset, ABI-aware address formula, runtime prerequisite and confidence. Offline analysis cannot truthfully emit a stable absolute runtime address because ASLR changes module bases and field addresses require a live object instance; the report now makes that distinction explicit instead of presenting a bare number.
 
 The Android client now exposes one primary workflow: save the customer profile once, confirm the
 scope for the current target, then select an installed application or APK. A persistent WorkManager

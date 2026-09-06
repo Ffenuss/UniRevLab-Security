@@ -20,6 +20,14 @@ class ConfirmedDumpOutputExporterTest {
                 .put("category", "HEALTH_DAMAGE")
                 .put("addressKind", "METHOD_RVA")
                 .put("address", "0x1234")
+                .put("namespace", "Game.Core")
+                .put("className", "Player")
+                .put("memberKind", "METHOD")
+                .put("memberName", "TakeDamage")
+                .put("declaredType", "void")
+                .put("managedSignature", "public void TakeDamage(int value)")
+                .put("addressFormula", "moduleBase(lib/arm64-v8a/libil2cpp.so) + 0x1234")
+                .put("runtimeAddressStatus", "REQUIRES_RUNTIME_MODULE_BASE")
                 .put("confidence", "HIGH")
                 .put("managedIdentity", "Player.TakeDamage(int)")
             File(root, "confirmed-offsets-all-abi.json").writeText(
@@ -38,7 +46,10 @@ class ConfirmedDumpOutputExporterTest {
             val exported = JSONObject(jsonOutput.readText())
             assertEquals("COMPLETE", exported.getString("status"))
             assertEquals("0x1234", exported.getJSONArray("gameplayOffsets").getJSONObject(0).getString("address"))
-            assertTrue(htmlOutput.readText().contains("Player.TakeDamage"))
+            assertTrue(htmlOutput.readText().contains("TakeDamage"))
+            assertTrue(htmlOutput.readText().contains("Game.Core"))
+            assertTrue(htmlOutput.readText().contains("Формула адреса"))
+            assertTrue(htmlOutput.readText().contains("moduleBase(lib/arm64-v8a/libil2cpp.so) + 0x1234"))
         } finally {
             root.deleteRecursively()
         }

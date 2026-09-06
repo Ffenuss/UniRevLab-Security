@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.46.0-preview-actionable-offset-context
+
+- Split every confirmed dump surface into namespace, class, member, declared type and managed signature.
+- Added distinct method RVA, ELF file offset, dump VA and in-object field offset properties to JSON/CSV.
+- Added an ABI-aware runtime address formula and an explicit prerequisite for resolving each address.
+- Rebuilt the human HTML table around these structured fields instead of one opaque managed-identity string.
+- Kept runtime absolute addresses null when offline evidence cannot truthfully determine them because of ASLR or a missing live object instance.
+
 ## 0.45.0-preview-il2cpp-truth-state
 
 - Fixed a false negative where `libil2cpp.so` existed in the APK central directory but was omitted from the bounded detailed ELF list.

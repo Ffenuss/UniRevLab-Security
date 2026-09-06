@@ -59,7 +59,7 @@ fun AutoAuditScreen(
             item {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Eyebrow("UNIREVLAB · AUTO AUDIT 0.45")
+                        Eyebrow("UNIREVLAB · AUTO AUDIT 0.46")
                         Text(language.text("Аудит в один выбор", "One-selection audit"), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
                     }
                     LanguageSelector(language, enabled = !isRunning, onLanguageChanged)

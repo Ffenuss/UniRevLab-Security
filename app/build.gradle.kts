@@ -15,8 +15,8 @@ android {
         applicationId = "org.unirevlab.security"
         minSdk = 26
         targetSdk = 36
-        versionCode = 59
-        versionName = "0.45.0-preview-il2cpp-truth-state"
+        versionCode = 60
+        versionName = "0.46.0-preview-actionable-offset-context"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

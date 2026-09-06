@@ -34,6 +34,7 @@ openrouter_secret = (ROOT / "app/src/main/java/org/unirevlab/security/ai/OpenRou
 report_context = (ROOT / "app/src/main/java/org/unirevlab/security/ai/ReportContextEngine.kt").read_text(encoding="utf-8")
 report_import = (ROOT / "app/src/main/java/org/unirevlab/security/ai/ReportImportStore.kt").read_text(encoding="utf-8")
 confirmed_dump_output = (ROOT / "app/src/main/java/org/unirevlab/security/analysis/ConfirmedDumpOutputExporter.kt").read_text(encoding="utf-8")
+confirmed_surfaces = (ROOT / "app/src/main/java/org/unirevlab/security/analysis/ConfirmedIl2CppSurfaceExporter.kt").read_text(encoding="utf-8")
 real_dump = (ROOT / "app/src/main/java/org/unirevlab/security/analysis/RealIl2CppDumpEngine.kt").read_text(encoding="utf-8")
 input_locator = (ROOT / "app/src/main/java/org/unirevlab/security/analysis/Il2CppInputLocator.kt").read_text(encoding="utf-8")
 main_activity = (ROOT / "app/src/main/java/org/unirevlab/security/MainActivity.kt").read_text(encoding="utf-8")
@@ -41,8 +42,8 @@ main_activity = (ROOT / "app/src/main/java/org/unirevlab/security/MainActivity.k
 checks = [
     ("compileSdk 37.0", app, r"version\s*=\s*release\(37\)[\s\S]*minorApiLevel\s*=\s*0"),
     ("targetSdk 36", app, r"targetSdk\s*=\s*36"),
-    ("v0.45 preview versionCode", app, r"versionCode\s*=\s*59"),
-    ("v0.45 truth-state versionName", app, r'versionName\s*=\s*"0\.45\.0-preview-il2cpp-truth-state"'),
+    ("v0.46 preview versionCode", app, r"versionCode\s*=\s*60"),
+    ("v0.46 actionable-offset versionName", app, r'versionName\s*=\s*"0\.46\.0-preview-actionable-offset-context"'),
     ("release signing input gate", app, r'tasks\.register\("verifyReleaseSigningInputs"\)'),
     ("AGP 9.3.0", root_build, r'id\("com\.android\.application"\) version "9\.3\.0"'),
     ("Kotlin Compose 2.3.21", root_build, r'id\("org\.jetbrains\.kotlin\.plugin\.compose"\) version "2\.3\.21"'),
@@ -58,20 +59,22 @@ checks = [
     ("CI lint", workflow, r':app:lintDebug'),
     ("CI debug build", workflow, r':app:assembleDebug'),
     ("CI APK integrity verify", workflow, r'unzip -t .*APK'),
-    ("CI APK SHA-256", workflow, r'sha256sum .*UniRevLab-Security-v0\.45\.0-il2cpp-truth-state-debug\.apk'),
+    ("CI APK SHA-256", workflow, r'sha256sum .*UniRevLab-Security-v0\.46\.0-actionable-offset-context-debug\.apk'),
     ("CI artifact upload", workflow, r'actions/upload-artifact@v4'),
     ("WorkManager persistent audit", audit_worker, r'OneTimeWorkRequestBuilder<AuditWorker>'),
     ("full report streamed to disk", audit_worker, r'ReportJsonExporter\.write\(report, output\)'),
     ("real IL2CPP multi-ABI dump by file path", audit_worker, r'RealIl2CppDumpEngine\.dumpMultiple\(metadata, libraries, outputDirectory\)'),
     ("dumper reads original APK and installed splits", audit_worker + input_locator, r'Il2CppInputLocator\.locate[\s\S]*baseApkPath[\s\S]*splitApkPaths'),
     ("dumper scans nested APK containers", input_locator, r'endsWith\("\.apk"[\s\S]*MAX_NESTED_APKS'),
-    ("analysis cache invalidated for v0.45", inspector, r'ENGINE_VERSION\s*=\s*"0\.45\.0-il2cpp-truth-state"'),
+    ("analysis cache invalidated for v0.46", inspector, r'ENGINE_VERSION\s*=\s*"0\.46\.0-actionable-offset-context"'),
     ("IL2CPP detection uses archive entry truth", il2cpp_scanner, r'il2cppLibraryNames[\s\S]*archiveEntryNames'),
     ("summary uses real dump truth", audit_worker, r'il2cppDetected\s*=\s*report\.il2cpp\?\.detected\s*==\s*true\s*\|\|\s*realDump\?\.pairLocated'),
     ("split IL2CPP evidence merger wired", inspector, r'Il2CppSummaryMerger\.merge\(values\)'),
     ("split IL2CPP metadata/library merge", il2cpp_merger, r'SPLIT_EVIDENCE_MERGED'),
     ("confirmed dump drives job offset exports", audit_worker, r'ConfirmedDumpOutputExporter\.write\(result, outputDirectory'),
     ("human confirmed offset report", confirmed_dump_output, r'completed Rodroid dump only[\s\S]*FIELD_OFFSET'),
+    ("confirmed offset class and member context", confirmed_surfaces, r'namespace[\s\S]*className[\s\S]*memberName[\s\S]*declaredType'),
+    ("runtime address formula is explicit", confirmed_surfaces, r'addressFormula[\s\S]*REQUIRES_RUNTIME_MODULE_BASE[\s\S]*REQUIRES_LIVE_OBJECT_INSTANCE'),
     ("multi-ABI aggregate offset output", real_dump, r'confirmed-offsets-all-abi\.json[\s\S]*successfulAbis'),
     ("human offset search and filters", readable_offsets, r'function applyFilters\(\)'),
     ("human offset C++ name decoding", readable_offsets, r'readableSymbolName'),

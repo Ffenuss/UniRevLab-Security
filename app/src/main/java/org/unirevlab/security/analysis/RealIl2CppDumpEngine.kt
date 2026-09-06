@@ -142,7 +142,7 @@ object RealIl2CppDumpEngine {
             }
         }
         val aggregate = JSONObject()
-            .put("schemaVersion", "1.0")
+            .put("schemaVersion", "2.0")
             .put("source", "completed Rodroid dumps for every discovered ABI")
             .put("semantics", "Only addresses emitted by a completed engine dump are included. Field offsets are not absolute addresses.")
             .put("gameplayOffsets", gameplay)
@@ -190,18 +190,27 @@ object RealIl2CppDumpEngine {
         if (source == null) return
         for (index in 0 until source.length()) {
             val value = source.optJSONObject(index) ?: continue
-            destination.put(JSONObject(value.toString()).put("abi", abi))
+            val copy = JSONObject(value.toString()).put("abi", abi)
+            if (copy.has("addressFormula")) {
+                copy.put("addressFormula", copy.optString("addressFormula").replace("<abi>", abi))
+            }
+            destination.put(copy)
         }
     }
 
     private fun writeAggregateCsv(directory: File, gameplay: JSONArray, application: JSONArray) {
         File(directory, "confirmed-offsets-all-abi.csv").bufferedWriter(Charsets.UTF_8).use { output ->
-            output.appendLine("abi,domain,category,address_kind,address,confidence,managed_identity")
+            output.appendLine("abi,domain,category,address_kind,address,namespace,class,member_kind,member_name,declared_type,managed_signature,address_formula,runtime_address_status,method_rva,method_file_offset,dump_virtual_address,field_offset,confidence,managed_identity")
             sequenceOf(gameplay, application).forEach { array ->
                 for (index in 0 until array.length()) {
                     val item = array.optJSONObject(index) ?: continue
                     output.appendLine(
-                        listOf("abi", "domain", "category", "addressKind", "address", "confidence", "managedIdentity")
+                        listOf(
+                            "abi", "domain", "category", "addressKind", "address", "namespace", "className",
+                            "memberKind", "memberName", "declaredType", "managedSignature", "addressFormula",
+                            "runtimeAddressStatus", "methodRva", "methodFileOffset", "dumpVirtualAddress",
+                            "fieldOffset", "confidence", "managedIdentity",
+                        )
                             .joinToString(",") { key -> csv(item.optString(key)) }
                     )
                 }

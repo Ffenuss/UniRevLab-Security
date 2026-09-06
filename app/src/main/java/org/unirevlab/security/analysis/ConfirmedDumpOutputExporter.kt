@@ -23,7 +23,7 @@ object ConfirmedDumpOutputExporter {
                 .put("failedAbis", JSONArray(result.failedAbis))
         } else {
             JSONObject()
-                .put("schemaVersion", "1.0")
+                .put("schemaVersion", "2.0")
                 .put("status", "NOT_AVAILABLE")
                 .put("error", result?.error ?: if (languageCode == "en") "A matching global-metadata.dat/libil2cpp.so pair was not found" else "Не найдена совместимая пара global-metadata.dat/libil2cpp.so")
                 .put("source", "real Rodroid dump only")
@@ -51,11 +51,11 @@ object ConfirmedDumpOutputExporter {
             val complete = json.optString("status") == "COMPLETE"
             output.appendLine("<p class=\"${if (complete) "ok" else "bad"}\">${html(if (ru) "Статус: ${json.optString("status")}" else "Status: ${json.optString("status")}")}</p>")
             if (!complete) output.appendLine("<p>${html(json.optString("error"))}</p>")
-            output.appendLine("<p><small>${if (ru) "Источник: только успешно завершённый Rodroid dump. FIELD_OFFSET — смещение поля внутри объекта, не абсолютный адрес. Неподтверждённые гипотезы исключены." else "Source: completed Rodroid dump only. FIELD_OFFSET is an in-object field offset, not an absolute address. Unconfirmed hypotheses are excluded."}</small></p>")
+            output.appendLine("<p><small>${if (ru) "Источник: только успешно завершённый Rodroid dump. Для метода показана формула moduleBase + RVA, для поля — objectAddress + FIELD_OFFSET. Постоянного абсолютного адреса нет из-за ASLR и динамических экземпляров объектов." else "Source: completed Rodroid dump only. Methods include the moduleBase + RVA formula; fields include objectAddress + FIELD_OFFSET. A stable absolute address cannot exist because of ASLR and dynamic object instances."}</small></p>")
             output.appendLine("<input id=\"q\" placeholder=\"${if (ru) "Поиск по ABI, категории, адресу или имени" else "Search ABI, category, address, or name"}\" oninput=\"f()\">")
-            output.appendLine("<p>${if (ru) "Записей" else "Rows"}: <b>${rows.size}</b></p><table><thead><tr><th>ABI</th><th>${if (ru) "Область" else "Domain"}</th><th>${if (ru) "Категория" else "Category"}</th><th>${if (ru) "Тип адреса" else "Address kind"}</th><th>${if (ru) "Адрес" else "Address"}</th><th>${if (ru) "Подтверждённое имя" else "Confirmed identity"}</th></tr></thead><tbody id=\"rows\">")
+            output.appendLine("<p>${if (ru) "Записей" else "Rows"}: <b>${rows.size}</b></p><table><thead><tr><th>ABI</th><th>${if (ru) "Область" else "Domain"}</th><th>${if (ru) "Категория" else "Category"}</th><th>Namespace</th><th>${if (ru) "Класс" else "Class"}</th><th>${if (ru) "Член" else "Member"}</th><th>${if (ru) "Тип" else "Type"}</th><th>${if (ru) "Вид смещения" else "Offset kind"}</th><th>${if (ru) "Смещение" else "Offset"}</th><th>${if (ru) "Формула адреса" else "Address formula"}</th><th>${if (ru) "Что требуется" else "Required runtime value"}</th></tr></thead><tbody id=\"rows\">")
             rows.forEach { item ->
-                output.appendLine("<tr><td>${html(item.optString("abi"))}</td><td class=\"tag\">${html(item.optString("domain"))}</td><td>${html(item.optString("category"))}</td><td>${html(item.optString("addressKind"))}</td><td><code>${html(item.optString("address"))}</code></td><td>${html(item.optString("managedIdentity"))}</td></tr>")
+                output.appendLine("<tr><td>${html(item.optString("abi"))}</td><td class=\"tag\">${html(item.optString("domain"))}</td><td>${html(item.optString("category"))}</td><td>${html(item.optString("namespace"))}</td><td>${html(item.optString("className"))}</td><td>${html(item.optString("memberName"))}<br><small>${html(item.optString("managedSignature"))}</small></td><td>${html(item.optString("declaredType"))}</td><td>${html(item.optString("addressKind"))}</td><td><code>${html(item.optString("address"))}</code></td><td><code>${html(item.optString("addressFormula"))}</code></td><td>${html(runtimeRequirement(item.optString("runtimeAddressStatus"), ru))}</td></tr>")
             }
             output.appendLine("</tbody></table><script>function f(){const q=document.getElementById('q').value.toLowerCase();for(const r of document.querySelectorAll('#rows tr'))r.hidden=!r.textContent.toLowerCase().includes(q)}</script></main></body></html>")
         }
@@ -66,4 +66,10 @@ object ConfirmedDumpOutputExporter {
         .replace("<", "&lt;")
         .replace(">", "&gt;")
         .replace("\"", "&quot;")
+
+    private fun runtimeRequirement(value: String, ru: Boolean): String = when (value) {
+        "REQUIRES_RUNTIME_MODULE_BASE" -> if (ru) "База libil2cpp.so при запуске" else "Runtime libil2cpp.so base"
+        "REQUIRES_LIVE_OBJECT_INSTANCE" -> if (ru) "Адрес экземпляра объекта" else "Live object instance address"
+        else -> value
+    }
 }
