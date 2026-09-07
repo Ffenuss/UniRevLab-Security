@@ -2,7 +2,7 @@ name: Build UniRevLab v0.48 Purchase Trust Chain APK
 
 on:
   push:
-    branches: [ codex/v0.38-auto-audit ]
+    branches: [ codex/v0.38-auto-audit, codex/v0.48-drova-report-fixes ]
     paths:
       - 'app/**'
       - 'native-core/**'
