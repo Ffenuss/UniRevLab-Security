@@ -84,7 +84,7 @@ checks = [
     ("resolved and metadata-only surfaces separated", modification_surfaces, r'resolvedOffsets[\s\S]*unresolvedManagedCandidates'),
     ("human prioritized surface section", readable_offsets, r'Приоритетные поверхности модификации'),
     ("JSON prioritized surface export", offset_evidence, r'modificationSurfacePrioritization'),
-    ("customer action map wired", audit_worker + customer_action_map, r'CustomerActionMapExporter\.build\(report\)[\s\S]*CUSTOMER_ACTION_MAP'),
+    ("customer action map wired", audit_worker + customer_action_map, r'CUSTOMER_ACTION_MAP[\s\S]*CustomerActionMapExporter\.build\(report\)'),
     ("mod resistance playbook wired", audit_worker + mod_resistance_validation, r'ModResistanceValidationExporter\.export\(report, actionMap, language\)'),
     ("mod resistance playbook excludes operational modification", mod_resistance_validation, r'never emits binary patches[\s\S]*payment bypasses'),
     ("Gradle/module exporter wired", audit_worker, r'GradleModuleEvidenceExporter\.export'),
