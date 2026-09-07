@@ -118,6 +118,18 @@ data class DexClassReference(
     val descriptor: String,
     val superDescriptor: String?,
     val accessFlags: Long,
+    /** DEX class_def interfaces, retained for semantic deobfuscation/recovery. */
+    val interfaces: List<String> = emptyList(),
+    /** Surviving class_def source_file string when present; not treated as an exact class name. */
+    val sourceFile: String? = null,
+)
+
+data class DexFieldReference(
+    val dexEntry: String,
+    val fieldIndex: Int,
+    val declaringClass: String,
+    val name: String,
+    val type: String,
 )
 
 data class DexMethodReference(
@@ -255,6 +267,9 @@ data class DexSummary(
     val classesIndexed: Long = 0,
     val methodsDeclared: Long = 0,
     val methodsIndexed: Long = 0,
+    val fieldsDeclared: Long = 0,
+    val fieldsIndexed: Long = 0,
+    val fields: List<DexFieldReference> = emptyList(),
     val classes: List<DexClassReference> = emptyList(),
     val methods: List<DexMethodReference> = emptyList(),
     val nativeMethods: List<DexNativeMethodDeclaration> = emptyList(),

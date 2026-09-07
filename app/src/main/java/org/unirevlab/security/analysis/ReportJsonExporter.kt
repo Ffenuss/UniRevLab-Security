@@ -1211,13 +1211,13 @@ object ReportJsonExporter {
 
     private fun Appendable.numberArrayField(name: String, values: List<Int>, level: Int, comma: Boolean) {
         append(indent(level)).append('"').append(name).append("\": [")
-        values.forEachIndexed { index, value -> if (index > 0) append(", "); append(value) }
+        values.forEachIndexed { index, value -> if (index > 0) append(", "); append(value.toString()) }
         append(']'); if (comma) append(','); append('\n')
     }
 
     private fun Appendable.longArrayField(name: String, values: List<Long>, level: Int, comma: Boolean) {
         append(indent(level)).append('"').append(name).append("\": [")
-        values.forEachIndexed { index, value -> if (index > 0) append(", "); append(value) }
+        values.forEachIndexed { index, value -> if (index > 0) append(", "); append(value.toString()) }
         append(']'); if (comma) append(','); append('\n')
     }
 
@@ -1877,7 +1877,7 @@ object ReportJsonExporter {
     }
 
     private fun Appendable.booleanField(name: String, value: Boolean, level: Int, comma: Boolean) {
-        append(indent(level)).append('"').append(name).append("\": ").append(value)
+        append(indent(level)).append('"').append(name).append("\": ").append(value.toString())
         if (comma) append(',')
         append('\n')
     }
