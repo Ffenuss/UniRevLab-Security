@@ -58,6 +58,43 @@ class AutoAuditExportersTest {
     }
 
     @Test
+    fun customerActionMapExplainsWhichReportContainsWhat() {
+        val json = JSONObject(CustomerActionMapExporter.export(report))
+        val guide = json.getJSONArray("reportGuide")
+
+        assertTrue((0 until guide.length()).map { guide.getJSONObject(it).getString("report") }.contains("il2cpp-dump.cs"))
+        assertTrue((0 until guide.length()).map { guide.getJSONObject(it).getString("report") }.contains("offset-evidence.json"))
+        assertTrue((0 until guide.length()).map { guide.getJSONObject(it).getString("report") }.contains("mod-resistance-validation.md"))
+        assertEquals(0, json.getJSONArray("items").length())
+    }
+
+    @Test
+    fun modResistancePlaybookUsesOwnerControlledValidationAndExcludesOperationalSteps() {
+        val withFinding = report.copy(
+            findings = listOf(
+                Finding(
+                    id = "CLIENT-AUTHORITY-TEST",
+                    title = "Local entitlement decision",
+                    severity = Severity.HIGH,
+                    confidence = Confidence.HIGH,
+                    category = "PLATFORM",
+                    description = "A local decision reaches a protected operation.",
+                    evidence = listOf(Evidence("dex", "entitlement", "local flag")),
+                    remediation = "Make the trusted backend authoritative.",
+                ),
+            ),
+        )
+
+        val markdown = ModResistanceValidationExporter.export(withFinding)
+
+        assertTrue(markdown.contains("отдельной QA/debug-сборке"))
+        assertTrue(markdown.contains("CLIENT-AUTHORITY-TEST"))
+        assertTrue(markdown.contains("Где взять доказательство"))
+        assertTrue(markdown.contains("готовые хуки"))
+        assertTrue(markdown.contains("Make the trusted backend authoritative"))
+    }
+
+    @Test
     fun verificationPlanIsLinkedToReportedFinding() {
         val withFinding = report.copy(
             findings = listOf(
