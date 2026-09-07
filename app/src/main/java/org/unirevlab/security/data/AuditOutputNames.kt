@@ -13,6 +13,8 @@ object AuditOutputNames {
             AuditJobRepository.IL2CPP_DUMP_PACKAGE -> "полный-il2cpp-дамп.zip"
             AuditJobRepository.GRADLE_MODULE_EVIDENCE -> "gradle-модули.json"
             AuditJobRepository.VERIFICATION_PLAN -> "план-проверок.json"
+            AuditJobRepository.CUSTOMER_ACTION_MAP -> "карта-действий-заказчика.json"
+            AuditJobRepository.MOD_RESISTANCE_VALIDATION -> "проверка-устойчивости-к-мод-меню.md"
             AuditJobRepository.ARTIFACT_BUNDLE -> "артефакты-анализа.zip"
             AuditJobRepository.EVIDENCE_MANIFEST -> "манифест-доказательств.json"
             AuditJobRepository.EVIDENCE_SIGNATURE -> "подпись-доказательств.json"
