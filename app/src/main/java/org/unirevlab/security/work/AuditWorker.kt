@@ -17,6 +17,8 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import org.unirevlab.security.analysis.ArtifactBundleExporter
 import org.unirevlab.security.analysis.CustomerReportExporter
+import org.unirevlab.security.analysis.CustomerActionMapExporter
+import org.unirevlab.security.analysis.ModResistanceValidationExporter
 import org.unirevlab.security.analysis.ConfirmedDumpOutputExporter
 import org.unirevlab.security.analysis.EvidencePackageSigner
 import org.unirevlab.security.analysis.GradleModuleEvidenceExporter
@@ -104,9 +106,14 @@ class AuditWorker(
             val managedDumpFile = repository.outputFile(jobId, AuditJobRepository.IL2CPP_DUMP)
             val gradleEvidenceFile = repository.outputFile(jobId, AuditJobRepository.GRADLE_MODULE_EVIDENCE)
             val planFile = repository.outputFile(jobId, AuditJobRepository.VERIFICATION_PLAN)
+            val actionMapFile = repository.outputFile(jobId, AuditJobRepository.CUSTOMER_ACTION_MAP)
+            val modResistanceFile = repository.outputFile(jobId, AuditJobRepository.MOD_RESISTANCE_VALIDATION)
             writeTextAtomically(reportFile) { output -> ReportJsonExporter.write(report, output) }
             update(jobId, AuditStage.REPORT, 90, tr(language, "Полный JSON записан; готовим офсеты и план проверок", "Full JSON written; preparing offsets and verification plan"))
             planFile.writeText(VerificationPlanExporter.export(report), Charsets.UTF_8)
+            val actionMap = CustomerActionMapExporter.build(report)
+            actionMapFile.writeText(actionMap.toString(2), Charsets.UTF_8)
+            modResistanceFile.writeText(ModResistanceValidationExporter.export(report, actionMap, language), Charsets.UTF_8)
 
             ensureActive()
             update(jobId, AuditStage.GRADLE_MODULES, 91, tr(language, "Поиск Gradle metadata, base/split и dynamic-feature модулей", "Discovering Gradle metadata, base/split, and dynamic-feature modules"))
