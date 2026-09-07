@@ -25,6 +25,8 @@ inspector = (ROOT / "app/src/main/java/org/unirevlab/security/analysis/LocalArti
 readable_offsets = (ROOT / "app/src/main/java/org/unirevlab/security/analysis/OffsetReadableExporter.kt").read_text(encoding="utf-8")
 offset_evidence = (ROOT / "app/src/main/java/org/unirevlab/security/analysis/OffsetEvidenceExporter.kt").read_text(encoding="utf-8")
 modification_surfaces = (ROOT / "app/src/main/java/org/unirevlab/security/analysis/ModificationSurfaceClassifier.kt").read_text(encoding="utf-8")
+customer_action_map = (ROOT / "app/src/main/java/org/unirevlab/security/analysis/CustomerActionMapExporter.kt").read_text(encoding="utf-8")
+mod_resistance_validation = (ROOT / "app/src/main/java/org/unirevlab/security/analysis/ModResistanceValidationExporter.kt").read_text(encoding="utf-8")
 il2cpp_merger = (ROOT / "app/src/main/java/org/unirevlab/security/analysis/Il2CppSummaryMerger.kt").read_text(encoding="utf-8")
 gradle_evidence = (ROOT / "app/src/main/java/org/unirevlab/security/analysis/GradleModuleEvidenceExporter.kt").read_text(encoding="utf-8")
 gradle_evidence_test = (ROOT / "app/src/test/java/org/unirevlab/security/analysis/GradleModuleEvidenceExporterTest.kt").read_text(encoding="utf-8")
@@ -42,8 +44,8 @@ main_activity = (ROOT / "app/src/main/java/org/unirevlab/security/MainActivity.k
 checks = [
     ("compileSdk 37.0", app, r"version\s*=\s*release\(37\)[\s\S]*minorApiLevel\s*=\s*0"),
     ("targetSdk 36", app, r"targetSdk\s*=\s*36"),
-    ("v0.46 preview versionCode", app, r"versionCode\s*=\s*60"),
-    ("v0.46 actionable-offset versionName", app, r'versionName\s*=\s*"0\.46\.0-preview-actionable-offset-context"'),
+    ("v0.47 preview versionCode", app, r"versionCode\s*=\s*61"),
+    ("v0.47 mod-resistance versionName", app, r'versionName\s*=\s*"0\.47\.0-preview-mod-resistance-playbook"'),
     ("release signing input gate", app, r'tasks\.register\("verifyReleaseSigningInputs"\)'),
     ("AGP 9.3.0", root_build, r'id\("com\.android\.application"\) version "9\.3\.0"'),
     ("Kotlin Compose 2.3.21", root_build, r'id\("org\.jetbrains\.kotlin\.plugin\.compose"\) version "2\.3\.21"'),
@@ -59,14 +61,14 @@ checks = [
     ("CI lint", workflow, r':app:lintDebug'),
     ("CI debug build", workflow, r':app:assembleDebug'),
     ("CI APK integrity verify", workflow, r'unzip -t .*APK'),
-    ("CI APK SHA-256", workflow, r'sha256sum .*UniRevLab-Security-v0\.46\.0-actionable-offset-context-debug\.apk'),
+    ("CI APK SHA-256", workflow, r'sha256sum .*UniRevLab-Security-v0\.47\.0-mod-resistance-playbook-debug\.apk'),
     ("CI artifact upload", workflow, r'actions/upload-artifact@v4'),
     ("WorkManager persistent audit", audit_worker, r'OneTimeWorkRequestBuilder<AuditWorker>'),
     ("full report streamed to disk", audit_worker, r'ReportJsonExporter\.write\(report, output\)'),
     ("real IL2CPP multi-ABI dump by file path", audit_worker, r'RealIl2CppDumpEngine\.dumpMultiple\(metadata, libraries, outputDirectory\)'),
     ("dumper reads original APK and installed splits", audit_worker + input_locator, r'Il2CppInputLocator\.locate[\s\S]*baseApkPath[\s\S]*splitApkPaths'),
     ("dumper scans nested APK containers", input_locator, r'endsWith\("\.apk"[\s\S]*MAX_NESTED_APKS'),
-    ("analysis cache invalidated for v0.46", inspector, r'ENGINE_VERSION\s*=\s*"0\.46\.0-actionable-offset-context"'),
+    ("analysis cache invalidated for v0.47", inspector, r'ENGINE_VERSION\s*=\s*"0\.47\.0-mod-resistance-playbook"'),
     ("IL2CPP detection uses archive entry truth", il2cpp_scanner, r'il2cppLibraryNames[\s\S]*archiveEntryNames'),
     ("summary uses real dump truth", audit_worker, r'il2cppDetected\s*=\s*report\.il2cpp\?\.detected\s*==\s*true\s*\|\|\s*realDump\?\.pairLocated'),
     ("split IL2CPP evidence merger wired", inspector, r'Il2CppSummaryMerger\.merge\(values\)'),
@@ -82,6 +84,9 @@ checks = [
     ("resolved and metadata-only surfaces separated", modification_surfaces, r'resolvedOffsets[\s\S]*unresolvedManagedCandidates'),
     ("human prioritized surface section", readable_offsets, r'Приоритетные поверхности модификации'),
     ("JSON prioritized surface export", offset_evidence, r'modificationSurfacePrioritization'),
+    ("customer action map wired", audit_worker + customer_action_map, r'CustomerActionMapExporter\.build\(report\)[\s\S]*CUSTOMER_ACTION_MAP'),
+    ("mod resistance playbook wired", audit_worker + mod_resistance_validation, r'ModResistanceValidationExporter\.export\(report, actionMap, language\)'),
+    ("mod resistance playbook excludes operational modification", mod_resistance_validation, r'never emits binary patches[\s\S]*payment bypasses'),
     ("Gradle/module exporter wired", audit_worker, r'GradleModuleEvidenceExporter\.export'),
     ("Gradle split manifest parsing", gradle_evidence, r'configForSplit[\s\S]*isFeatureSplit'),
     ("Gradle dynamic feature classification", gradle_evidence, r'DYNAMIC_FEATURE'),
