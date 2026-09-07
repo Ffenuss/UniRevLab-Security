@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.47.0-preview-mod-resistance-playbook
+
+- Added `mod-resistance-validation.md` to every Auto Audit result and signed evidence package.
+- Added a fourteen-step owner-controlled QA workflow from immutable scope and asset inventory through source tracing, safe outcome simulation, remediation, negative tests, and closure evidence.
+- Added one validation card per finding/trust surface with exact report selectors, confidence/status, required owner change and acceptance test.
+- Added explicit server-authority checks for entitlement, purchases, economy, progression, gameplay state and network decisions.
+- Kept the report defensive-only: it does not emit hook code, patch bytes, runtime injection steps, billing bypasses, response-rewrite rules or a modified APK.
+
 ## 0.46.0-preview-actionable-offset-context
 
 - Split every confirmed dump surface into namespace, class, member, declared type and managed signature.
