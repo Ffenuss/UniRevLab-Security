@@ -2,7 +2,9 @@
 
 Open-source Android-first platform for **authorized** mobile application security assessment and reverse engineering.
 
-## Current milestone: v0.46.0-actionable-offset-context
+## Current milestone: v0.47.0-mod-resistance-playbook
+
+Each one-APK assessment now exports `mod-resistance-validation.md`: a detailed customer workflow that maps every static risk to its DEX/ELF/JNI/IL2CPP evidence, an owner-controlled source-level QA simulation, the required security change, and explicit acceptance criteria. It models attacker-controlled client outcomes without generating operational hooks, binary patches, payment bypasses, response-rewrite recipes, or a modified APK.
 
 Confirmed Rodroid offsets are now exported with namespace, class, member name, declared type, full managed signature, address kind, method RVA/file offset/VA or field offset, ABI-aware address formula, runtime prerequisite and confidence. Offline analysis cannot truthfully emit a stable absolute runtime address because ASLR changes module bases and field addresses require a live object instance; the report now makes that distinction explicit instead of presenting a bare number.
 
