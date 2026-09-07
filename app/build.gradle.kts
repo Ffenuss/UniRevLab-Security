@@ -15,8 +15,8 @@ android {
         applicationId = "org.unirevlab.security"
         minSdk = 26
         targetSdk = 36
-        versionCode = 61
-        versionName = "0.47.0-preview-mod-resistance-playbook"
+        versionCode = 62
+        versionName = "0.48.0-preview-purchase-trust-chain"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

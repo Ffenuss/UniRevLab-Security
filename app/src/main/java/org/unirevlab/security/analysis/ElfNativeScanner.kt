@@ -4,7 +4,6 @@ import org.unirevlab.security.model.NativeLibrarySummary
 import org.unirevlab.security.model.NativeSecretCandidate
 import org.unirevlab.security.model.NativeSymbolReference
 import java.io.File
-import java.io.InterruptedIOException
 import java.io.RandomAccessFile
 
 /**
@@ -52,15 +51,8 @@ object ElfNativeScanner {
         var name: String = "",
     )
 
-    fun scan(
-        entryName: String,
-        file: File,
-        limits: Limits = Limits(),
-        onProgress: ((percent: Int, detail: String, completed: Int, total: Int) -> Unit)? = null,
-    ): NativeLibrarySummary {
+    fun scan(entryName: String, file: File, limits: Limits = Limits()): NativeLibrarySummary {
         require(file.length() <= limits.maxElfBytes) { "ELF exceeds ${limits.maxElfBytes} byte limit" }
-        checkCancelled()
-        onProgress?.invoke(0, "Читаем ELF header", 0, 1)
         RandomAccessFile(file, "r").use { raf ->
             val header = readHeader(raf)
             if (header.shnum > limits.maxSections) throw ElfFormatException("ELF section count exceeds limit")
@@ -69,23 +61,11 @@ object ElfNativeScanner {
             var truncated = false
             val sections = readSections(raf, header)
             resolveSectionNames(raf, sections, header.shstrndx)
-            checkCancelled()
-            onProgress?.invoke(10, "ELF sections готовы", sections.size, sections.size)
 
             val hardening = inspectProgramHeaders(raf, header)
-            onProgress?.invoke(15, "Проверяем dynamic symbols", 0, limits.maxSymbols)
-            val symbols = inspectDynamicSymbols(entryName, raf, header, sections, limits) { completed, total ->
-                onProgress?.invoke(scaleProgress(15, 50, completed, total), "ELF imports/exports", completed, total)
-            }.also { if (it.truncated) truncated = true }
-            checkCancelled()
-            onProgress?.invoke(52, "Проверяем dynamic section / NEEDED", 0, 1)
+            val symbols = inspectDynamicSymbols(entryName, raf, header, sections, limits).also { if (it.truncated) truncated = true }
             val dynamic = inspectDynamicSection(raf, header, sections, limits).also { if (it.truncated) truncated = true }
-            onProgress?.invoke(56, "Сканируем ASCII/URL/secret evidence", 0, 1)
-            val strings = scanAscii(raf, limits) { completed, total ->
-                onProgress?.invoke(scaleProgress(56, 95, completed, total), "ASCII/URL/secret scan", completed, total)
-            }.also { if (it.truncated) truncated = true }
-            checkCancelled()
-            onProgress?.invoke(97, "Читаем GNU build-id", 0, 1)
+            val strings = scanAscii(raf, limits).also { if (it.truncated) truncated = true }
             val buildId = readBuildId(raf, sections)
             val hasSymtab = sections.any { it.type == SHT_SYMTAB }
 
@@ -94,8 +74,6 @@ object ElfNativeScanner {
                 .distinct()
                 .take(limits.maxReportedExports)
 
-            checkCancelled()
-            onProgress?.invoke(100, "ELF inventory готов", 1, 1)
             return NativeLibrarySummary(
                 entryName = entryName,
                 abi = abiFrom(entryName, header.machine),
@@ -120,16 +98,6 @@ object ElfNativeScanner {
                 truncated = truncated,
             )
         }
-    }
-
-    private fun checkCancelled() {
-        if (Thread.currentThread().isInterrupted) throw InterruptedIOException("ELF analysis cancelled")
-    }
-
-    private fun scaleProgress(from: Int, to: Int, completed: Int, total: Int): Int {
-        if (total <= 0) return to
-        val fraction = (completed.toDouble() / total.toDouble()).coerceIn(0.0, 1.0)
-        return from + ((to - from) * fraction).toInt()
     }
 
     private fun readHeader(raf: RandomAccessFile): Header {
@@ -170,7 +138,6 @@ object ElfNativeScanner {
     private fun readSections(raf: RandomAccessFile, h: Header): MutableList<Section> {
         val result = ArrayList<Section>(h.shnum)
         repeat(h.shnum) { index ->
-            if ((index and 0x3f) == 0) checkCancelled()
             val base = h.shoff + index.toLong() * h.shentsize
             val section = if (h.is64) {
                 Section(
@@ -202,8 +169,7 @@ object ElfNativeScanner {
     private fun resolveSectionNames(raf: RandomAccessFile, sections: MutableList<Section>, shstrndx: Int) {
         if (shstrndx !in sections.indices) return
         val table = sections[shstrndx]
-        for ((index, section) in sections.withIndex()) {
-            if ((index and 0x3f) == 0) checkCancelled()
+        for (section in sections) {
             section.name = readCString(raf, table.offset, table.size, section.nameOffset, 512)
         }
     }
@@ -214,7 +180,6 @@ object ElfNativeScanner {
         var executableStack: Boolean? = null
         var relro = false
         repeat(h.phnum) { index ->
-            if ((index and 0x3f) == 0) checkCancelled()
             val base = h.phoff + index.toLong() * h.phentsize
             val type = u32(raf, base)
             val flags = if (h.is64) u32(raf, base + 4) else u32(raf, base + 24)
@@ -230,14 +195,7 @@ object ElfNativeScanner {
         val truncated: Boolean,
     )
 
-    private fun inspectDynamicSymbols(
-        entryName: String,
-        raf: RandomAccessFile,
-        h: Header,
-        sections: List<Section>,
-        limits: Limits,
-        onProgress: ((completed: Int, total: Int) -> Unit)? = null,
-    ): SymbolInventory {
+    private fun inspectDynamicSymbols(entryName: String, raf: RandomAccessFile, h: Header, sections: List<Section>, limits: Limits): SymbolInventory {
         val dynsym = sections.firstOrNull { it.type == SHT_DYNSYM } ?: return SymbolInventory(emptyList(), emptyList(), false)
         val strtab = sections.getOrNull(dynsym.link) ?: throw ElfFormatException(".dynsym string-table link is invalid")
         val entrySize = when {
@@ -254,10 +212,6 @@ object ElfNativeScanner {
         val exports = mutableListOf<NativeSymbolReference>()
 
         repeat(toScan) { i ->
-            if ((i and 0x7f) == 0) {
-                checkCancelled()
-                onProgress?.invoke(i, toScan)
-            }
             val base = dynsym.offset + i.toLong() * entrySize
             val nameOff = u32(raf, base)
             val info = if (h.is64) u8(raf, base + 4) else u8(raf, base + 12)
@@ -284,7 +238,6 @@ object ElfNativeScanner {
                 if (imports.size < limits.maxReportedImports) imports += ref else truncated = true
             }
         }
-        onProgress?.invoke(toScan, toScan)
         return SymbolInventory(imports, exports, truncated)
     }
 
@@ -300,7 +253,6 @@ object ElfNativeScanner {
         var truncated = count > maxEntries
         val neededOffsets = mutableListOf<Long>()
         for (i in 0 until maxEntries) {
-            if ((i and 0xff) == 0) checkCancelled()
             val base = dynamic.offset + i.toLong() * entrySize
             val tag = if (h.is64) u64(raf, base) else u32(raf, base)
             val value = if (h.is64) u64(raf, base + 8) else u32(raf, base + 4)
@@ -323,11 +275,7 @@ object ElfNativeScanner {
         val truncated: Boolean,
     )
 
-    private fun scanAscii(
-        raf: RandomAccessFile,
-        limits: Limits,
-        onProgress: ((completed: Int, total: Int) -> Unit)? = null,
-    ): AsciiInfo {
+    private fun scanAscii(raf: RandomAccessFile, limits: Limits): AsciiInfo {
         val bytesToScan = minOf(raf.length(), limits.maxAsciiScanBytes)
         raf.seek(0)
         val buffer = ByteArray(64 * 1024)
@@ -336,7 +284,6 @@ object ElfNativeScanner {
         val secretCandidates = mutableListOf<NativeSecretCandidate>()
         var registerNatives = false
         var remaining = bytesToScan
-        var completedBytes = 0L
         var truncated = raf.length() > bytesToScan
 
         fun consumeCurrent() {
@@ -363,12 +310,9 @@ object ElfNativeScanner {
         }
 
         while (remaining > 0) {
-            checkCancelled()
             val read = raf.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
             if (read <= 0) break
             remaining -= read
-            completedBytes += read
-            onProgress?.invoke(completedBytes.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), bytesToScan.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
             for (i in 0 until read) {
                 val b = buffer[i].toInt() and 0xff
                 if (b in 0x20..0x7e) {
@@ -384,11 +328,9 @@ object ElfNativeScanner {
 
     private fun readBuildId(raf: RandomAccessFile, sections: List<Section>): String? {
         for (section in sections.filter { it.type == SHT_NOTE }) {
-            checkCancelled()
             var cursor = section.offset
             val end = section.offset + section.size
             while (cursor + 12 <= end) {
-                checkCancelled()
                 val namesz = u32(raf, cursor)
                 val descsz = u32(raf, cursor + 4)
                 val type = u32(raf, cursor + 8)
@@ -415,7 +357,6 @@ object ElfNativeScanner {
         val bytes = ByteArray(maxBytes)
         var count = 0
         while (raf.filePointer < end && count < maxBytes) {
-            if ((count and 0x03ff) == 0) checkCancelled()
             val b = raf.read()
             if (b <= 0) break
             bytes[count++] = b.toByte()
@@ -432,17 +373,23 @@ object ElfNativeScanner {
 
     private fun u8(raf: RandomAccessFile, offset: Long): Int {
         ensureRange(offset, 1, raf.length(), "u8")
-        return PositionalReadCache.u8(raf, offset, raf.length())
+        raf.seek(offset)
+        return raf.readUnsignedByte()
     }
 
     private fun u16(raf: RandomAccessFile, offset: Long): Int {
         ensureRange(offset, 2, raf.length(), "u16")
-        return PositionalReadCache.u16Le(raf, offset, raf.length())
+        raf.seek(offset)
+        return raf.readUnsignedByte() or (raf.readUnsignedByte() shl 8)
     }
 
     private fun u32(raf: RandomAccessFile, offset: Long): Long {
         ensureRange(offset, 4, raf.length(), "u32")
-        return PositionalReadCache.u32Le(raf, offset, raf.length())
+        raf.seek(offset)
+        return raf.readUnsignedByte().toLong() or
+            (raf.readUnsignedByte().toLong() shl 8) or
+            (raf.readUnsignedByte().toLong() shl 16) or
+            (raf.readUnsignedByte().toLong() shl 24)
     }
 
     private fun u64(raf: RandomAccessFile, offset: Long): Long {

@@ -99,9 +99,19 @@ object CustomerReportExporter {
         } else {
             appendLine("Связанная пара `libil2cpp.so` + `global-metadata.dat` не подтверждена. Если компоненты лежат в разных split APK, они должны быть объединены до формирования этого вывода.")
         }
-        appendLine("- Ghidra-анализов: ${report.ghidra.size}.")
-        appendLine("- Подтверждённых связей «managed method → native RVA»: ${report.correlations?.il2cppMethodsResolved ?: 0}.")
-        appendLine("- Подтверждённых JNI-связей: ${report.correlations?.dexNativeMethodsResolved ?: 0}.")
+        appendLine("- Ghidra: ${if (report.ghidra.isEmpty()) "НЕ ВЫПОЛНЯЛСЯ в этом мобильном анализе" else "выполнено анализов: ${report.ghidra.size}"}.")
+        val staticManagedLinks = report.correlations?.il2cppMethodsResolved ?: 0
+        val staticJniLinks = report.correlations?.dexNativeMethodsResolved ?: 0
+        appendLine("- Предварительная статическая корреляция managed method → ELF symbol/RVA: ${if (staticManagedLinks == 0) "НЕ НАЙДЕНА (это отдельный этап до Rodroid dump)" else "подтверждено: $staticManagedLinks"}.")
+        appendLine("- DEX ↔ JNI-корреляция: ${if (staticJniLinks == 0) "НЕ НАЙДЕНА; для IL2CPP field/method dump она не обязательна" else "подтверждено: $staticJniLinks"}.")
+        if (realDump?.complete == true) {
+            appendLine("- Rodroid dump: **COMPLETE**; подтверждённых записей: ${realDump.gameplaySurfaceCount + realDump.applicationSurfaceCount} (методов: ${realDump.methodSurfaceCount}; полей: ${realDump.fieldSurfaceCount}).")
+            appendLine("- Релевантных managed-методов без восстановленного RVA: ${realDump.unresolvedRelevantMethodCount}; они перечислены отдельно и не выдаются за подтверждённые адреса.")
+            appendLine("- Релевантных строковых литералов с адресом из `script.json`: ${realDump.relevantStringCount}.")
+            appendLine("- Успешные ABI: ${realDump.successfulAbis.joinToString().ifBlank { realDump.architecture ?: "основной ABI" }}.")
+        } else {
+            appendLine("- Rodroid dump: **${realDump?.status ?: "ЕЩЁ НЕ ВЫПОЛНЕН"}**${realDump?.error?.let { "; причина: ${safe(it)}" }.orEmpty()}.")
+        }
         appendLine()
         appendLine("Metadata token, ELF-символ и подтверждённый native RVA метода — разные сущности. `offsets-readable.html` показывает их раздельно и не выдаёт сырой символ за готовый hook-offset.")
         appendLine()
@@ -245,6 +255,16 @@ object CustomerReportExporter {
             appendLine("## IL2CPP evidence boundary")
             appendLine()
             appendLine("The general static scan provides discovery hints only. Final offset exports are generated later and exclusively from a successfully completed Rodroid dump for each ABI. Metadata tokens and heuristic names are never promoted to native RVA.")
+            if (realDump?.complete == true) {
+                appendLine()
+                appendLine("- Rodroid dump: **COMPLETE**; resolved security-relevant records: ${realDump.gameplaySurfaceCount + realDump.applicationSurfaceCount} (methods: ${realDump.methodSurfaceCount}; fields: ${realDump.fieldSurfaceCount}).")
+                appendLine("- Relevant managed methods without a resolved RVA: ${realDump.unresolvedRelevantMethodCount}; these are reported separately and never presented as confirmed addresses.")
+                appendLine("- Relevant string literals with an address from `script.json`: ${realDump.relevantStringCount}.")
+                appendLine("- Successful ABIs: ${realDump.successfulAbis.joinToString().ifBlank { realDump.architecture ?: "primary ABI" }}.")
+            } else {
+                appendLine()
+                appendLine("- Rodroid dump: **${realDump?.status ?: "NOT_RUN"}**${realDump?.error?.let { "; reason: ${safe(it)}" }.orEmpty()}.")
+            }
             appendLine()
             appendEnglishFindingSection("Confirmed configurations and technical facts", confirmed)
             appendEnglishFindingSection("Signals requiring manual confirmation", review)
@@ -252,7 +272,7 @@ object CustomerReportExporter {
             appendLine("## Evidence package contents")
             appendLine()
             appendLine("- `full-report.json`: complete machine-readable evidence.")
-            appendLine("- `customer-report.md`: this report plus the real dump status appended by the pipeline.")
+            appendLine("- `customer-report.md`: this report, including the real dump status and resolved/unresolved coverage counts.")
             appendLine("- `offsets-readable.html`: searchable confirmed offsets from completed dumps only.")
             appendLine("- `offset-evidence.json`: confirmed method RVA and field offsets for every successful ABI, with namespace, class, member, declared type, signature, address formula, and required runtime base.")
             appendLine("- `il2cpp-dump.cs`: real managed dump for the primary ABI.")

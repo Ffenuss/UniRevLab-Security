@@ -23,12 +23,14 @@ object ConfirmedDumpOutputExporter {
                 .put("failedAbis", JSONArray(result.failedAbis))
         } else {
             JSONObject()
-                .put("schemaVersion", "2.0")
+                .put("schemaVersion", "2.1")
                 .put("status", "NOT_AVAILABLE")
                 .put("error", result?.error ?: if (languageCode == "en") "A matching global-metadata.dat/libil2cpp.so pair was not found" else "Не найдена совместимая пара global-metadata.dat/libil2cpp.so")
                 .put("source", "real Rodroid dump only")
                 .put("gameplayOffsets", JSONArray())
                 .put("applicationAndMonetizationOffsets", JSONArray())
+                .put("unresolvedRelevantMethods", JSONArray())
+                .put("relevantStringLiterals", JSONArray())
         }
         jsonDestination.writeText(json.toString(2), Charsets.UTF_8)
         writeHtml(json, htmlDestination, languageCode)
@@ -38,6 +40,8 @@ object ConfirmedDumpOutputExporter {
         val ru = languageCode != "en"
         val gameplay = json.optJSONArray("gameplayOffsets") ?: JSONArray()
         val application = json.optJSONArray("applicationAndMonetizationOffsets") ?: JSONArray()
+        val unresolved = json.optJSONArray("unresolvedRelevantMethods") ?: JSONArray()
+        val strings = json.optJSONArray("relevantStringLiterals") ?: JSONArray()
         val rows = buildList {
             for (array in listOf(gameplay, application)) {
                 for (index in 0 until array.length()) array.optJSONObject(index)?.let(::add)
@@ -57,7 +61,21 @@ object ConfirmedDumpOutputExporter {
             rows.forEach { item ->
                 output.appendLine("<tr><td>${html(item.optString("abi"))}</td><td class=\"tag\">${html(item.optString("domain"))}</td><td>${html(item.optString("category"))}</td><td>${html(item.optString("namespace"))}</td><td>${html(item.optString("className"))}</td><td>${html(item.optString("memberName"))}<br><small>${html(item.optString("managedSignature"))}</small></td><td>${html(item.optString("declaredType"))}</td><td>${html(item.optString("addressKind"))}</td><td><code>${html(item.optString("address"))}</code></td><td><code>${html(item.optString("addressFormula"))}</code></td><td>${html(runtimeRequirement(item.optString("runtimeAddressStatus"), ru))}</td></tr>")
             }
-            output.appendLine("</tbody></table><script>function f(){const q=document.getElementById('q').value.toLowerCase();for(const r of document.querySelectorAll('#rows tr'))r.hidden=!r.textContent.toLowerCase().includes(q)}</script></main></body></html>")
+            output.appendLine("</tbody></table>")
+            output.appendLine("<h2>${if (ru) "Методы без восстановленного RVA" else "Methods without a resolved RVA"}</h2>")
+            output.appendLine("<p><small>${if (ru) "Сигнатура подтверждена dump.cs, но Rodroid не выдал адрес. Эти строки нельзя считать готовыми офсетами." else "The declaration is present in dump.cs, but Rodroid did not emit an address. These rows are not confirmed offsets."}</small></p>")
+            output.appendLine("<table><thead><tr><th>ABI</th><th>Assembly</th><th>Namespace</th><th>${if (ru) "Класс" else "Class"}</th><th>${if (ru) "Метод" else "Method"}</th><th>${if (ru) "Категория" else "Category"}</th><th>${if (ru) "Статус" else "Status"}</th></tr></thead><tbody id=\"unresolved\">")
+            for (index in 0 until unresolved.length()) unresolved.optJSONObject(index)?.let { item ->
+                output.appendLine("<tr><td>${html(item.optString("abi"))}</td><td>${html(item.optString("assembly"))}</td><td>${html(item.optString("namespace"))}</td><td>${html(item.optString("className"))}</td><td>${html(item.optString("memberName"))}<br><small>${html(item.optString("managedSignature"))}</small></td><td>${html(item.optString("category"))}</td><td>${html(item.optString("resolutionStatus"))}</td></tr>")
+            }
+            output.appendLine("</tbody></table>")
+            output.appendLine("<h2>${if (ru) "Адресованные строки Rodroid" else "Addressed Rodroid strings"}</h2>")
+            output.appendLine("<p><small>${if (ru) "Это координаты литералов из script.json, а не адреса методов и не доказательство уязвимости." else "These are string coordinates from script.json, not method addresses or proof of a vulnerability."}</small></p>")
+            output.appendLine("<table><thead><tr><th>ABI</th><th>${if (ru) "Область" else "Domain"}</th><th>${if (ru) "Категория" else "Category"}</th><th>${if (ru) "Адрес" else "Address"}</th><th>${if (ru) "Строка" else "String"}</th></tr></thead><tbody id=\"strings\">")
+            for (index in 0 until strings.length()) strings.optJSONObject(index)?.let { item ->
+                output.appendLine("<tr><td>${html(item.optString("abi"))}</td><td>${html(item.optString("domain"))}</td><td>${html(item.optString("category"))}</td><td><code>${html(item.optString("address"))}</code></td><td>${html(item.optString("value"))}</td></tr>")
+            }
+            output.appendLine("</tbody></table><script>function f(){const q=document.getElementById('q').value.toLowerCase();for(const r of document.querySelectorAll('tbody tr'))r.hidden=!r.textContent.toLowerCase().includes(q)}</script></main></body></html>")
         }
     }
 

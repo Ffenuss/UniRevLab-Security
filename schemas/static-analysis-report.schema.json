@@ -14,6 +14,7 @@
     "dex",
     "native",
     "il2cpp",
+    "realIl2CppDump",
     "ghidra",
     "correlations",
     "manifestDexReachability",
@@ -220,6 +221,35 @@
           "$ref": "#/$defs/il2cpp"
         }
       ]
+    },
+    "realIl2CppDump": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": [
+        "status", "complete", "error", "engine", "engineRevision", "architecture",
+        "codeRegistration", "metadataRegistration", "registrationStrategy", "typeCount",
+        "methodDeclarationCount", "resolvedRelevantMethodCount", "fieldOffsetCount",
+        "unresolvedRelevantMethodCount", "relevantStringCount", "successfulAbis", "failedAbis"
+      ],
+      "properties": {
+        "status": {"type": "string"},
+        "complete": {"type": "boolean"},
+        "error": {"type": ["string", "null"]},
+        "engine": {"type": ["string", "null"]},
+        "engineRevision": {"type": ["string", "null"]},
+        "architecture": {"type": ["string", "null"]},
+        "codeRegistration": {"type": ["string", "null"]},
+        "metadataRegistration": {"type": ["string", "null"]},
+        "registrationStrategy": {"type": ["string", "null"]},
+        "typeCount": {"type": "integer", "minimum": 0},
+        "methodDeclarationCount": {"type": "integer", "minimum": 0},
+        "resolvedRelevantMethodCount": {"type": "integer", "minimum": 0},
+        "fieldOffsetCount": {"type": "integer", "minimum": 0},
+        "unresolvedRelevantMethodCount": {"type": "integer", "minimum": 0},
+        "relevantStringCount": {"type": "integer", "minimum": 0},
+        "successfulAbis": {"type": "array", "items": {"type": "string"}},
+        "failedAbis": {"type": "array", "items": {"type": "string"}}
+      }
     },
     "runtimes": {
       "anyOf": [
@@ -1032,6 +1062,7 @@
         "stringXrefs",
         "typeXrefs",
         "parseErrors",
+        "parseErrorDetails",
         "truncated",
         "httpUrls",
         "httpsUrls",
@@ -1061,6 +1092,10 @@
         "parseErrors": {
           "type": "integer",
           "minimum": 0
+        },
+        "parseErrorDetails": {
+          "type": "array",
+          "items": {"type": "string"}
         },
         "truncated": {
           "type": "boolean"

@@ -241,6 +241,7 @@ class LocalArtifactInspector(
             if (dex != null) addAll(DexRuleEngine.evaluate(dex))
             if (native != null) addAll(NativeRuleEngine.evaluate(native))
             if (il2cpp != null) addAll(Il2CppRuleEngine.evaluate(il2cpp))
+            addAll(PurchaseEntitlementRuleEngine.evaluate(dex, il2cpp))
         }.sortedWith(compareBy({ findingSeverityOrder(it.severity) }, { it.id }))
         control.update("report", 88, "Формирование результатов")
         val report = StaticAnalysisReport(
@@ -358,6 +359,7 @@ class LocalArtifactInspector(
             secretCandidates = secrets.toList(),
             parseErrors = values.sumOf { it.parseErrors },
             truncated = truncated,
+            parseErrorDetails = values.flatMap { it.parseErrorDetails }.distinct().take(100),
         )
     }
 
@@ -591,6 +593,7 @@ class LocalArtifactInspector(
             if (dex != null) addAll(DexRuleEngine.evaluate(dex))
             if (native != null) addAll(NativeRuleEngine.evaluate(native))
             if (il2cpp != null) addAll(Il2CppRuleEngine.evaluate(il2cpp))
+            addAll(PurchaseEntitlementRuleEngine.evaluate(dex, il2cpp))
         }.sortedWith(compareBy({ findingSeverityOrder(it.severity) }, { it.id }))
         control.update("report", 88, "Формирование результатов")
         return StaticAnalysisReport(
@@ -666,7 +669,11 @@ class LocalArtifactInspector(
 
     private data class CopiedEntry(val bytes: Long, val sha256: String)
     private data class PreparedDexEntry(val reportedEntry: String, val file: File, val sha256: String)
-    private data class DexTaskResult(val prepared: PreparedDexEntry, val bundle: DexScanBundle?, val failed: Boolean)
+    private data class DexTaskResult(
+        val prepared: PreparedDexEntry,
+        val bundle: DexScanBundle?,
+        val errorMessage: String? = null,
+    )
     private data class PreparedNativeEntry(
         val reportedEntry: String,
         val rawEntryName: String,
@@ -735,6 +742,7 @@ class LocalArtifactInspector(
         var stringsDeclared = 0L
         var stringsScanned = 0L
         var parseErrors = 0
+        val parseErrorDetails = mutableListOf<String>()
         var truncated = false
         var typesDeclared = 0L
         var typesIndexed = 0L
@@ -818,9 +826,9 @@ class LocalArtifactInspector(
                         val futures = prepared.map { item ->
                             executor.submit(java.util.concurrent.Callable {
                                 try {
-                                    DexTaskResult(item, obtainDexScan(item.reportedEntry, item.file, item.sha256, session), failed = false)
-                                } catch (_: Exception) {
-                                    DexTaskResult(item, bundle = null, failed = true)
+                                    DexTaskResult(item, obtainDexScan(item.reportedEntry, item.file, item.sha256, session))
+                                } catch (error: Exception) {
+                                    DexTaskResult(item, bundle = null, errorMessage = error.message ?: error::class.java.simpleName)
                                 }
                             })
                         }
@@ -833,8 +841,11 @@ class LocalArtifactInspector(
                             }
                             try {
                                 val bundle = task.bundle
-                                if (task.failed || bundle == null) {
+                                if (bundle == null) {
                                     parseErrors++
+                                    if (parseErrorDetails.size < 100) {
+                                        parseErrorDetails += "${task.prepared.reportedEntry}: ${task.errorMessage ?: "unknown DEX parse error"}"
+                                    }
                                     continue
                                 }
                                 val scan = bundle.inventory
@@ -875,10 +886,12 @@ class LocalArtifactInspector(
                     }
                 }
             }
-        } catch (_: ZipException) {
+        } catch (error: ZipException) {
             parseErrors++
-        } catch (_: java.io.IOException) {
+            if (parseErrorDetails.size < 100) parseErrorDetails += "archive: ${error.message ?: "ZIP parse error"}"
+        } catch (error: java.io.IOException) {
             parseErrors++
+            if (parseErrorDetails.size < 100) parseErrorDetails += "archive: ${error.message ?: "I/O error"}"
         }
 
         return DexSummary(
@@ -907,6 +920,7 @@ class LocalArtifactInspector(
             httpsUrls = httpsUrls.toList(),
             secretCandidates = secretCandidates.toList(),
             parseErrors = parseErrors,
+            parseErrorDetails = parseErrorDetails,
             truncated = truncated || filesScanned < minOf(discovered, MAX_DEX_FILES) || listOf(
                 classes.overflowed, methods.overflowed, nativeMethods.overflowed, codeMethods.overflowed,
                 callXrefs.overflowed, stringXrefs.overflowed, typeXrefs.overflowed, fieldXrefs.overflowed,
@@ -1366,7 +1380,7 @@ class LocalArtifactInspector(
     )
 
     companion object {
-    const val ENGINE_VERSION = "0.47.0-mod-resistance-playbook"
+    const val ENGINE_VERSION = "0.48.0-purchase-trust-chain"
         private const val MAX_DEX_FILES = 32
         private const val MAX_SINGLE_DEX_BYTES = 96L * 1024L * 1024L
         private const val MAX_TOTAL_DEX_BYTES = 384L * 1024L * 1024L
@@ -1386,7 +1400,9 @@ class LocalArtifactInspector(
         private const val MAX_NATIVE_LIBRARIES = 128
         private const val MAX_SUPPLY_COMPONENTS = 512
         private const val MAX_NATIVE_DEPENDENCIES = 1024
-        private const val MAX_SINGLE_NATIVE_BYTES = 128L * 1024L * 1024L
+        // Large Unity releases commonly place libil2cpp.so just above 128 MiB. Keep the scan
+        // bounded, but do not silently exclude the primary IL2CPP evidence source at that edge.
+        private const val MAX_SINGLE_NATIVE_BYTES = 512L * 1024L * 1024L
         private const val MAX_TOTAL_NATIVE_BYTES = 512L * 1024L * 1024L
         private const val MAX_ARCHIVE_ENTRIES = 20_000
         private const val MAX_MANIFEST_BYTES = 4 * 1024 * 1024

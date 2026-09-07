@@ -1,8 +1,8 @@
-name: Build UniRevLab v0.47 Mod Resistance Playbook APK
+name: Build UniRevLab v0.48 Purchase Trust Chain APK
 
 on:
   push:
-    branches: [ codex/v0.38-auto-audit, codex/v0.47-mod-resistance-playbook ]
+    branches: [ codex/v0.38-auto-audit ]
     paths:
       - 'app/**'
       - 'native-core/**'
@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: v0470-${{ github.ref }}
+  group: v0480-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -92,14 +92,14 @@ jobs:
           test -s "${APK}"
           unzip -t "${APK}" >/dev/null
           "${ANDROID_HOME}/build-tools/36.0.0/zipalign" -c -P 16 -v 4 "${APK}" >/dev/null
-          cp "${APK}" UniRevLab-Security-v0.47.0-mod-resistance-playbook-debug.apk
-          sha256sum UniRevLab-Security-v0.47.0-mod-resistance-playbook-debug.apk | tee UniRevLab-Security-v0.47.0-mod-resistance-playbook-debug.apk.sha256
+          cp "${APK}" UniRevLab-Security-v0.48.0-purchase-trust-chain-debug.apk
+          sha256sum UniRevLab-Security-v0.48.0-purchase-trust-chain-debug.apk | tee UniRevLab-Security-v0.48.0-purchase-trust-chain-debug.apk.sha256
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: UniRevLab-Security-v0.47.0-mod-resistance-playbook-debug
+          name: UniRevLab-Security-v0.48.0-purchase-trust-chain-debug
           path: |
-            UniRevLab-Security-v0.47.0-mod-resistance-playbook-debug.apk
-            UniRevLab-Security-v0.47.0-mod-resistance-playbook-debug.apk.sha256
+            UniRevLab-Security-v0.48.0-purchase-trust-chain-debug.apk
+            UniRevLab-Security-v0.48.0-purchase-trust-chain-debug.apk.sha256
           if-no-files-found: error

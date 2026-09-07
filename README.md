@@ -2,7 +2,11 @@
 
 Open-source Android-first platform for **authorized** mobile application security assessment and reverse engineering.
 
-## Current milestone: v0.47.0-mod-resistance-playbook
+## Current milestone: v0.48.0-purchase-trust-chain
+
+Rodroid evidence now keeps resolved method RVA, field offset, unresolved managed method declaration, and addressed string literal as four distinct result types. Offline reports intentionally do not claim an absolute runtime address: ASLR and live object allocation are runtime-only state.
+
+One-APK assessment now correlates DEX and IL2CPP purchase evidence into a customer-readable chain: purchase initiation, proof/token handling, local entitlement state, persistence, validation signals, and the protected-content decision. It raises a high-priority review finding when local gates are visible without a linked validation stage and preserves coverage caveats so obfuscated or server-only behavior is never reported as a proven bypass.
 
 Each one-APK assessment now exports `mod-resistance-validation.md`: a detailed customer workflow that maps every static risk to its DEX/ELF/JNI/IL2CPP evidence, an owner-controlled source-level QA simulation, the required security change, and explicit acceptance criteria. It models attacker-controlled client outcomes without generating operational hooks, binary patches, payment bypasses, response-rewrite recipes, or a modified APK.
 

@@ -7,12 +7,12 @@ data class Evidence(
     val source: String,
     val location: String,
     val value: String,
-) : java.io.Serializable
+)
 
 data class SecurityReference(
     val standard: String,
     val id: String,
-) : java.io.Serializable
+)
 
 data class Finding(
     val id: String,
@@ -25,20 +25,20 @@ data class Finding(
     val remediation: String,
     val references: List<SecurityReference> = emptyList(),
     val requiresManualReview: Boolean = false,
-) : java.io.Serializable
+)
 
 data class ComponentExposure(
     val kind: String,
     val name: String,
     val exported: Boolean,
     val permissions: List<String> = emptyList(),
-) : java.io.Serializable
+)
 
 data class DeclaredPermission(
     val name: String,
     /** Android base protection level normalized to NORMAL/DANGEROUS/SIGNATURE/OTHER/UNKNOWN. */
     val protectionLevel: String,
-) : java.io.Serializable
+)
 
 data class DeepLinkDeclaration(
     val componentName: String,
@@ -52,7 +52,7 @@ data class DeepLinkDeclaration(
     val pathPrefixes: List<String> = emptyList(),
     val pathPatterns: List<String> = emptyList(),
     val mimeTypes: List<String> = emptyList(),
-) : java.io.Serializable
+)
 
 data class ProviderPathPermissionSummary(
     val path: String? = null,
@@ -60,7 +60,7 @@ data class ProviderPathPermissionSummary(
     val pathPattern: String? = null,
     val readPermission: String? = null,
     val writePermission: String? = null,
-) : java.io.Serializable
+)
 
 data class ProviderDeclaration(
     val name: String,
@@ -70,7 +70,7 @@ data class ProviderDeclaration(
     val readPermission: String? = null,
     val writePermission: String? = null,
     val pathPermissions: List<ProviderPathPermissionSummary> = emptyList(),
-) : java.io.Serializable
+)
 
 
 
@@ -86,21 +86,21 @@ data class ComponentDexReachability(
     val reachableMethodCount: Int,
     val maxDepthReached: Int,
     val truncated: Boolean,
-) : java.io.Serializable
+)
 
 data class ManifestDexReachabilitySummary(
     val components: List<ComponentDexReachability>,
     val externallyAddressableComponents: Int,
     val reachableMethods: Int,
     val truncated: Boolean,
-) : java.io.Serializable
+)
 
 data class DexStringReference(
     val dexEntry: String,
     val stringIndex: Int,
     /** Sanitized value; query/fragment data are removed from URLs before reporting. */
     val value: String,
-) : java.io.Serializable
+)
 
 data class SecretCandidate(
     val kind: String,
@@ -109,7 +109,7 @@ data class SecretCandidate(
     /** SHA-256 of the original candidate. Raw candidate material is intentionally not exported. */
     val valueSha256: String,
     val redactedPreview: String,
-) : java.io.Serializable
+)
 
 
 data class DexClassReference(
@@ -118,19 +118,7 @@ data class DexClassReference(
     val descriptor: String,
     val superDescriptor: String?,
     val accessFlags: Long,
-    /** DEX class_def interfaces, retained for semantic deobfuscation/recovery. */
-    val interfaces: List<String> = emptyList(),
-    /** Surviving class_def source_file string when present; not treated as an exact class name. */
-    val sourceFile: String? = null,
-) : java.io.Serializable
-
-data class DexFieldReference(
-    val dexEntry: String,
-    val fieldIndex: Int,
-    val declaringClass: String,
-    val name: String,
-    val type: String,
-) : java.io.Serializable
+)
 
 data class DexMethodReference(
     val dexEntry: String,
@@ -138,7 +126,7 @@ data class DexMethodReference(
     val declaringClass: String,
     val name: String,
     val prototype: String,
-) : java.io.Serializable
+)
 
 data class DexNativeMethodDeclaration(
     val dexEntry: String,
@@ -147,7 +135,7 @@ data class DexNativeMethodDeclaration(
     val name: String,
     val prototype: String,
     val accessFlags: Long,
-) : java.io.Serializable
+)
 
 
 
@@ -163,7 +151,7 @@ data class DexMethodCodeReference(
     val outsSize: Int,
     val triesSize: Int,
     val instructionUnits: Int,
-) : java.io.Serializable
+)
 
 data class DexMethodCallXref(
     val dexEntry: String,
@@ -175,7 +163,7 @@ data class DexMethodCallXref(
     val calleeName: String,
     val calleePrototype: String,
     val instructionOffsetCodeUnits: Int,
-) : java.io.Serializable
+)
 
 data class DexStringXref(
     val dexEntry: String,
@@ -185,7 +173,7 @@ data class DexStringXref(
     val stringIndex: Int,
     val value: String,
     val instructionOffsetCodeUnits: Int,
-) : java.io.Serializable
+)
 
 data class DexTypeXref(
     val dexEntry: String,
@@ -196,7 +184,7 @@ data class DexTypeXref(
     val descriptor: String,
     val kind: String,
     val instructionOffsetCodeUnits: Int,
-) : java.io.Serializable
+)
 
 
 
@@ -211,7 +199,7 @@ data class DexFieldXref(
     val fieldType: String,
     val kind: String,
     val instructionOffsetCodeUnits: Int,
-) : java.io.Serializable
+)
 
 data class DexBasicBlock(
     val dexEntry: String,
@@ -222,7 +210,7 @@ data class DexBasicBlock(
     /** Successor block start offsets in code units. */
     val successorCodeUnits: List<Int>,
     val terminalKind: String,
-) : java.io.Serializable
+)
 
 data class DexInvokeArgument(
     val argumentIndex: Int,
@@ -231,7 +219,7 @@ data class DexInvokeArgument(
     val kind: String,
     /** Sanitized/redacted representation. */
     val value: String,
-) : java.io.Serializable
+)
 
 data class DexInvokeObservation(
     val dexEntry: String,
@@ -244,7 +232,7 @@ data class DexInvokeObservation(
     val calleePrototype: String,
     val instructionOffsetCodeUnits: Int,
     val arguments: List<DexInvokeArgument>,
-) : java.io.Serializable
+)
 
 
 data class DexConstantReference(
@@ -254,7 +242,7 @@ data class DexConstantReference(
     val kind: String,
     val value: String,
     val instructionOffsetCodeUnits: Int,
-) : java.io.Serializable
+)
 
 data class DexSummary(
     val dexFilesDiscovered: Int,
@@ -267,9 +255,6 @@ data class DexSummary(
     val classesIndexed: Long = 0,
     val methodsDeclared: Long = 0,
     val methodsIndexed: Long = 0,
-    val fieldsDeclared: Long = 0,
-    val fieldsIndexed: Long = 0,
-    val fields: List<DexFieldReference> = emptyList(),
     val classes: List<DexClassReference> = emptyList(),
     val methods: List<DexMethodReference> = emptyList(),
     val nativeMethods: List<DexNativeMethodDeclaration> = emptyList(),
@@ -286,19 +271,20 @@ data class DexSummary(
     val secretCandidates: List<SecretCandidate>,
     val parseErrors: Int,
     val truncated: Boolean,
-) : java.io.Serializable
+    val parseErrorDetails: List<String> = emptyList(),
+)
 
 data class NetworkTrustAnchorSummary(
     val source: String,
     val inDebugOverrides: Boolean,
     val overridePins: Boolean? = null,
-) : java.io.Serializable
+)
 
 data class NetworkDomainConfigSummary(
     val cleartextTrafficPermitted: Boolean?,
     val domains: List<String>,
     val includeSubdomains: Boolean,
-) : java.io.Serializable
+)
 
 data class NetworkSecurityConfigSummary(
     val manifestReference: String?,
@@ -311,7 +297,7 @@ data class NetworkSecurityConfigSummary(
     val pinSetPresent: Boolean,
     val parseErrors: Int,
     val truncated: Boolean,
-) : java.io.Serializable
+)
 
 data class SigningCertificateSummary(
     val sha256: String,
@@ -325,7 +311,7 @@ data class SigningCertificateSummary(
     val publicKeySizeBits: Int?,
     val currentSigner: Boolean,
     val lineageIndex: Int?,
-) : java.io.Serializable
+)
 
 data class ManifestSummary(
     val packageName: String,
@@ -352,7 +338,7 @@ data class ManifestSummary(
     val v1SignatureFiles: List<String> = emptyList(),
     val signingParseError: String? = null,
     val networkSecurity: NetworkSecurityConfigSummary? = null,
-) : java.io.Serializable
+)
 
 
 
@@ -362,7 +348,7 @@ data class Il2CppTableRange(
     val name: String,
     val offset: Long,
     val sizeBytes: Long,
-) : java.io.Serializable
+)
 
 data class Il2CppTypeDefinitionSummary(
     val index: Int,
@@ -374,7 +360,7 @@ data class Il2CppTypeDefinitionSummary(
     val fieldStart: Int,
     val fieldCount: Int,
     val token: Long,
-) : java.io.Serializable
+)
 
 data class Il2CppMethodDefinitionSummary(
     val index: Int,
@@ -384,7 +370,7 @@ data class Il2CppMethodDefinitionSummary(
     val parameterCount: Int,
     val token: Long,
     val flags: Int,
-) : java.io.Serializable
+)
 
 data class Il2CppFieldDefinitionSummary(
     val index: Int,
@@ -393,7 +379,7 @@ data class Il2CppFieldDefinitionSummary(
     val name: String,
     val typeIndex: Int,
     val token: Long,
-) : java.io.Serializable
+)
 
 data class Il2CppMetadataSummary(
     val entryName: String,
@@ -412,7 +398,7 @@ data class Il2CppMetadataSummary(
     val reconstructionTruncated: Boolean = false,
     val parseError: String? = null,
     val truncated: Boolean = false,
-) : java.io.Serializable
+)
 
 data class Il2CppRegistrationCandidate(
     val kind: String,
@@ -421,7 +407,7 @@ data class Il2CppRegistrationCandidate(
     val virtualAddress: Long? = null,
     val sizeBytes: Long? = null,
     val validatedDefinedSymbol: Boolean = false,
-) : java.io.Serializable
+)
 
 data class Il2CppSummary(
     val detected: Boolean,
@@ -433,7 +419,7 @@ data class Il2CppSummary(
     val registrationCandidates: List<Il2CppRegistrationCandidate> = emptyList(),
     val parseErrors: Int,
     val truncated: Boolean,
-) : java.io.Serializable
+)
 
 
 
@@ -441,25 +427,25 @@ data class RuntimeProfileDetection(
     val kind: String,
     val confidence: String,
     val indicators: List<String>,
-) : java.io.Serializable
+)
 
 data class RuntimeSummary(
     val profiles: List<RuntimeProfileDetection>,
-) : java.io.Serializable
+)
 
 
 
 data class RuntimeFileReference(
     val entryName: String,
     val sizeBytes: Long,
-) : java.io.Serializable
+)
 
 data class RuntimeArtifactFingerprint(
     val entryName: String,
     val kind: String,
     val sizeBytes: Long,
     val sha256: String,
-) : java.io.Serializable
+)
 
 data class FlutterRuntimeSummary(
     val detected: Boolean,
@@ -475,7 +461,7 @@ data class FlutterRuntimeSummary(
     val aotLikely: Boolean,
     val artifactFingerprints: List<RuntimeArtifactFingerprint> = emptyList(),
     val truncated: Boolean,
-) : java.io.Serializable
+)
 
 data class HermesFunctionSummary(
     val index: Int,
@@ -490,7 +476,7 @@ data class HermesFunctionSummary(
     val hasDebugInfo: Boolean?,
     val overflowed: Boolean,
     val largeHeaderOffset: Long? = null,
-) : java.io.Serializable
+)
 
 data class HermesBytecodeSummary(
     val entryName: String,
@@ -521,7 +507,7 @@ data class HermesBytecodeSummary(
     val sourceHashSha1: String?,
     val parseError: String? = null,
     val truncated: Boolean = false,
-) : java.io.Serializable
+)
 
 data class HermesRuntimeSummary(
     val detected: Boolean,
@@ -530,19 +516,19 @@ data class HermesRuntimeSummary(
     val bytecodeFiles: List<HermesBytecodeSummary>,
     val javascriptBundles: List<RuntimeFileReference>,
     val truncated: Boolean,
-) : java.io.Serializable
+)
 
 data class ManagedMetadataStreamSummary(
     val name: String,
     val offset: Long,
     val sizeBytes: Long,
-) : java.io.Serializable
+)
 
 data class ManagedMetadataTableSummary(
     val tableId: Int,
     val name: String,
     val rowCount: Long,
-) : java.io.Serializable
+)
 
 data class ManagedTypeReferenceSummary(
     val index: Int,
@@ -550,7 +536,7 @@ data class ManagedTypeReferenceSummary(
     val name: String,
     val fullName: String,
     val resolutionScopeToken: Long?,
-) : java.io.Serializable
+)
 
 data class ManagedTypeDefinitionSummary(
     val index: Int,
@@ -563,7 +549,7 @@ data class ManagedTypeDefinitionSummary(
     val fieldCount: Int,
     val methodStart: Int,
     val methodCount: Int,
-) : java.io.Serializable
+)
 
 data class ManagedMethodDefinitionSummary(
     val index: Int,
@@ -574,14 +560,14 @@ data class ManagedMethodDefinitionSummary(
     val name: String,
     val signatureBlobIndex: Long,
     val paramStart: Int,
-) : java.io.Serializable
+)
 
 data class ManagedMemberReferenceSummary(
     val index: Int,
     val parentToken: Long?,
     val name: String,
     val signatureBlobIndex: Long,
-) : java.io.Serializable
+)
 
 data class ManagedAssemblyReferenceSummary(
     val index: Int,
@@ -589,7 +575,7 @@ data class ManagedAssemblyReferenceSummary(
     val version: String,
     val culture: String?,
     val flags: Long,
-) : java.io.Serializable
+)
 
 data class ManagedAssemblySummary(
     val entryName: String,
@@ -610,7 +596,7 @@ data class ManagedAssemblySummary(
     val reconstructionTruncated: Boolean = false,
     val parseError: String? = null,
     val truncated: Boolean = false,
-) : java.io.Serializable
+)
 
 data class UnityMonoRuntimeSummary(
     val detected: Boolean,
@@ -619,7 +605,7 @@ data class UnityMonoRuntimeSummary(
     val unityLibraries: List<String>,
     val assemblies: List<ManagedAssemblySummary>,
     val truncated: Boolean,
-) : java.io.Serializable
+)
 
 data class UnrealContainerSummary(
     val entryName: String,
@@ -627,7 +613,7 @@ data class UnrealContainerSummary(
     val sizeBytes: Long,
     val probeSha256: String? = null,
     val probeBytes: Int = 0,
-) : java.io.Serializable
+)
 
 data class UnrealRuntimeSummary(
     val detected: Boolean,
@@ -637,14 +623,14 @@ data class UnrealRuntimeSummary(
     val obbEntries: List<RuntimeFileReference>,
     val commandLineEntries: List<String>,
     val truncated: Boolean,
-) : java.io.Serializable
+)
 
 data class RuntimeArtifactSummary(
     val flutter: FlutterRuntimeSummary? = null,
     val hermes: HermesRuntimeSummary? = null,
     val unityMono: UnityMonoRuntimeSummary? = null,
     val unreal: UnrealRuntimeSummary? = null,
-) : java.io.Serializable
+)
 
 data class DependencyComponentSummary(
     val id: String,
@@ -655,7 +641,7 @@ data class DependencyComponentSummary(
     val confidence: String,
     val evidence: List<String>,
     val versionEvidence: String? = null,
-) : java.io.Serializable
+)
 
 data class AdvisoryFeedProvenance(
     val schemaVersion: String,
@@ -671,7 +657,7 @@ data class AdvisoryFeedProvenance(
     val signingKeyId: String? = null,
     val signatureAlgorithm: String? = null,
     val envelopeSha256: String? = null,
-) : java.io.Serializable
+)
 
 data class VulnerabilityAdvisoryMatch(
     val advisoryId: String,
@@ -683,7 +669,7 @@ data class VulnerabilityAdvisoryMatch(
     val source: String,
     /** Exact version or a conservative ecosystem-specific range resolver evidence string. */
     val matchBasis: String = "EXACT_COMPONENT_VERSION",
-) : java.io.Serializable
+)
 
 data class SupplyChainSummary(
     val components: List<DependencyComponentSummary>,
@@ -691,7 +677,7 @@ data class SupplyChainSummary(
     val advisoryFeed: AdvisoryFeedProvenance? = null,
     val vulnerabilities: List<VulnerabilityAdvisoryMatch> = emptyList(),
     val truncated: Boolean,
-) : java.io.Serializable
+)
 
 data class StaticAnalysisReport(
     val schemaVersion: String = "1.19",
@@ -710,7 +696,7 @@ data class StaticAnalysisReport(
     val runtimeArtifacts: RuntimeArtifactSummary? = null,
     val supplyChain: SupplyChainSummary? = null,
     val findings: List<Finding>,
-) : java.io.Serializable
+)
 
 data class NativeSymbolReference(
     val libraryEntry: String,
@@ -720,7 +706,7 @@ data class NativeSymbolReference(
     val defined: Boolean,
     val virtualAddress: Long? = null,
     val sizeBytes: Long? = null,
-) : java.io.Serializable
+)
 
 
 data class NativeSecretCandidate(
@@ -728,7 +714,7 @@ data class NativeSecretCandidate(
     val libraryEntry: String,
     val valueSha256: String,
     val redactedPreview: String,
-) : java.io.Serializable
+)
 
 data class NativeLibrarySummary(
     val entryName: String,
@@ -753,7 +739,7 @@ data class NativeLibrarySummary(
     val secretCandidates: List<NativeSecretCandidate> = emptyList(),
     val parseError: String? = null,
     val truncated: Boolean = false,
-) : java.io.Serializable
+)
 
 
 data class JniBridgeReference(
@@ -764,7 +750,7 @@ data class JniBridgeReference(
     val resolution: String,
     val libraryEntry: String? = null,
     val nativeSymbol: String? = null,
-) : java.io.Serializable
+)
 
 data class NativeSummary(
     val librariesDiscovered: Int,
@@ -773,4 +759,4 @@ data class NativeSummary(
     val jniBridges: List<JniBridgeReference> = emptyList(),
     val parseErrors: Int,
     val truncated: Boolean,
-) : java.io.Serializable
+)

@@ -27,6 +27,36 @@ class ConfirmedIl2CppSurfaceExporterTest {
                 // RVA: 0x9999 Offset: 0x9999 VA: 0x9999
                 public void HarmlessTelemetry() { }
             }
+            // Dll : Drova.dll
+            // Namespace: Drova
+            public class StoreService
+            {
+                private bool _hasBoughtGame; // 0x38
+                // RVA: -1 Offset: -1
+                public void PurchaseGame(bool isOffer = false) { }
+                // RVA: -1 Offset: -1
+                internal bool HasBoughtGame() { }
+                /* GenericInstMethod :
+                |
+                |-RVA: 0x4567 Offset: 0x4167 VA: 0x4567
+                |-GenericEvent<StoreService.PurchaseGameState>.AddEventListener
+                */
+            }
+            """.trimIndent(),
+        )
+        dir.resolve("script.json").writeText(
+            """
+            {
+              "ScriptMethod": [],
+              "ScriptString": [
+                {
+                  "Address": 131514352,
+                  "Value": "Invalid receipt, not unlocking content.",
+                  "Name": "StringLiteral_Invalid_receipt"
+                }
+              ],
+              "ScriptMetadata": []
+            }
             """.trimIndent(),
         )
         val summary = ConfirmedIl2CppSurfaceExporter.export(dump, dir)
@@ -46,7 +76,8 @@ class ConfirmedIl2CppSurfaceExporterTest {
         assertEquals("int", health.getString("declaredType"))
         assertEquals("0x18", health.getString("fieldOffset"))
         assertEquals("objectAddress(Game.Core.PlayerStats) + 0x18", health.getString("addressFormula"))
-        assertTrue(health.isNull("runtimeAbsoluteAddress"))
+        assertFalse(health.has("runtimeAbsoluteAddress"))
+        assertEquals("LIVE_OBJECT_INSTANCE_REQUIRED", health.getJSONObject("runtimeAddressResolution").getString("reason"))
 
         val damage = (0 until gameplay.length())
             .map { gameplay.getJSONObject(it) }
@@ -55,5 +86,11 @@ class ConfirmedIl2CppSurfaceExporterTest {
         assertEquals("0x1234", damage.getString("methodRva"))
         assertEquals("0x1234", damage.getString("methodFileOffset"))
         assertEquals("moduleBase(lib/<abi>/libil2cpp.so) + 0x1234", damage.getString("addressFormula"))
+        assertTrue(summary.methodCount >= 2)
+        assertEquals(2, summary.unresolvedRelevantMethodCount)
+        assertEquals(1, summary.relevantStringCount)
+        val root = org.json.JSONObject(json)
+        assertTrue(root.getJSONArray("unresolvedRelevantMethods").toString().contains("HasBoughtGame"))
+        assertTrue(root.getJSONArray("relevantStringLiterals").toString().contains("Invalid receipt"))
     }
 }
