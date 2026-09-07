@@ -59,7 +59,7 @@ fun AutoAuditScreen(
             item {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Eyebrow("UNIREVLAB · AUTO AUDIT 0.46")
+                        Eyebrow("UNIREVLAB · AUTO AUDIT 0.47")
                         Text(language.text("Аудит в один выбор", "One-selection audit"), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
                     }
                     LanguageSelector(language, enabled = !isRunning, onLanguageChanged)
@@ -277,6 +277,8 @@ private fun OutputCard(language: AppLanguage, availableFiles: Set<String>, onExp
         AuditJobRepository.IL2CPP_DUMP_PACKAGE to (language.text("Полный IL2CPP-пакет", "Complete IL2CPP package") to language.text("Все ABI, script, строки, headers и индексы", "All ABIs, script, strings, headers and indexes")),
         AuditJobRepository.GRADLE_MODULE_EVIDENCE to (language.text("Gradle-модули", "Gradle modules") to language.text("Base, split, dynamic-feature и build metadata", "Base, split, dynamic-feature and build metadata")),
         AuditJobRepository.VERIFICATION_PLAN to (language.text("План проверок", "Verification plan") to language.text("Безопасные тесты сборки владельца", "Safe owner-build tests")),
+        AuditJobRepository.CUSTOMER_ACTION_MAP to (language.text("Карта действий заказчика", "Customer action map") to language.text("Что взять, из какого отчёта и как исправить", "What to use, source report, and remediation")),
+        AuditJobRepository.MOD_RESISTANCE_VALIDATION to (language.text("Проверка устойчивости к мод-меню", "Mod-menu resistance validation") to language.text("Пошаговая QA-проверка, исправления и критерии приёмки", "Step-by-step QA validation, fixes, and acceptance criteria")),
         AuditJobRepository.REPORT_JSON to (language.text("Полный JSON", "Full JSON") to language.text("Все доказательства и находки", "All evidence and findings")),
         AuditJobRepository.ARTIFACT_BUNDLE to (language.text("Артефакты", "Artifacts") to "DEX, ELF, metadata, runtime"),
     )
