@@ -391,7 +391,7 @@ object ConfirmedIl2CppSurfaceExporter {
         Rule("GAME", "MOVEMENT", listOf("movespeed", "movementspeed", "walkspeed", "runspeed", "jumpspeed", "teleport", "gravity")),
         Rule("GAME", "PROGRESSION", listOf("experiencepoints", "experience", "playerlevel", "accountlevel", "levelup", "highscore", "achievement", "questreward", "skillpoints", "cooldown", "stamina", "energy")),
         Rule("MONETIZATION", "PREMIUM_SUBSCRIPTION", listOf("ispremium", "premiumuser", "premiumstatus", "isvip", "vipstatus", "paiduser", "isproaccount", "proaccount", "entitlement", "subscriptionactive", "subscriptionstatus", "subscribed", "hasboughtgame", "fullversion")),
-        Rule("MONETIZATION", "PURCHASE_BILLING", listOf("inapppurchase", "purchase", "billingclient", "checkout", "restorepurchase", "verifyreceipt", "validatereceipt")),
+        Rule("MONETIZATION", "PURCHASE_BILLING", listOf("inapppurchase", "purchase", "billingclient", "checkout", "restorepurchase", "verifyreceipt", "validatereceipt", "receipt")),
         Rule("APPLICATION", "AUTHORIZATION", listOf("authorization", "permissioncheck", "accesslevel", "hasaccess", "isadmin", "userrole")),
         Rule("APPLICATION", "FEATURE_QUOTA", listOf("featureenabled", "featureflag", "isunlocked", "paidfeature", "ratelimit", "dailylimit", "usagequota", "triallimit")),
         Rule("APPLICATION", "INTEGRITY_LICENSE", listOf("integritycheck", "tampercheck", "signaturecheck", "verifyintegrity", "licensecheck", "verifylicense")),
