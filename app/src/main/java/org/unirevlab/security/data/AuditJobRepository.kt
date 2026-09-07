@@ -138,6 +138,8 @@ class AuditJobRepository(context: Context) {
         const val IL2CPP_DUMP_PACKAGE = "il2cpp-real-dump.zip"
         const val GRADLE_MODULE_EVIDENCE = "gradle-module-evidence.json"
         const val VERIFICATION_PLAN = "verification-plan.json"
+        const val CUSTOMER_ACTION_MAP = "customer-action-map.json"
+        const val MOD_RESISTANCE_VALIDATION = "mod-resistance-validation.md"
         const val ARTIFACT_BUNDLE = "analysis-artifacts.zip"
         const val EVIDENCE_MANIFEST = "evidence-manifest.json"
         const val EVIDENCE_SIGNATURE = "evidence-signature.json"
@@ -152,6 +154,8 @@ class AuditJobRepository(context: Context) {
             IL2CPP_DUMP_PACKAGE,
             GRADLE_MODULE_EVIDENCE,
             VERIFICATION_PLAN,
+            CUSTOMER_ACTION_MAP,
+            MOD_RESISTANCE_VALIDATION,
             ARTIFACT_BUNDLE,
             EVIDENCE_MANIFEST,
             EVIDENCE_SIGNATURE,
