@@ -98,7 +98,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: UniRevLab-Security-v0.46.0-actionable-offset-context-debug
+          name: UniRevLab-Security-v0.47.0-mod-resistance-playbook-debug
           path: |
             UniRevLab-Security-v0.47.0-mod-resistance-playbook-debug.apk
             UniRevLab-Security-v0.47.0-mod-resistance-playbook-debug.apk.sha256
