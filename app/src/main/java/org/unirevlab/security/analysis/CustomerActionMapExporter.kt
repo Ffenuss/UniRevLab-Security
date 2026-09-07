@@ -71,7 +71,6 @@ object CustomerActionMapExporter {
             .put("interpretation", "Potential tampering classes are threat-model statements, not proof that a working modification was produced.")
             .put("reportGuide", reportGuide())
             .put("items", JSONArray(items.distinctBy { it.getString("id") }))
-            .toString(2)
     }
 
     private fun findingItem(finding: Finding) = JSONObject()
