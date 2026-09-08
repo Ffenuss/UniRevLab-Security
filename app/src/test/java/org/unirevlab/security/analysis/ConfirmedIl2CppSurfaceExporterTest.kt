@@ -56,6 +56,13 @@ class ConfirmedIl2CppSurfaceExporterTest {
                   "Group": "Game/Game/Core/PlayerStats"
                 },
                 {
+                  "Address": 30583,
+                  "Name": "Account_IsPremium",
+                  "Signature": "bool Game_Core_Account__IsPremium (void);",
+                  "DotNetSignature": "Game.Core.Account::IsPremium()",
+                  "Group": "Game/Game/Core/Account"
+                },
+                {
                   "Address": 17767,
                   "Name": "HttpWebRequest_MoveNext",
                   "Signature": "void System_Net_HttpWebRequest_State__MoveNext (void);",
@@ -91,7 +98,7 @@ class ConfirmedIl2CppSurfaceExporterTest {
         val summary = ConfirmedIl2CppSurfaceExporter.export(dump, dir)
         val json = summary.outputJson.readText()
         assertEquals(2, summary.gameplayCount)
-        assertEquals(3, summary.applicationCount)
+        assertEquals(4, summary.applicationCount)
         assertTrue(json.contains("0x1234"))
         assertTrue(json.contains("0x18"))
         assertTrue(json.contains("0x7777"))
@@ -117,7 +124,7 @@ class ConfirmedIl2CppSurfaceExporterTest {
         assertEquals("0x1234", damage.getString("methodRva"))
         assertFalse(damage.has("methodFileOffset"))
         assertEquals("moduleBase(lib/<abi>/libil2cpp.so) + 0x1234", damage.getString("addressFormula"))
-        assertEquals(2, summary.methodCount)
+        assertEquals(4, summary.methodCount)
         val resolved = rootArrays(json, "gameplayOffsets", "applicationAndMonetizationOffsets")
         assertTrue(resolved.any { it.getString("managedIdentity") == "Game.Core.PlayerStats::ApplyDamage()" })
         assertFalse(resolved.any { it.optString("address") == "0x0" })
