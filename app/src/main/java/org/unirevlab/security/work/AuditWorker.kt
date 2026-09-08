@@ -98,7 +98,7 @@ class AuditWorker(
             }
 
             ensureActive()
-            update(jobId, AuditStage.REPORT, 89, tr(language, "Потоковая запись полного JSON без дублирования в памяти", "Streaming the full JSON without duplicating it in memory"))
+            update(jobId, AuditStage.REPORT, 89, tr(language, "Подготовка отчётов и доказательств", "Preparing reports and evidence"))
             val reportFile = repository.outputFile(jobId, AuditJobRepository.REPORT_JSON)
             val customerFile = repository.outputFile(jobId, AuditJobRepository.CUSTOMER_REPORT)
             val offsetsFile = repository.outputFile(jobId, AuditJobRepository.OFFSET_EVIDENCE)
@@ -108,8 +108,7 @@ class AuditWorker(
             val planFile = repository.outputFile(jobId, AuditJobRepository.VERIFICATION_PLAN)
             val actionMapFile = repository.outputFile(jobId, AuditJobRepository.CUSTOMER_ACTION_MAP)
             val modResistanceFile = repository.outputFile(jobId, AuditJobRepository.MOD_RESISTANCE_VALIDATION)
-            writeTextAtomically(reportFile) { output -> ReportJsonExporter.write(report, output) }
-            update(jobId, AuditStage.REPORT, 90, tr(language, "Полный JSON записан; готовим офсеты и план проверок", "Full JSON written; preparing offsets and verification plan"))
+            update(jobId, AuditStage.REPORT, 90, tr(language, "Готовим офсеты и план проверок", "Preparing offsets and verification plan"))
             planFile.writeText(VerificationPlanExporter.export(report), Charsets.UTF_8)
             val actionMap = CustomerActionMapExporter.build(report)
             actionMapFile.writeText(actionMap.toString(2), Charsets.UTF_8)
@@ -144,31 +143,9 @@ class AuditWorker(
                 readableOffsetsDestination = readableOffsetsFile,
                 languageCode = language,
             )
+            update(jobId, AuditStage.REPORT, 97, tr(language, "Потоковая запись полного JSON с итогом Rodroid", "Streaming full JSON with the Rodroid result"))
+            writeTextAtomically(reportFile) { output -> ReportJsonExporter.write(report, output, realDump) }
             customerFile.writeText(CustomerReportExporter.export(report, gradleEvidence, language, realDump), Charsets.UTF_8)
-            customerFile.appendText(
-                if (language == "en") {
-                    "\n\n## Real IL2CPP dump\n\n" + if (realDump?.complete == true) {
-                        "- Status: COMPLETE\n- Engine: ${realDump.engine}\n- Metadata: v${realDump.metadataVersion}\n" +
-                            "- Successful ABIs: ${realDump.successfulAbis.joinToString()}\n- Failed ABIs: ${realDump.failedAbis.joinToString().ifBlank { "none" }}\n" +
-                            "- CodeRegistration (primary ABI): ${realDump.codeRegistration}\n- MetadataRegistration (primary ABI): ${realDump.metadataRegistration}\n" +
-                            "- Confirmed gameplay surfaces: ${realDump.gameplaySurfaceCount}\n- Application/monetization surfaces: ${realDump.applicationSurfaceCount}\n"
-                    } else {
-                        "- Status: NOT_AVAILABLE\n- Reason: ${realDump?.error ?: "matching global-metadata.dat/libil2cpp.so pair not found"}\n" +
-                            "- No offsets were created or guessed.\n"
-                    }
-                } else {
-                    "\n\n## Настоящий IL2CPP dump\n\n" + if (realDump?.complete == true) {
-                        "- Статус: COMPLETE\n- Движок: ${realDump.engine}\n- Metadata: v${realDump.metadataVersion}\n" +
-                            "- Успешные ABI: ${realDump.successfulAbis.joinToString()}\n- Неуспешные ABI: ${realDump.failedAbis.joinToString().ifBlank { "нет" }}\n" +
-                            "- CodeRegistration (основной ABI): ${realDump.codeRegistration}\n- MetadataRegistration (основной ABI): ${realDump.metadataRegistration}\n" +
-                            "- Игровые поверхности: ${realDump.gameplaySurfaceCount}\n- Приложение/монетизация: ${realDump.applicationSurfaceCount}\n"
-                    } else {
-                        "- Статус: NOT_AVAILABLE\n- Причина: ${realDump?.error ?: "не найдена совместимая пара global-metadata.dat/libil2cpp.so"}\n" +
-                            "- Офсеты не создавались и не угадывались.\n"
-                    }
-                },
-                Charsets.UTF_8,
-            )
 
             ensureActive()
             update(jobId, AuditStage.SIGNING, 98, tr(language, "Подпись целостности пакета доказательств", "Signing evidence package integrity"))
@@ -180,6 +157,8 @@ class AuditWorker(
                 managedDumpFile,
                 gradleEvidenceFile,
                 planFile,
+                actionMapFile,
+                modResistanceFile,
                 repository.outputFile(jobId, AuditJobRepository.ARTIFACT_BUNDLE),
                 repository.outputFile(jobId, AuditJobRepository.IL2CPP_DUMP_PACKAGE),
             ).filter(File::isFile)

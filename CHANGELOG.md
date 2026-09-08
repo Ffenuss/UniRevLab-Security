@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.48.0-preview-purchase-trust-chain
+
+- Added a one-APK purchase trust-chain mapper across DEX and IL2CPP evidence.
+- Separately reports purchase initiation, purchase proof/token access, local entitlement gates, local persistence, validation signals, and protected-content decisions.
+- Added high-priority findings when a local entitlement gate has no statically linked validation stage or purchase-related code persists entitlement-like state locally.
+- Every conclusion records analyzer coverage and explicitly distinguishes a review gap from proof of a working payment bypass.
+- Reports source-level backend remediation and negative acceptance tests without generating hooks, patches, tokens, purchase bypasses, or modified APKs.
+- Fixed a postprocessing gap where Rodroid emitted resolved generic method RVAs and addressed strings but the confirmed export retained fields only.
+- Added separate counts and evidence arrays for resolved methods, unresolved managed method declarations, fields, and addressed relevant strings.
+- Raised the bounded per-library extraction ceiling so a `libil2cpp.so` slightly above 128 MiB is not omitted from the general ELF scan.
+- Removed the duplicate late IL2CPP report section, fixed aggregate CSV column alignment, and signed the generated mod-resistance validation file.
+- Expanded entitlement-gate matching for `hasBoughtGame`/`boughtGame` identities.
+
 ## 0.47.0-preview-mod-resistance-playbook
 
 - Added `mod-resistance-validation.md` to every Auto Audit result and signed evidence package.

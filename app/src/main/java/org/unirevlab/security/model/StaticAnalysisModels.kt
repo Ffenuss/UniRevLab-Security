@@ -286,6 +286,7 @@ data class DexSummary(
     val secretCandidates: List<SecretCandidate>,
     val parseErrors: Int,
     val truncated: Boolean,
+    val parseErrorDetails: List<String> = emptyList(),
 ) : java.io.Serializable
 
 data class NetworkTrustAnchorSummary(

@@ -34,6 +34,10 @@ object RealIl2CppDumpEngine {
         val generatedFiles: List<String>,
         val gameplaySurfaceCount: Int = 0,
         val applicationSurfaceCount: Int = 0,
+        val methodSurfaceCount: Int = 0,
+        val fieldSurfaceCount: Int = 0,
+        val unresolvedRelevantMethodCount: Int = 0,
+        val relevantStringCount: Int = 0,
         val successfulAbis: List<String> = emptyList(),
         val failedAbis: List<String> = emptyList(),
         val pairLocated: Boolean = true,
@@ -107,6 +111,10 @@ object RealIl2CppDumpEngine {
             generatedFiles = generated,
             gameplaySurfaceCount = surfaces.gameplayCount,
             applicationSurfaceCount = surfaces.applicationCount,
+            methodSurfaceCount = surfaces.methodCount,
+            fieldSurfaceCount = surfaces.fieldCount,
+            unresolvedRelevantMethodCount = surfaces.unresolvedRelevantMethodCount,
+            relevantStringCount = surfaces.relevantStringCount,
         )
     }
 
@@ -133,23 +141,34 @@ object RealIl2CppDumpEngine {
 
         val gameplay = JSONArray()
         val application = JSONArray()
+        val unresolvedMethods = JSONArray()
+        val relevantStrings = JSONArray()
         complete.forEach { attempt ->
             val surfaces = File(outputDirectory, "${attempt.abi}/security-surfaces.json")
             if (surfaces.isFile) {
                 val json = runCatching { JSONObject(surfaces.readText(Charsets.UTF_8)) }.getOrNull()
                 appendWithAbi(json?.optJSONArray("gameplayOffsets"), gameplay, attempt.abi)
                 appendWithAbi(json?.optJSONArray("applicationAndMonetizationOffsets"), application, attempt.abi)
+                appendWithAbi(json?.optJSONArray("unresolvedRelevantMethods"), unresolvedMethods, attempt.abi)
+                appendWithAbi(json?.optJSONArray("relevantStringLiterals"), relevantStrings, attempt.abi)
             }
         }
         val aggregate = JSONObject()
-            .put("schemaVersion", "2.0")
+            .put("schemaVersion", "2.1")
             .put("source", "completed Rodroid dumps for every discovered ABI")
             .put("semantics", "Only addresses emitted by a completed engine dump are included. Field offsets are not absolute addresses.")
+            .put("counts", JSONObject()
+                .put("resolvedMethods", countKind(gameplay, "METHOD") + countKind(application, "METHOD"))
+                .put("fields", countKind(gameplay, "FIELD") + countKind(application, "FIELD"))
+                .put("unresolvedRelevantMethods", unresolvedMethods.length())
+                .put("relevantStringLiterals", relevantStrings.length()))
             .put("gameplayOffsets", gameplay)
             .put("applicationAndMonetizationOffsets", application)
+            .put("unresolvedRelevantMethods", unresolvedMethods)
+            .put("relevantStringLiterals", relevantStrings)
         File(outputDirectory, "confirmed-offsets-all-abi.json").writeText(aggregate.toString(2), Charsets.UTF_8)
         writeAggregateCsv(outputDirectory, gameplay, application)
-        writeReadableSummary(outputDirectory, attempts, gameplay.length(), application.length())
+        writeReadableSummary(outputDirectory, attempts, gameplay.length(), application.length(), unresolvedMethods.length(), relevantStrings.length())
 
         val manifest = JSONObject()
             .put("schemaVersion", "1.0")
@@ -181,6 +200,10 @@ object RealIl2CppDumpEngine {
             generatedFiles = outputDirectory.walkTopDown().filter(File::isFile).map { it.relativeTo(outputDirectory).invariantSeparatorsPath }.sorted().toList(),
             gameplaySurfaceCount = gameplay.length(),
             applicationSurfaceCount = application.length(),
+            methodSurfaceCount = countKind(gameplay, "METHOD") + countKind(application, "METHOD"),
+            fieldSurfaceCount = countKind(gameplay, "FIELD") + countKind(application, "FIELD"),
+            unresolvedRelevantMethodCount = unresolvedMethods.length(),
+            relevantStringCount = relevantStrings.length(),
             successfulAbis = complete.map(AbiAttempt::abi),
             failedAbis = attempts.filterNot { it.result.complete }.map(AbiAttempt::abi),
         )
@@ -218,7 +241,14 @@ object RealIl2CppDumpEngine {
         }
     }
 
-    private fun writeReadableSummary(directory: File, attempts: List<AbiAttempt>, gameplay: Int, application: Int) {
+    private fun writeReadableSummary(
+        directory: File,
+        attempts: List<AbiAttempt>,
+        gameplay: Int,
+        application: Int,
+        unresolvedMethods: Int,
+        relevantStrings: Int,
+    ) {
         File(directory, "ЧИТАТЬ-МЕНЯ.txt").writeText(
             buildString {
                 appendLine("UniRevLab: настоящий IL2CPP dump")
@@ -226,6 +256,8 @@ object RealIl2CppDumpEngine {
                 appendLine("Неуспешные ABI: ${attempts.filterNot { it.result.complete }.joinToString { it.abi }.ifBlank { "нет" }}")
                 appendLine("Игровые подтверждённые поверхности: $gameplay")
                 appendLine("Приложение/монетизация: $application")
+                appendLine("Релевантные методы без восстановленного RVA: $unresolvedMethods")
+                appendLine("Релевантные строки с адресами из script.json: $relevantStrings")
                 appendLine("Каждая папка ABI содержит dump.cs, script.json, строки, заголовки и собственный manifest.")
                 appendLine("confirmed-offsets-all-abi.* содержит только адреса из успешно завершённых dump; гипотезы туда не попадают.")
             },
@@ -238,12 +270,17 @@ object RealIl2CppDumpEngine {
                 appendLine("Failed ABIs: ${attempts.filterNot { it.result.complete }.joinToString { it.abi }.ifBlank { "none" }}")
                 appendLine("Confirmed gameplay surfaces: $gameplay")
                 appendLine("Application/monetization surfaces: $application")
+                appendLine("Relevant methods without a resolved RVA: $unresolvedMethods")
+                appendLine("Relevant strings with script.json addresses: $relevantStrings")
                 appendLine("Each ABI directory contains dump.cs, script.json, strings, headers, and its engine manifest.")
                 appendLine("confirmed-offsets-all-abi.* contains only addresses from completed dumps; hypotheses are excluded.")
             },
             Charsets.UTF_8,
         )
     }
+
+    private fun countKind(values: JSONArray, kind: String): Int =
+        (0 until values.length()).count { values.optJSONObject(it)?.optString("memberKind") == kind }
 
     private fun sha256(file: File): String {
         val digest = java.security.MessageDigest.getInstance("SHA-256")

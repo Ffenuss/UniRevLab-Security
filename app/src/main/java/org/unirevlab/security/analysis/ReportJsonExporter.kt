@@ -32,6 +32,7 @@ import org.unirevlab.security.model.DexInvokeObservation
 import org.unirevlab.security.model.Il2CppTableRange
 import org.unirevlab.security.model.Il2CppTypeDefinitionSummary
 import org.unirevlab.security.model.Il2CppMethodDefinitionSummary
+import org.unirevlab.security.model.Il2CppFieldDefinitionSummary
 import org.unirevlab.security.model.Il2CppRegistrationCandidate
 import org.unirevlab.security.model.DexStringReference
 import org.unirevlab.security.model.SecretCandidate
@@ -54,20 +55,13 @@ import org.unirevlab.security.model.ResourceTableSummary
 
 /** Deterministic JSON writer: stable field and list ordering make reports diff-friendly and reproducible. */
 object ReportJsonExporter {
-    private fun Appendable.append(value: Int): Appendable = append(value.toString())
-    private fun Appendable.append(value: Long): Appendable = append(value.toString())
-    private fun Appendable.append(value: Float): Appendable = append(value.toString())
-    private fun Appendable.append(value: Double): Appendable = append(value.toString())
-    private fun Appendable.append(value: Boolean): Appendable = append(value.toString())
+    fun export(report: StaticAnalysisReport): String = buildString { write(report, this) }
 
-    fun export(report: StaticAnalysisReport): String = buildString { appendReport(report) }
-
-    /** Stream the deterministic report without materializing the whole JSON in memory. */
-    fun write(report: StaticAnalysisReport, out: Appendable) {
-        out.appendReport(report)
+    fun write(report: StaticAnalysisReport, output: Appendable, realDump: RealIl2CppDumpEngine.Result? = null) {
+        output.appendReport(report, realDump)
     }
 
-    private fun Appendable.appendReport(report: StaticAnalysisReport) {
+    private fun Appendable.appendReport(report: StaticAnalysisReport, realDump: RealIl2CppDumpEngine.Result?) {
         append("{\n")
         field("schemaVersion", report.schemaVersion, 1, comma = true)
         field("engineVersion", report.engineVersion, 1, comma = true)
@@ -115,6 +109,7 @@ object ReportJsonExporter {
         append(indent(1)).append("\"il2cpp\": ")
         if (report.il2cpp == null) append("null") else appendIl2Cpp(report.il2cpp, 1)
         append(",\n")
+        realIl2CppDump(realDump, 1, true)
         ghidraAnalyses(report.ghidra, 1, true)
         correlations(report.correlations, 1, true)
         manifestDexReachability(report.manifestDexReachability, 1, true)
@@ -130,6 +125,35 @@ object ReportJsonExporter {
         }
         if (report.findings.isNotEmpty()) append(indent(1))
         append("]\n}")
+    }
+
+    private fun Appendable.realIl2CppDump(value: RealIl2CppDumpEngine.Result?, level: Int, comma: Boolean) {
+        append(indent(level)).append("\"realIl2CppDump\": ")
+        if (value == null) {
+            append("null")
+        } else {
+            append("{\n")
+            field("status", value.status, level + 1, true)
+            booleanField("complete", value.complete, level + 1, true)
+            nullableStringField("error", value.error, level + 1, true)
+            nullableStringField("engine", value.engine, level + 1, true)
+            nullableStringField("engineRevision", value.engineRevision, level + 1, true)
+            nullableStringField("architecture", value.architecture, level + 1, true)
+            nullableStringField("codeRegistration", value.codeRegistration, level + 1, true)
+            nullableStringField("metadataRegistration", value.metadataRegistration, level + 1, true)
+            nullableStringField("registrationStrategy", value.registrationStrategy, level + 1, true)
+            numberField("typeCount", value.typeCount.toLong(), level + 1, true)
+            numberField("methodDeclarationCount", value.methodCount.toLong(), level + 1, true)
+            numberField("resolvedRelevantMethodCount", value.methodSurfaceCount.toLong(), level + 1, true)
+            numberField("fieldOffsetCount", value.fieldSurfaceCount.toLong(), level + 1, true)
+            numberField("unresolvedRelevantMethodCount", value.unresolvedRelevantMethodCount.toLong(), level + 1, true)
+            numberField("relevantStringCount", value.relevantStringCount.toLong(), level + 1, true)
+            stringArrayField("successfulAbis", value.successfulAbis, level + 1, true)
+            stringArrayField("failedAbis", value.failedAbis, level + 1, false)
+            append(indent(level)).append('}')
+        }
+        if (comma) append(',')
+        append('\n')
     }
 
     private fun Appendable.manifestDexReachability(value: ManifestDexReachabilitySummary?, level: Int, comma: Boolean) {
@@ -476,6 +500,7 @@ object ReportJsonExporter {
         numberField("methodsDeclared", d.methodsDeclared, level + 1, true)
         numberField("methodsIndexed", d.methodsIndexed, level + 1, true)
         numberField("parseErrors", d.parseErrors.toLong(), level + 1, true)
+        stringArrayField("parseErrorDetails", d.parseErrorDetails, level + 1, true)
         booleanField("truncated", d.truncated, level + 1, true)
         dexClassesArray(d.classes, level + 1, true)
         dexMethodsArray("methods", d.methods, level + 1, true)
@@ -1186,13 +1211,13 @@ object ReportJsonExporter {
 
     private fun Appendable.numberArrayField(name: String, values: List<Int>, level: Int, comma: Boolean) {
         append(indent(level)).append('"').append(name).append("\": [")
-        values.forEachIndexed { index, value -> if (index > 0) append(", "); append(value) }
+        values.forEachIndexed { index, value -> if (index > 0) append(", "); append(value.toString()) }
         append(']'); if (comma) append(','); append('\n')
     }
 
     private fun Appendable.longArrayField(name: String, values: List<Long>, level: Int, comma: Boolean) {
         append(indent(level)).append('"').append(name).append("\": [")
-        values.forEachIndexed { index, value -> if (index > 0) append(", "); append(value) }
+        values.forEachIndexed { index, value -> if (index > 0) append(", "); append(value.toString()) }
         append(']'); if (comma) append(','); append('\n')
     }
 
@@ -1683,6 +1708,7 @@ object ReportJsonExporter {
         il2cppTableRangesArray(value.tableRanges, level + 1, true)
         il2cppTypesArray(value.typeDefinitions, level + 1, true)
         il2cppMethodsArray(value.methodDefinitions, level + 1, true)
+        il2cppFieldsArray(value.fieldDefinitions, level + 1, true)
         booleanField("reconstructionTruncated", value.reconstructionTruncated, level + 1, true)
         nullableStringField("parseError", value.parseError, level + 1, true)
         booleanField("truncated", value.truncated, level + 1, false)
@@ -1750,6 +1776,26 @@ object ReportJsonExporter {
         append(']'); if (comma) append(','); append('\n')
     }
 
+    private fun Appendable.il2cppFieldsArray(values: List<Il2CppFieldDefinitionSummary>, level: Int, comma: Boolean) {
+        append(indent(level)).append("\"fieldDefinitions\": [")
+        val ordered = values.sortedBy { it.index }
+        if (ordered.isNotEmpty()) append('\n')
+        ordered.forEachIndexed { index, value ->
+            append(indent(level + 1)).append("{\n")
+            numberField("index", value.index.toLong(), level + 2, true)
+            numberField("declaringTypeIndex", value.declaringTypeIndex.toLong(), level + 2, true)
+            field("declaringType", value.declaringType, level + 2, true)
+            field("name", value.name, level + 2, true)
+            numberField("typeIndex", value.typeIndex.toLong(), level + 2, true)
+            numberField("token", value.token, level + 2, false)
+            append(indent(level + 1)).append('}')
+            if (index != ordered.lastIndex) append(',')
+            append('\n')
+        }
+        if (ordered.isNotEmpty()) append(indent(level))
+        append(']'); if (comma) append(','); append('\n')
+    }
+
     private fun Appendable.appendFinding(f: Finding, level: Int) {
         append(indent(level)).append("{\n")
         field("id", f.id, level + 1, true)
@@ -1804,9 +1850,7 @@ object ReportJsonExporter {
         append(indent(level)).append('"').append(name).append("\": [")
         values.forEachIndexed { index, value ->
             if (index > 0) append(", ")
-            append('"')
-            appendEscaped(value)
-            append('"')
+            append('"').append(escape(value)).append('"')
         }
         append(']')
         if (comma) append(',')
@@ -1814,22 +1858,14 @@ object ReportJsonExporter {
     }
 
     private fun Appendable.field(name: String, value: String, level: Int, comma: Boolean) {
-        append(indent(level)).append('"').append(name).append("\": \"")
-        appendEscaped(value)
-        append('"')
+        append(indent(level)).append('"').append(name).append("\": \"").append(escape(value)).append('"')
         if (comma) append(',')
         append('\n')
     }
 
     private fun Appendable.nullableStringField(name: String, value: String?, level: Int, comma: Boolean) {
         append(indent(level)).append('"').append(name).append("\": ")
-        if (value == null) {
-            append("null")
-        } else {
-            append('"')
-            appendEscaped(value)
-            append('"')
-        }
+        if (value == null) append("null") else append('"').append(escape(value)).append('"')
         if (comma) append(',')
         append('\n')
     }
@@ -1841,7 +1877,7 @@ object ReportJsonExporter {
     }
 
     private fun Appendable.booleanField(name: String, value: Boolean, level: Int, comma: Boolean) {
-        append(indent(level)).append('"').append(name).append("\": ").append(value)
+        append(indent(level)).append('"').append(name).append("\": ").append(value.toString())
         if (comma) append(',')
         append('\n')
     }
@@ -1854,7 +1890,7 @@ object ReportJsonExporter {
 
     private fun indent(level: Int) = "  ".repeat(level)
 
-    private fun Appendable.appendEscaped(input: String) {
+    private fun escape(input: String): String = buildString(input.length + 8) {
         input.forEach { ch ->
             when (ch) {
                 '\\' -> append("\\\\")
@@ -1864,18 +1900,8 @@ object ReportJsonExporter {
                 '\n' -> append("\\n")
                 '\r' -> append("\\r")
                 '\t' -> append("\\t")
-                else -> if (ch.code < 0x20) {
-                    append("\\u")
-                    append(HEX[(ch.code ushr 12) and 0xf])
-                    append(HEX[(ch.code ushr 8) and 0xf])
-                    append(HEX[(ch.code ushr 4) and 0xf])
-                    append(HEX[ch.code and 0xf])
-                } else {
-                    append(ch)
-                }
+                else -> if (ch.code < 0x20) append("\\u%04x".format(ch.code)) else append(ch)
             }
         }
     }
-
-    private const val HEX = "0123456789abcdef"
 }
