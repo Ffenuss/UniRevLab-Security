@@ -95,19 +95,24 @@ object ConfirmedIl2CppSurfaceExporter {
                     return@forEach
                 }
                 METHOD_ADDRESS.find(line)?.let { match ->
-                    pendingAddress = DumpAddress(
-                        rva = hex(match.groupValues[1]),
-                        fileOffset = match.groupValues.getOrNull(2)?.takeIf(String::isNotBlank)?.let(::hex),
-                        virtualAddress = match.groupValues.getOrNull(3)?.takeIf(String::isNotBlank)?.let(::hex),
-                    )
-                    pendingUnresolvedMethod = false
+                    val rva = hex(match.groupValues[1])
+                    if (isZeroAddress(rva)) {
+                        pendingAddress = null
+                        pendingUnresolvedMethod = true
+                    } else {
+                        pendingAddress = DumpAddress(
+                            rva = rva,
+                            fileOffset = match.groupValues.getOrNull(2)?.takeIf(String::isNotBlank)?.let(::hex),
+                            virtualAddress = match.groupValues.getOrNull(3)?.takeIf(String::isNotBlank)?.let(::hex),
+                        )
+                        pendingUnresolvedMethod = false
+                    }
                     return@forEach
                 }
                 val methodAddress = pendingAddress
+                // GenericInstMethod lines are not bound to currentType: that context belongs
+                // to a preceding declaration. Exact generic identities come from ScriptMethod below.
                 if (methodAddress != null && line.startsWith("|-") && !line.contains("RVA:")) {
-                    parseGenericMethod(line)?.let { member ->
-                        classify(currentNamespace, currentType, member, "METHOD_RVA", methodAddress.rva, methodAddress)?.let(matches::add)
-                    }
                     pendingAddress = null
                     return@forEach
                 }
@@ -128,7 +133,14 @@ object ConfirmedIl2CppSurfaceExporter {
                 }
             }
         }
-        val distinct = matches.distinctBy {
+        val scriptJson = File(dumpCs.parentFile, "script.json")
+        val scriptMethods = parseRelevantScriptMethods(scriptJson)
+        val authoritativeMatches = if (scriptJson.isFile) {
+            matches.filter { it.memberKind == "FIELD" } + scriptMethods
+        } else {
+            matches
+        }
+        val distinct = authoritativeMatches.distinctBy {
             listOf(it.domain, it.category, it.addressKind, it.addressHex, it.namespace, it.className, it.memberName, it.managedSignature)
         }.sortedWith(compareBy({ it.domain }, { it.category }, { it.namespace }, { it.className }, { it.memberName }, { it.addressHex }))
         val gameplay = distinct.filter { it.domain == "GAME" }
@@ -136,7 +148,7 @@ object ConfirmedIl2CppSurfaceExporter {
         val unresolved = unresolvedMethods.distinctBy {
             listOf(it.assembly, it.namespace, it.className, it.memberName, it.managedSignature)
         }.sortedWith(compareBy({ it.domain }, { it.category }, { it.assembly }, { it.namespace }, { it.className }, { it.memberName }))
-        val strings = parseRelevantStrings(File(dumpCs.parentFile, "script.json"))
+        val strings = parseRelevantStrings(scriptJson)
         val jsonFile = File(outputDirectory, "security-surfaces.json")
         val csvFile = File(outputDirectory, "security-surfaces.csv")
         val json = JSONObject()
@@ -266,6 +278,66 @@ object ConfirmedIl2CppSurfaceExporter {
             .maxByOrNull { (_, marker) -> marker.length }
     }
 
+    /** Uses ScriptMethod as the authoritative method identity/address source. */
+    private fun parseRelevantScriptMethods(scriptJson: File): List<Match> {
+        if (!scriptJson.isFile) return emptyList()
+        val result = LinkedHashMap<Pair<String, String>, Match>()
+        var inMethods = false
+        var address: Long? = null
+        var dotNetSignature: String? = null
+        fun flush() {
+            val currentAddress = address
+            val identity = dotNetSignature
+            if (currentAddress != null && currentAddress > 0L && !identity.isNullOrBlank()) {
+                matchingRule(identity)?.let { rule ->
+                    val declaringType = identity.substringBefore("::", "<unknown-type>")
+                    val memberName = identity.substringAfter("::", identity)
+                        .substringBefore('(')
+                        .substringBefore('<')
+                        .ifBlank { "<unknown-method>" }
+                    val addressHex = "0x${currentAddress.toString(16).uppercase()}"
+                    result.putIfAbsent(identity to addressHex, Match(
+                        domain = rule.first.domain,
+                        category = rule.first.category,
+                        marker = rule.second,
+                        addressKind = "METHOD_RVA",
+                        addressHex = addressHex,
+                        namespace = "<script.json>",
+                        className = declaringType,
+                        memberKind = "METHOD",
+                        memberName = memberName,
+                        declaredType = null,
+                        managedSignature = identity.take(2_000),
+                        managedIdentity = identity.take(2_000),
+                        methodRva = addressHex,
+                        confidence = "HIGH",
+                    ))
+                }
+            }
+            address = null
+            dotNetSignature = null
+        }
+        scriptJson.bufferedReader(Charsets.UTF_8, 128 * 1024).useLines { lines ->
+            lines.forEach { raw ->
+                val line = raw.trim()
+                if (!inMethods) {
+                    if (line.startsWith("\"ScriptMethod\"") && line.contains('[')) inMethods = true
+                    return@forEach
+                }
+                if (line == "]," || line == "]") {
+                    flush()
+                    return@useLines
+                }
+                when {
+                    line.startsWith("{") -> flush()
+                    line.startsWith("\"Address\"") -> address = line.substringAfter(':').trim().removeSuffix(",").toLongOrNull()
+                    line.startsWith("\"DotNetSignature\"") -> dotNetSignature = decodeJsonString(line.substringAfter(':').trim().removeSuffix(","))
+                    line.startsWith("}") -> flush()
+                }
+            }
+        }
+        return result.values.toList()
+    }
     /** Streams only ScriptString from Rodroid's large script.json instead of loading it into RAM. */
     private fun parseRelevantStrings(scriptJson: File): List<StringSurface> {
         if (!scriptJson.isFile) return emptyList()
@@ -381,6 +453,8 @@ object ConfirmedIl2CppSurfaceExporter {
     }
 
     private fun hex(value: String) = "0x${value.uppercase()}"
+    private fun isZeroAddress(value: String): Boolean =
+        value.removePrefix("0x").trimStart('0').isEmpty()
     private fun csv(value: String) = "\"${value.replace("\"", "\"\"")}\""
 
     private data class Rule(val domain: String, val category: String, val markers: List<String>)
