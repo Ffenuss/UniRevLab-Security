@@ -63,6 +63,13 @@ class ConfirmedIl2CppSurfaceExporterTest {
                   "Group": "System/System/Net/HttpWebRequest/<AuthorizationState>d__1"
                 },
                 {
+                  "Address": 22136,
+                  "Name": "StoreService_HasBoughtGame",
+                  "Signature": "bool Drova_StoreService__HasBoughtGame (void);",
+                  "DotNetSignature": "Drova.StoreService::HasBoughtGame()",
+                  "Group": "Drova/Drova/StoreService"
+                },
+                {
                   "Address": 0,
                   "Name": "ZeroAddress",
                   "Signature": "void StoreService__PurchaseGame (void);",
@@ -110,15 +117,17 @@ class ConfirmedIl2CppSurfaceExporterTest {
         assertEquals("0x1234", damage.getString("methodRva"))
         assertFalse(damage.has("methodFileOffset"))
         assertEquals("moduleBase(lib/<abi>/libil2cpp.so) + 0x1234", damage.getString("addressFormula"))
-        assertEquals(1, summary.methodCount)
+        assertEquals(2, summary.methodCount)
         val resolved = rootArrays(json, "gameplayOffsets", "applicationAndMonetizationOffsets")
         assertTrue(resolved.any { it.getString("managedIdentity") == "Game.Core.PlayerStats::ApplyDamage()" })
         assertFalse(resolved.any { it.optString("address") == "0x0" })
         assertFalse(resolved.any { it.optString("managedIdentity").contains("PurchaseGame") })
-        assertEquals(2, summary.unresolvedRelevantMethodCount)
+        assertEquals(1, summary.unresolvedRelevantMethodCount)
         assertEquals(1, summary.relevantStringCount)
         val root = org.json.JSONObject(json)
-        assertTrue(root.getJSONArray("unresolvedRelevantMethods").toString().contains("HasBoughtGame"))
+        assertFalse(root.getJSONArray("unresolvedRelevantMethods").toString().contains("HasBoughtGame"))
+        assertTrue(resolved.first { it.getString("managedIdentity").contains("HasBoughtGame") }
+            .getString("resolutionSource") == "GLOBAL_METADATA_PLUS_CODE_REGISTRATION")
         assertTrue(root.getJSONArray("relevantStringLiterals").toString().contains("Invalid receipt"))
     }
     private fun rootArrays(json: String, vararg names: String): List<org.json.JSONObject> {
