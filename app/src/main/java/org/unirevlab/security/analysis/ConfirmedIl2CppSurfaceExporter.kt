@@ -145,9 +145,14 @@ object ConfirmedIl2CppSurfaceExporter {
         }.sortedWith(compareBy({ it.domain }, { it.category }, { it.namespace }, { it.className }, { it.memberName }, { it.addressHex }))
         val gameplay = distinct.filter { it.domain == "GAME" }
         val application = distinct.filter { it.domain != "GAME" }
+        val scriptMethodKeys = scriptMethods
+            .groupBy { methodIdentityKey(it.className, it.memberName) }
+            .filterValues { candidates -> candidates.map { it.addressHex }.distinct().size == 1 }
+            .keys
         val unresolved = unresolvedMethods.distinctBy {
             listOf(it.assembly, it.namespace, it.className, it.memberName, it.managedSignature)
-        }.sortedWith(compareBy({ it.domain }, { it.category }, { it.assembly }, { it.namespace }, { it.className }, { it.memberName }))
+        }.filterNot { methodIdentityKey(it.namespace + "." + it.className, it.memberName) in scriptMethodKeys }
+            .sortedWith(compareBy({ it.domain }, { it.category }, { it.assembly }, { it.namespace }, { it.className }, { it.memberName }))
         val strings = parseRelevantStrings(scriptJson)
         val jsonFile = File(outputDirectory, "security-surfaces.json")
         val csvFile = File(outputDirectory, "security-surfaces.csv")
@@ -441,6 +446,10 @@ object ConfirmedIl2CppSurfaceExporter {
         }
         put("addressFormula", item.addressFormula)
         put("runtimeAddressStatus", item.runtimeAddressStatus)
+        if (item.memberKind == "METHOD" && item.namespace == "<script.json>") {
+            put("resolutionSource", "GLOBAL_METADATA_PLUS_CODE_REGISTRATION")
+            put("identitySource", "script.json:DotNetSignature")
+        }
         put(
             "runtimeAddressResolution",
             JSONObject()
@@ -450,6 +459,15 @@ object ConfirmedIl2CppSurfaceExporter {
         )
         put("confidence", item.confidence)
         put("matchedMarker", item.marker)
+    }
+
+    private fun methodIdentityKey(declaringType: String, memberName: String): String {
+        val type = declaringType.removePrefix("<script.json>.")
+            .replace("..", ".")
+            .trim('.')
+            .lowercase()
+            .filter { it.isLetterOrDigit() || it == '.' || it == '+' }
+        return "$type#$memberName".lowercase()
     }
 
     private fun hex(value: String) = "0x${value.uppercase()}"
