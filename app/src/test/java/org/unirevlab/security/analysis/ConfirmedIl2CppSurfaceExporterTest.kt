@@ -47,7 +47,29 @@ class ConfirmedIl2CppSurfaceExporterTest {
         dir.resolve("script.json").writeText(
             """
             {
-              "ScriptMethod": [],
+              "ScriptMethod": [
+                {
+                  "Address": 4660,
+                  "Name": "PlayerStats_ApplyDamage",
+                  "Signature": "void Game_Core_PlayerStats__ApplyDamage (void);",
+                  "DotNetSignature": "Game.Core.PlayerStats::ApplyDamage()",
+                  "Group": "Game/Game/Core/PlayerStats"
+                },
+                {
+                  "Address": 17767,
+                  "Name": "HttpWebRequest_MoveNext",
+                  "Signature": "void System_Net_HttpWebRequest_State__MoveNext (void);",
+                  "DotNetSignature": "System.Net.HttpWebRequest.<AuthorizationState>d__1::MoveNext()",
+                  "Group": "System/System/Net/HttpWebRequest/<AuthorizationState>d__1"
+                },
+                {
+                  "Address": 0,
+                  "Name": "ZeroAddress",
+                  "Signature": "void StoreService__PurchaseGame (void);",
+                  "DotNetSignature": "Drova.StoreService::PurchaseGame()",
+                  "Group": "Drova/Drova/StoreService"
+                }
+              ],
               "ScriptString": [
                 {
                   "Address": 131514352,
@@ -84,15 +106,27 @@ class ConfirmedIl2CppSurfaceExporterTest {
         val damage = (0 until gameplay.length())
             .map { gameplay.getJSONObject(it) }
             .first { it.getString("memberName") == "ApplyDamage" }
-        assertEquals("void", damage.getString("declaredType"))
+        assertFalse(damage.has("declaredType"))
         assertEquals("0x1234", damage.getString("methodRva"))
-        assertEquals("0x1234", damage.getString("methodFileOffset"))
+        assertFalse(damage.has("methodFileOffset"))
         assertEquals("moduleBase(lib/<abi>/libil2cpp.so) + 0x1234", damage.getString("addressFormula"))
-        assertTrue(summary.methodCount >= 2)
+        assertEquals(1, summary.methodCount)
+        val resolved = rootArrays(json, "gameplayOffsets", "applicationAndMonetizationOffsets")
+        assertTrue(resolved.any { it.getString("managedIdentity") == "Game.Core.PlayerStats::ApplyDamage()" })
+        assertFalse(resolved.any { it.optString("address") == "0x0" })
+        assertFalse(resolved.any { it.optString("managedIdentity").contains("PurchaseGame") })
         assertEquals(2, summary.unresolvedRelevantMethodCount)
         assertEquals(1, summary.relevantStringCount)
         val root = org.json.JSONObject(json)
         assertTrue(root.getJSONArray("unresolvedRelevantMethods").toString().contains("HasBoughtGame"))
         assertTrue(root.getJSONArray("relevantStringLiterals").toString().contains("Invalid receipt"))
     }
+    private fun rootArrays(json: String, vararg names: String): List<org.json.JSONObject> {
+        val root = org.json.JSONObject(json)
+        return names.flatMap { name ->
+            val array = root.getJSONArray(name)
+            (0 until array.length()).map { array.getJSONObject(it) }
+        }
+    }
+
 }
