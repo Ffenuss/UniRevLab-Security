@@ -415,6 +415,20 @@ fun PatchLabScreen(
                 )
                 }
                 PatchLabSectionHeader(
+                    title = "IL2CPP Mod Builder",
+                    subtitle = "Подтверждённые RVA → воспроизводимый проект мода",
+                    expanded = openToolSection == "il2cpp-mod",
+                    onClick = { openToolSection = if (openToolSection == "il2cpp-mod") null else "il2cpp-mod" },
+                )
+                if (openToolSection == "il2cpp-mod") {
+                    Il2CppModBuilderPanel(
+                        report = report,
+                        busy = busy,
+                        onStatus = { status = it },
+                        onError = { error = it },
+                    )
+                }
+                PatchLabSectionHeader(
                     title = "Runtime State Lab",
                     subtitle = "Локальные сохранения и state-файлы",
                     expanded = openToolSection == "runtime",
