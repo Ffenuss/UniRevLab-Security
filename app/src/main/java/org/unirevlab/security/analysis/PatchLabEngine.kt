@@ -402,7 +402,7 @@ object PatchLabEngine {
                 require(read >= 8 && header.copyOfRange(0, 4).contentEquals(byteArrayOf(0x64, 0x65, 0x78, 0x0a))) {
                     "Выбранный файл не является DEX"
                 }
-                require(header[7] == 0.toByte() && header.copyOfRange(4, 7).all { it in 0x30..0x39 }) {
+                require(header[7] == 0.toByte() && header.copyOfRange(4, 7).all { (it.toInt() and 0xff) in 0x30..0x39 }) {
                     "Некорректная версия DEX"
                 }
             }
