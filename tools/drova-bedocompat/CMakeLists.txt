@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.22.1)
+project(BedoCompat LANGUAGES CXX)
+add_library(Bedo SHARED src/main.cpp)
+target_compile_features(Bedo PRIVATE cxx_std_17)
+target_compile_options(Bedo PRIVATE -fvisibility=hidden -fno-exceptions -fno-rtti)
+target_link_libraries(Bedo PRIVATE log dl)
