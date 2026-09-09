@@ -80,4 +80,47 @@ class PatchLabEngineTest {
         assertFalse(PatchLabEngine.canAddArchiveEntry("lib/armeabi-v7a/libmod.so"))
         assertFalse(PatchLabEngine.canAddArchiveEntry("classes.dex"))
     }
+    @Test
+    fun validatesDexAndArm64HeadersBeforeAddingModules() {
+        val dex = java.io.File.createTempFile("unirevlab-", ".dex")
+        val arm64 = java.io.File.createTempFile("unirevlab-", ".so")
+        val wrongElf = java.io.File.createTempFile("unirevlab-", ".so")
+        try {
+            dex.writeBytes(ByteArray(24).apply {
+                byteArrayOf(0x64, 0x65, 0x78, 0x0a, 0x30, 0x33, 0x35, 0x00).copyInto(this)
+            })
+            arm64.writeBytes(ByteArray(24).apply {
+                this[0] = 0x7f
+                this[1] = 0x45
+                this[2] = 0x4c
+                this[3] = 0x46
+                this[4] = 2
+                this[5] = 1
+                this[18] = 183.toByte()
+                this[19] = 0
+            })
+            wrongElf.writeBytes(ByteArray(24).apply {
+                this[0] = 0x7f
+                this[1] = 0x45
+                this[2] = 0x4c
+                this[3] = 0x46
+                this[4] = 2
+                this[5] = 1
+                this[18] = 40
+            })
+
+            PatchLabEngine.validateNewArchiveEntry("classes2.dex", dex)
+            PatchLabEngine.validateNewArchiveEntry("lib/arm64-v8a/libmodule.so", arm64)
+            assertTrue(
+                runCatching {
+                    PatchLabEngine.validateNewArchiveEntry("lib/arm64-v8a/libwrong.so", wrongElf)
+                }.isFailure,
+            )
+        } finally {
+            dex.delete()
+            arm64.delete()
+            wrongElf.delete()
+        }
+    }
+
 }
