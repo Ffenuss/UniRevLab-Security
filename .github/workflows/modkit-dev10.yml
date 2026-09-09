@@ -1,0 +1,111 @@
+name: Build ModKit 0.9.0-dev10 APK
+
+on:
+  push:
+    branches: [ Modkit1 ]
+    paths:
+      - 'ModKit-Android-0.9.0-dev10-sources.zip'
+      - '.github/workflows/modkit-dev10.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-modkit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      NDK_PIN: 26.3.11579264
+      MODKIT_DIR: ${{ runner.temp }}/modkit-dev10
+    steps:
+      - name: Checkout Modkit1
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Install Android toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            'platform-tools' \
+            'platforms;android-34' \
+            'build-tools;34.0.0' \
+            "ndk;${NDK_PIN}" \
+            'cmake;3.22.1'
+
+      - name: Extract ModKit source snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "${MODKIT_DIR}"
+          mkdir -p "${MODKIT_DIR}"
+          unzip -q ModKit-Android-0.9.0-dev10-sources.zip -d "${MODKIT_DIR}"
+          test -f "${MODKIT_DIR}/android/settings.gradle"
+          test -f "${MODKIT_DIR}/android/app/build.gradle"
+          test -f "${MODKIT_DIR}/android/app/src/main/AndroidManifest.xml"
+          grep -q "versionName '0.9.0-dev10'" "${MODKIT_DIR}/android/app/build.gradle"
+
+      - name: Python regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check pytest
+          cd "${MODKIT_DIR}"
+          python -m pytest tests -q
+
+      - name: ModKit selftest
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "${MODKIT_DIR}"
+          python -m modkit selftest
+
+      - name: Build APK and lint
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "${MODKIT_DIR}/android"
+          gradle --no-daemon :app:assembleDebug :app:lintDebug
+
+      - name: Verify and stage APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$(find "${MODKIT_DIR}/android/app/build/outputs/apk/debug" -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          test -n "${APK}"
+          test -s "${APK}"
+          unzip -t "${APK}" >/dev/null
+          "${ANDROID_HOME}/build-tools/34.0.0/zipalign" -c -P 16 -v 4 "${APK}" >/dev/null
+          cp "${APK}" ModKit-Android-0.9.0-dev10-debug.apk
+          sha256sum ModKit-Android-0.9.0-dev10-debug.apk | tee ModKit-Android-0.9.0-dev10-debug.apk.sha256
+          ls -lh ModKit-Android-0.9.0-dev10-debug.apk
+
+      - name: Upload ModKit APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ModKit-Android-0.9.0-dev10-debug
+          path: |
+            ModKit-Android-0.9.0-dev10-debug.apk
+            ModKit-Android-0.9.0-dev10-debug.apk.sha256
+          if-no-files-found: error
+          retention-days: 14
