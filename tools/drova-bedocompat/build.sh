@@ -10,6 +10,7 @@ cmake -S . -B build \
 cmake --build build --parallel
 mkdir -p output
 cp build/libBedo.so output/libBedo.so
-cp libCore.so output/libCore.so
-sha256sum output/libBedo.so output/libCore.so > output/SHA256SUMS.txt
+sha256sum output/libBedo.so > output/SHA256SUMS.txt
+readelf -h output/libBedo.so > output/libBedo-elf-header.txt
 readelf -d output/libBedo.so > output/libBedo-dynamic.txt
+readelf -Ws output/libBedo.so > output/libBedo-symbols.txt
