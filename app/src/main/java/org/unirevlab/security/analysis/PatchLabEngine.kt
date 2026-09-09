@@ -357,8 +357,18 @@ object PatchLabEngine {
         return classText.replaceRange(range, updatedBlock)
     }
 
+    fun canAddArchiveEntry(entryName: String): Boolean {
+        val clean = entryName.trim()
+        if (clean.isEmpty() || clean.startsWith('/') || clean.contains('\\') || clean.split('/').any { it == ".." }) return false
+        return Regex("classes[2-9][0-9]*\\.dex").matches(clean) ||
+            Regex("lib/arm64-v8a/lib[A-Za-z0-9_.+-]+\\.so").matches(clean) ||
+            Regex("assets/unirevlab/[A-Za-z0-9_./+-]+").matches(clean)
+    }
+
     fun replaceArchiveEntry(workspace: Workspace, entryName: String, replacement: File) {
-        require(entryName in workspace.archiveEntries) { "Файл не найден в APK: $entryName" }
+        require(entryName in workspace.archiveEntries || canAddArchiveEntry(entryName)) {
+            "Новый entry разрешён только как classesN.dex, ARM64 .so или assets/unirevlab/*: $entryName"
+        }
         require(replacement.isFile) { "Файл замены не найден" }
         val stored = File(workspace.root, "replacements/${sha256Text(entryName)}.bin").apply { parentFile?.mkdirs() }
         replacement.inputStream().use { input -> stored.outputStream().use { output -> input.copyTo(output, COPY_BUFFER) } }
@@ -367,7 +377,9 @@ object PatchLabEngine {
     }
 
     fun replaceArchiveEntry(context: Context, workspace: Workspace, entryName: String, replacementUri: Uri) {
-        require(entryName in workspace.archiveEntries) { "Файл не найден в APK: $entryName" }
+        require(entryName in workspace.archiveEntries || canAddArchiveEntry(entryName)) {
+            "Новый entry разрешён только как classesN.dex, ARM64 .so или assets/unirevlab/*: $entryName"
+        }
         val stored = File(workspace.root, "replacements/${sha256Text(entryName)}.bin").apply { parentFile?.mkdirs() }
         context.contentResolver.openInputStream(replacementUri).use { input ->
             requireNotNull(input) { "Не удалось открыть файл замены" }
@@ -470,11 +482,13 @@ object PatchLabEngine {
         ZipFile(workspace.originalApk).use { source ->
             val counting = CountingOutputStream(FileOutputStream(outputApk).buffered(COPY_BUFFER))
             ZipOutputStream(counting).use { out ->
+                val written = linkedSetOf<String>()
                 val entries = source.entries()
                 while (entries.hasMoreElements()) {
                     val originalEntry = entries.nextElement()
                     val name = originalEntry.name
                     if (isSignatureEntry(name)) continue
+                    written += name
                     val displayName = displayEntry(workspace.sourcePrefix, name)
                     val replacement = rebuiltDex[displayName] ?: workspace.replacements[displayName]
                     val storedAlignment = requiredStoredAlignment(name, originalEntry.method, originalEntry.isDirectory)
@@ -515,6 +529,29 @@ object PatchLabEngine {
                         }
                         out.closeEntry()
                     }
+                }
+                workspace.replacements.forEach { (displayName, replacement) ->
+                    val name = rawEntryName(workspace, displayName)
+                    if (name in written) return@forEach
+                    require(canAddArchiveEntry(name)) { "Недопустимый новый entry: $name" }
+                    val stored = name.lowercase(Locale.ROOT).endsWith(".so")
+                    val entry = if (stored) {
+                        val size = replacement.length()
+                        ZipEntry(name).apply {
+                            time = 0L
+                            method = ZipEntry.STORED
+                            this.size = size
+                            compressedSize = size
+                            crc = crc32(replacement)
+                            extra = alignedExtra(counting.count, name, null, NATIVE_ALIGNMENT)
+                        }
+                    } else {
+                        ZipEntry(name).apply { time = 0L; method = ZipEntry.DEFLATED }
+                    }
+                    out.putNextEntry(entry)
+                    FileInputStream(replacement).buffered(COPY_BUFFER).use { it.copyTo(out, COPY_BUFFER) }
+                    out.closeEntry()
+                    written += name
                 }
             }
         }
