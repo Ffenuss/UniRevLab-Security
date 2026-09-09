@@ -121,7 +121,7 @@ fun PatchLabScreen(
                 }
                 if (result.isSuccess) {
                     built = null
-                    status = "Файл замены сохранён: $entry"
+                    status = if (entry in ws.archiveEntries) "Файл замены сохранён: $entry" else "Новый модуль добавлен: $entry"
                 }
                 error = result.exceptionOrNull()?.message
                 busy = false
@@ -626,13 +626,13 @@ fun PatchLabScreen(
                                     modifier = Modifier.fillMaxWidth(),
                                     singleLine = true,
                                     label = { Text("Путь файла внутри APK") },
-                                    supportingText = { Text("Можно указать любой существующий entry из APK, не только .so") },
+                                    supportingText = { Text("Существующий entry либо новый classesN.dex, lib/arm64-v8a/lib*.so, assets/unirevlab/*") },
                                 )
                                 Button(
                                     onClick = { replacementPicker.launch(arrayOf("*/*")) },
-                                    enabled = selectedReplacementEntry?.let { it in ws.archiveEntries } == true && !busy,
+                                    enabled = selectedReplacementEntry?.let { it in ws.archiveEntries || PatchLabEngine.canAddArchiveEntry(it) } == true && !busy,
                                     modifier = Modifier.fillMaxWidth(),
-                                ) { Text("Выбрать файл замены") }
+                                ) { Text(if (selectedReplacementEntry in ws.archiveEntries) "Выбрать файл замены" else "Добавить модуль в APK") }
                                 if (ws.replacements.isNotEmpty()) {
                                     Text("Запланированные замены:", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
                                     ws.replacements.keys.sorted().forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
