@@ -44,6 +44,7 @@ jobs:
           git push origin HEAD:fix-analysis-progress-v0221
 
       - name: Apply v0.37.0 modding resistance integration
+        if: github.ref_name == 'fix-analysis-progress-v0221'
         run: python tools/apply_v0370_modding_resistance.py
 
       - name: Set up Java 17
