@@ -366,19 +366,22 @@ object PatchLabEngine {
     }
 
     fun replaceArchiveEntry(workspace: Workspace, entryName: String, replacement: File) {
-        require(entryName in workspace.archiveEntries || canAddArchiveEntry(entryName)) {
-            "Новый entry разрешён только как classesN.dex, ARM64 .so или assets/unirevlab/*: $entryName"
+        val isNew = entryName !in workspace.archiveEntries
+        require(!isNew || (workspace.sourcePrefix == null && canAddArchiveEntry(entryName))) {
+            "Новый entry разрешён только в обычном APK как classesN.dex, ARM64 .so или assets/unirevlab/*: $entryName"
         }
         require(replacement.isFile) { "Файл замены не найден" }
         val stored = File(workspace.root, "replacements/${sha256Text(entryName)}.bin").apply { parentFile?.mkdirs() }
         replacement.inputStream().use { input -> stored.outputStream().use { output -> input.copyTo(output, COPY_BUFFER) } }
         require(stored.length() > 0L) { "Файл замены пуст" }
+        if (isNew) runCatching { validateNewArchiveEntry(entryName, stored) }.onFailure { stored.delete() }.getOrThrow()
         workspace.replacements[entryName] = stored
     }
 
     fun replaceArchiveEntry(context: Context, workspace: Workspace, entryName: String, replacementUri: Uri) {
-        require(entryName in workspace.archiveEntries || canAddArchiveEntry(entryName)) {
-            "Новый entry разрешён только как classesN.dex, ARM64 .so или assets/unirevlab/*: $entryName"
+        val isNew = entryName !in workspace.archiveEntries
+        require(!isNew || (workspace.sourcePrefix == null && canAddArchiveEntry(entryName))) {
+            "Новый entry разрешён только в обычном APK как classesN.dex, ARM64 .so или assets/unirevlab/*: $entryName"
         }
         val stored = File(workspace.root, "replacements/${sha256Text(entryName)}.bin").apply { parentFile?.mkdirs() }
         context.contentResolver.openInputStream(replacementUri).use { input ->
@@ -386,7 +389,39 @@ object PatchLabEngine {
             FileOutputStream(stored).buffered(COPY_BUFFER).use { output -> input.copyTo(output, COPY_BUFFER) }
         }
         require(stored.length() > 0L) { "Файл замены пуст" }
+        if (isNew) runCatching { validateNewArchiveEntry(entryName, stored) }.onFailure { stored.delete() }.getOrThrow()
         workspace.replacements[entryName] = stored
+    }
+
+    internal fun validateNewArchiveEntry(entryName: String, file: File) {
+        require(file.isFile && file.length() > 0L) { "Файл модуля пуст" }
+        val header = ByteArray(24)
+        val read = FileInputStream(file).use { it.read(header) }
+        when {
+            Regex("classes[2-9][0-9]*\\.dex").matches(entryName) -> {
+                require(read >= 8 && header.copyOfRange(0, 4).contentEquals(byteArrayOf(0x64, 0x65, 0x78, 0x0a))) {
+                    "Выбранный файл не является DEX"
+                }
+                require(header[7] == 0.toByte() && header.copyOfRange(4, 7).all { it in 0x30..0x39 }) {
+                    "Некорректная версия DEX"
+                }
+            }
+            Regex("lib/arm64-v8a/lib[A-Za-z0-9_.+-]+\\.so").matches(entryName) -> {
+                require(read >= 20 && header[0] == 0x7f.toByte() && header[1] == 0x45.toByte() &&
+                    header[2] == 0x4c.toByte() && header[3] == 0x46.toByte()) {
+                    "Выбранный файл не является ELF-библиотекой"
+                }
+                require(header[4] == 2.toByte() && header[5] == 1.toByte()) {
+                    "Нужна 64-битная little-endian ELF-библиотека"
+                }
+                val machine = (header[18].toInt() and 0xff) or ((header[19].toInt() and 0xff) shl 8)
+                require(machine == 183) { "Нужна ARM64 (AArch64) библиотека, e_machine=$machine" }
+            }
+            entryName.startsWith("assets/unirevlab/") -> {
+                require(file.length() <= MAX_MOD_ASSET_BYTES) { "Служебный файл мода больше 8 MiB" }
+            }
+            else -> error("Недопустимый новый entry: $entryName")
+        }
     }
 
     fun loadArchiveText(workspace: Workspace, entryName: String): String {
@@ -728,6 +763,7 @@ object PatchLabEngine {
     private const val ZIP_EXTRA_HEADER_SIZE = 4
     private const val ALIGNMENT_EXTRA_ID = 0xFEEF
     private const val MAX_EDITABLE_TEXT_BYTES = 4L * 1024L * 1024L
+    private const val MAX_MOD_ASSET_BYTES = 8L * 1024L * 1024L
 
     // Fixed non-secret laboratory signer. It intentionally does not impersonate the original APK
     // signer and exists only so an explicitly modified build can be installed for authorized tests.
