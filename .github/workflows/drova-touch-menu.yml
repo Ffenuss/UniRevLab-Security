@@ -14,13 +14,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: android-actions/setup-android@v3
-      - name: Install NDK and CMake
-        run: sdkmanager 'ndk;26.3.11579264' 'cmake;3.22.1'
-      - name: Build ARM64 libraries
+      - name: Install Android build tools
+        run: sdkmanager 'ndk;26.3.11579264' 'cmake;3.22.1' 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Build ARM64 library and overlay DEX
         working-directory: tools/drova-bedocompat
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/26.3.11579264
-        run: bash build.sh
+        run: |
+          bash build.sh
+          bash build-overlay.sh
       - uses: actions/upload-artifact@v4
         with:
           name: drova-touch-menu-arm64
