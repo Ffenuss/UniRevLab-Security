@@ -17,7 +17,7 @@ jobs:
     timeout-minutes: 45
     env:
       NDK_PIN: 26.3.11579264
-      MODKIT_DIR: ${{ runner.temp }}/modkit-dev10
+      MODKIT_DIR: /tmp/modkit-dev10
     steps:
       - name: Checkout Modkit1
         uses: actions/checkout@v4
