@@ -1,5 +1,6 @@
 package org.unirevlab.security.analysis
 
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -69,5 +70,14 @@ class PatchLabEngineTest {
         val extra = PatchLabEngine.alignedExtra(offset, name, null)
         val dataOffset = offset + 30L + name.toByteArray(Charsets.UTF_8).size + (extra?.size ?: 0)
         assertTrue(dataOffset % PatchLabEngine.NATIVE_ALIGNMENT == 0L)
+    }
+    @Test
+    fun onlySafeNewModEntryPathsAreAccepted() {
+        assertTrue(PatchLabEngine.canAddArchiveEntry("classes5.dex"))
+        assertTrue(PatchLabEngine.canAddArchiveEntry("lib/arm64-v8a/libunirevlab_mod.so"))
+        assertTrue(PatchLabEngine.canAddArchiveEntry("assets/unirevlab/mod-plan.json"))
+        assertFalse(PatchLabEngine.canAddArchiveEntry("../AndroidManifest.xml"))
+        assertFalse(PatchLabEngine.canAddArchiveEntry("lib/armeabi-v7a/libmod.so"))
+        assertFalse(PatchLabEngine.canAddArchiveEntry("classes.dex"))
     }
 }
