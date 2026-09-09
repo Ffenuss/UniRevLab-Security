@@ -100,7 +100,7 @@ class Il2CppModdingResistanceEngineTest {
         )
         return StaticAnalysisReport(
             engineVersion = "test",
-            assessment = AssessmentScope("test", "test", "authorized review", true),
+            assessment = AssessmentScope(projectName = "test", organization = "test", purpose = "authorized review", confirmsAuthority = true),
             artifact = ArtifactSummary(
                 displayName = "pair",
                 sizeBytes = 1,
