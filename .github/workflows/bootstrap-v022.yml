@@ -2,7 +2,7 @@ name: Build UniRevLab v0.37.0 Modding Resistance Preview APK
 
 on:
   push:
-    branches: [ fix-analysis-progress-v0221 ]
+    branches: [ fix-analysis-progress-v0221, codex/mod-builder-v0390 ]
     paths:
       - 'app/**'
       - 'testtarget/**'
