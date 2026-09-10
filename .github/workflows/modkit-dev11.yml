@@ -6,7 +6,7 @@ on:
     paths:
       - 'ModKit-Android-0.9.0-dev10-sources.zip'
       - '.ci/patch_modkit_android_compat.py'
-      - '.ci/ModKit-dev10-exact-to-dev11.patch.gz.b64'
+      - '.ci/dev11-patch/**'
       - '.ci/ModKit-dev11.manifest.txt'
       - '.github/workflows/modkit-dev11.yml'
   workflow_dispatch:
@@ -21,7 +21,9 @@ jobs:
     env:
       NDK_PIN: 26.3.11579264
       MODKIT_DIR: /tmp/modkit-dev11
+      DEV11_PATCH_GZ: /tmp/ModKit-dev11.patch.gz
       DEV11_PATCH: /tmp/ModKit-dev11.patch
+      DEV11_PATCH_GZ_SHA256: a884617ea250eceaecc1a8b6e6788ba14cfbbe93249446667f7595d3120af922
       DEV11_PATCH_SHA256: 46ca0c8fc395e75a3bdbdc7d75cd7d12743b371c7b98c6a9b89ac0e7ca91ca33
       BASE_SHA256: 71b51b27b63a75653b68a81de6feadc337e2dbe5e6b8ef521aa5082601009cef
     steps:
@@ -72,7 +74,12 @@ jobs:
 
           python .ci/patch_modkit_android_compat.py "${MODKIT_DIR}"
 
-          base64 --decode .ci/ModKit-dev10-exact-to-dev11.patch.gz.b64 | gunzip > "${DEV11_PATCH}"
+          cat .ci/dev11-patch/part00.gz.part \
+              .ci/dev11-patch/part01.gz.part \
+              .ci/dev11-patch/part02.gz.part \
+              .ci/dev11-patch/part03.gz.part > "${DEV11_PATCH_GZ}"
+          echo "${DEV11_PATCH_GZ_SHA256}  ${DEV11_PATCH_GZ}" | sha256sum -c -
+          gunzip -c "${DEV11_PATCH_GZ}" > "${DEV11_PATCH}"
           echo "${DEV11_PATCH_SHA256}  ${DEV11_PATCH}" | sha256sum -c -
 
           cd "${MODKIT_DIR}"
