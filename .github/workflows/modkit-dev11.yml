@@ -90,6 +90,23 @@ jobs:
           grep -q "versionName '0.9.0-dev11'" android/app/build.gradle
           grep -q 'version = "0.9.0.dev11"' pyproject.toml
 
+      - name: Stage exact dev11 sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -C "${MODKIT_DIR}" -czf ModKit-Android-0.9.0-dev11-exact-sources.tar.gz .
+          sha256sum ModKit-Android-0.9.0-dev11-exact-sources.tar.gz | tee ModKit-Android-0.9.0-dev11-exact-sources.tar.gz.sha256
+
+      - name: Upload exact dev11 sources artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ModKit-Android-0.9.0-dev11-exact-sources
+          path: |
+            ModKit-Android-0.9.0-dev11-exact-sources.tar.gz
+            ModKit-Android-0.9.0-dev11-exact-sources.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Python regression tests
         shell: bash
         run: |
