@@ -10,26 +10,45 @@ base_archive_sha256=71b51b27b63a75653b68a81de6feadc337e2dbe5e6b8ef521aa508260100
 base_github_blob_sha=2f9006ca0872609c0dfef62442c28b974605a803
 android_compat_patch=.ci/patch_modkit_android_compat.py
 
-DEV11 PATCH
-dev11_patch_b64=.ci/ModKit-dev10-exact-to-dev11.patch.gz.b64
-dev11_patch_sha256=46ca0c8fc395e75a3bdbdc7d75cd7d12743b371c7b98c6a9b89ac0e7ca91ca33
-dev11_patch_b64_sha256=3a1a65cc59a695e59bc1bfc678cf4f88ab207b623efb3a6523cff0abbc707047
+DEV11 PATCH STORAGE
+patch_part_00=.ci/dev11-patch/part00.gz.part
+patch_part_01=.ci/dev11-patch/part01.gz.part
+patch_part_02=.ci/dev11-patch/part02.gz.part
+patch_part_03=.ci/dev11-patch/part03.gz.part
+combined_patch_gzip_sha256=a884617ea250eceaecc1a8b6e6788ba14cfbbe93249446667f7595d3120af922
+decoded_patch_sha256=46ca0c8fc395e75a3bdbdc7d75cd7d12743b371c7b98c6a9b89ac0e7ca91ca33
+binary_patch_storage_commit=6877e8ccafc1e8232aac72d20ad732928285e12e
+successful_build_recipe_commit=b9e1a74fc5ab52c978f36596b059cad44171f007
 
 REPRODUCTION ORDER
-1. Extract base_archive.
-2. Apply android_compat_patch to extracted tree.
-3. base64-decode and gunzip dev11_patch_b64.
-4. Verify decoded patch SHA-256 equals dev11_patch_sha256.
-5. Run git apply --check and git apply on the extracted tree.
-6. Verify versionName 0.9.0-dev11 and versionCode 18.
-7. Run pytest, modkit selftest and modkit runtime-check.
-8. Build :app:assembleDebug and :app:lintDebug.
-9. Verify APK zip structure and zipalign.
+1. Verify base_archive SHA-256.
+2. Extract base_archive.
+3. Apply android_compat_patch to the extracted tree.
+4. Concatenate patch_part_00 through patch_part_03, in order, into one gzip file.
+5. Verify combined gzip SHA-256 equals combined_patch_gzip_sha256.
+6. Gunzip the patch.
+7. Verify decoded patch SHA-256 equals decoded_patch_sha256.
+8. Run git apply --check and git apply on the extracted tree.
+9. Verify versionName 0.9.0-dev11, versionCode 18 and Python 0.9.0.dev11.
+10. Run pytest, modkit selftest and modkit runtime-check.
+11. Build :app:assembleDebug and :app:lintDebug.
+12. Verify APK ZIP structure and zipalign.
 
-LOCAL RELEASE GATES BEFORE PERSISTENCE
+SUCCESSFUL CI RELEASE GATES
+workflow=Build ModKit 0.9.0-dev11 APK
+successful_run_id=34453837070
+successful_run_number=3
+successful_head=b9e1a74fc5ab52c978f36596b059cad44171f007
 pytest=214 passed
 selftest=PASS
 runtime-check=PASS
+assembleDebug=PASS
+lintDebug=PASS
+zipalign=PASS
+artifact_id=10142742144
+artifact_name=ModKit-Android-0.9.0-dev11-debug
+artifact_zip_sha256=bd3348846752224f610a131d577e4e1db811062ff2c44d1483b96344c7ebaab4
+apk_sha256=59b39e439007f3481a5fdfcc4065224c5d5142cf5264905b66002c862f16b3b5
 
 AFK JOURNEY VALIDATION SUMMARY
 package=com.farlightgames.igame.gp
@@ -52,4 +71,5 @@ monetization_trustBoundary=server-backed
 Notes:
 - Confidence is evidence/classification confidence, NOT exploitability or vulnerability probability.
 - Raw global-metadata strings are not actionable controls by themselves.
-- No game binaries are stored by this checkpoint; only source changes and validation notes.
+- No AFK Journey/game binaries are stored by this checkpoint; only source changes and validation notes.
+- The old single Base64 patch container is obsolete and is not part of the successful build recipe.
