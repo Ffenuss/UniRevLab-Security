@@ -72,7 +72,6 @@ jobs:
 
           python .ci/patch_modkit_android_compat.py "${MODKIT_DIR}"
 
-          echo "3a1a65cc59a695e59bc1bfc678cf4f88ab207b623efb3a6523cff0abbc707047  .ci/ModKit-dev10-exact-to-dev11.patch.gz.b64" | sha256sum -c -
           base64 --decode .ci/ModKit-dev10-exact-to-dev11.patch.gz.b64 | gunzip > "${DEV11_PATCH}"
           echo "${DEV11_PATCH_SHA256}  ${DEV11_PATCH}" | sha256sum -c -
 
