@@ -1,0 +1,12 @@
+{
+  "checkpoint": "0.9.0-dev18",
+  "base": "0.9.0-dev17",
+  "patch_sha256": "3136b2d3edcb8523f3bb6ca401b9198d3f117d996f03e7fce3fddac574da4654",
+  "patch_gzip_sha256": "d42eb5275284337b5051c98859dbb9bdb5cc16e8ac0b666a594bbb0b71a884c2",
+  "base64_stream_sha256": "134eea4fb346c0004d6b273b21c6afbe14ffb94d8da439b637696bd0f8963c90",
+  "parts": [
+    {"name":"part00.b64.part","size":7000},
+    {"name":"part01.b64.part","size":7000},
+    {"name":"part02.b64.part","size":916}
+  ]
+}
