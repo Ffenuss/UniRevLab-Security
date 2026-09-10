@@ -1,0 +1,55 @@
+ModKit reproducible checkpoint: 0.9.0-dev11
+Branch: Modkit1
+Android versionCode: 18
+Android versionName: 0.9.0-dev11
+Python version: 0.9.0.dev11
+
+BASE
+base_archive=ModKit-Android-0.9.0-dev10-sources.zip
+base_archive_sha256=71b51b27b63a75653b68a81de6feadc337e2dbe5e6b8ef521aa5082601009cef
+base_github_blob_sha=2f9006ca0872609c0dfef62442c28b974605a803
+android_compat_patch=.ci/patch_modkit_android_compat.py
+
+DEV11 PATCH
+dev11_patch_b64=.ci/ModKit-dev10-exact-to-dev11.patch.gz.b64
+dev11_patch_sha256=46ca0c8fc395e75a3bdbdc7d75cd7d12743b371c7b98c6a9b89ac0e7ca91ca33
+dev11_patch_b64_sha256=3a1a65cc59a695e59bc1bfc678cf4f88ab207b623efb3a6523cff0abbc707047
+
+REPRODUCTION ORDER
+1. Extract base_archive.
+2. Apply android_compat_patch to extracted tree.
+3. base64-decode and gunzip dev11_patch_b64.
+4. Verify decoded patch SHA-256 equals dev11_patch_sha256.
+5. Run git apply --check and git apply on the extracted tree.
+6. Verify versionName 0.9.0-dev11 and versionCode 18.
+7. Run pytest, modkit selftest and modkit runtime-check.
+8. Build :app:assembleDebug and :app:lintDebug.
+9. Verify APK zip structure and zipalign.
+
+LOCAL RELEASE GATES BEFORE PERSISTENCE
+pytest=214 passed
+selftest=PASS
+runtime-check=PASS
+
+AFK JOURNEY VALIDATION SUMMARY
+package=com.farlightgames.igame.gp
+version=1.7.31
+unity=2021.3.48f1
+il2cpp_metadata_version=29
+split_apk_support=validated
+controlCandidates=0
+menu_overlay=candidate:0.36
+debug_console=candidate:0.48
+gameplay_controls=candidate:0.48
+hook_framework=absent
+anti_cheat_surface=candidate:0.48
+il2cpp_surface=confirmed:0.98
+monetization_surface=confirmed:0.98
+monetization_behaviorConfidence=0.97
+monetization_actionabilityConfidence=0.18
+monetization_trustBoundary=server-backed
+
+Notes:
+- Confidence is evidence/classification confidence, NOT exploitability or vulnerability probability.
+- Raw global-metadata strings are not actionable controls by themselves.
+- No game binaries are stored by this checkpoint; only source changes and validation notes.
