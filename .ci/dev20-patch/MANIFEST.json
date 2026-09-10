@@ -1,0 +1,13 @@
+{
+  "schema": "modkit-dev20-patch-1",
+  "base": "0.9.0-dev19",
+  "target": "0.9.0-dev20",
+  "patch_sha256": "6e95a4e9116b269916204b7ba30a591f398f8af7be53cec61a6efe2c517ccc20",
+  "patch_gz_sha256": "23508b055fe8503a9d5ea3e81303f291080aaef7d7b0a255d091f642f7266d6b",
+  "parts": [
+    {"name":"part00.b64.part","size":4000,"sha256":"8f9533789025aac18c74b17777b6e08ed36f7344df3d9322067687eeebe3a196"},
+    {"name":"part01.b64.part","size":4000,"sha256":"e380f2873f4613e7936627991d279dbd3853d04fbd0b3d36d2acffaa0e1edb2e"},
+    {"name":"part02.b64.part","size":4000,"sha256":"ae5b4d323002c74dc9a7b5751d14fdc855a99171f30ecb3c2a6b324edbe228c2"},
+    {"name":"part03.b64.part","size":2136,"sha256":"4b76bb1b0b943b81377fe18cba0ef6297024f322ffb8356be25cace110ff199d"}
+  ]
+}
