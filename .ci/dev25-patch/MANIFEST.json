@@ -1,0 +1,18 @@
+{
+  "schema": "modkit-ci-patch-1",
+  "from": "0.9.0-dev20",
+  "to": "0.9.0-dev25",
+  "rawPatchSha256": "91e3e8230607bc3f97f3c37a662319329f5103aed068138dcdea12f37f6ba2c0",
+  "gzipPatchSha256": "62ea8d951bfcb010b67e30c0ba9822199ebd89277406684236f2b8646edc7f77",
+  "base64Bytes": 111008,
+  "parts": [
+    {"name":"part00.b64.part","size":14000,"sha256":"84a0baf7d510e3c3ac656d5675ab7c66c365e57fca15fa10b161118dd2266880"},
+    {"name":"part01.b64.part","size":14000,"sha256":"1694c0fb2ec9b9a4fbbf859f0bcf5400e69a79254e1f06646206969903fcc6da"},
+    {"name":"part02.b64.part","size":14000,"sha256":"e36d7d3bfe382c2c48130676db1a6001143d3ca9cad83f48ba7321589441561b"},
+    {"name":"part03.b64.part","size":14000,"sha256":"af27a69143c42560cb2935c26f5fbb4fc566e65b4740371895b691486d833457"},
+    {"name":"part04.b64.part","size":14000,"sha256":"0d50ddae80386b3d1072d4d74a051c32396b4cdbc39580b929990e9898652f1f"},
+    {"name":"part05.b64.part","size":14000,"sha256":"c33fa0a3a01235095a883bfb35a49ce9b2c01ad7df700faab416bbb60a830824"},
+    {"name":"part06.b64.part","size":14000,"sha256":"0c2449b0539248c71dbce285d9ea4e2ac3e80b43e7e93d1cd48668bf5e66c55d"},
+    {"name":"part07.b64.part","size":13008,"sha256":"4a80645f1939c48c33ec8e1cde89952add452b3ea9f678f30d16f8408e3c9145"}
+  ]
+}
