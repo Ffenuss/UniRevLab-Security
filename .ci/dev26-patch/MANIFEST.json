@@ -1,0 +1,9 @@
+{
+  "raw_sha256": "4dd2ea4aacb6ba8d3e6ff768bbb345d48e183504b24b06c251001bb66504238b",
+  "gz_sha256": "714ee5438629af8bdb3bb35209571fb6925060164afa88cb6a470c6fd57c8bae",
+  "b64_bytes": 15772,
+  "parts": [
+    {"name":"part00.b64.part","size":14000,"sha256":"658e045ae725d161a612e66386b7c5cb42cb403734326e7a83268dbe0bc332d9"},
+    {"name":"part01.b64.part","size":1772,"sha256":"fa468d198b14b9e90b1080c8880cedabbbce4f2e2c7146389d0445039ec70398"}
+  ]
+}
