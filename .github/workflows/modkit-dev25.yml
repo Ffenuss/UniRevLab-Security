@@ -1,0 +1,204 @@
+name: Build ModKit 0.9.0-dev25
+
+on:
+  push:
+    branches: [ Modkit1 ]
+    paths:
+      - '.github/workflows/modkit-dev25.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MODKIT_DIR: /tmp/modkit-dev25
+      NDK_PIN: 26.3.11579264
+      BASE_SHA256: 71b51b27b63a75653b68a81de6feadc337e2dbe5e6b8ef521aa5082601009cef
+      DEV11_PATCH_GZ_SHA256: a884617ea250eceaecc1a8b6e6788ba14cfbbe93249446667f7595d3120af922
+      DEV11_PATCH_SHA256: 46ca0c8fc395e75a3bdbdc7d75cd7d12743b371c7b98c6a9b89ac0e7ca91ca33
+      DEV16_PATCH_GZ_SHA256: f679898195a7bec5d8a9d0ff4836c7befbb9ac4fb9c8d142b8868fb1e5810b27
+      DEV16_PATCH_SHA256: 67a3a1cd456b13216395bbff87c73e4eb652dd9f62770d59da9404fd3f4a01ac
+      DEV17_PATCH_GZ_SHA256: 5a2de96d1a1f741d3ff8f2f9cd370a08ae6ca61ba797b09ab5b9c848a94734a4
+      DEV17_PATCH_SHA256: c02062c391320b50b82bdb5fc859ad45650afcd4ca5f2b9d8ac8f66cd5647736
+      DEV18_PATCH_GZ_SHA256: d42eb5275284337b5051c98859dbb9bdb5cc16e8ac0b666a594bbb0b71a884c2
+      DEV18_PATCH_SHA256: 3136b2d3edcb8523f3bb6ca401b9198d3f117d996f03e7fce3fddac574da4654
+      DEV19_PATCH_GZ_SHA256: 6a0c8ec44fc51cb4054b1e7bc359ae1f0a54adc4bca14d97bfe9ea1771399430
+      DEV19_PATCH_SHA256: 5cf7bf115988333256a01f0a66373cc945fece9a5363e42caf962e2018c407d5
+      DEV20_PATCH_GZ_SHA256: f843ab1e4ae40f2ca4c75267afe5240de2c6f3400efcbcaf99f03f9903480cbc
+      DEV20_PATCH_SHA256: eaf45fd61dd0c57c3595b6c9310a0664e2707d86a2d30912b806120e5dc3b35f
+      DEV25_PATCH_GZ_SHA256: 62ea8d951bfcb010b67e30c0ba9822199ebd89277406684236f2b8646edc7f77
+      DEV25_PATCH_SHA256: 91e3e8230607bc3f97f3c37a662319329f5103aed068138dcdea12f37f6ba2c0
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Install Android toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-34' 'build-tools;34.0.0' "ndk;${NDK_PIN}" 'cmake;3.22.1'
+
+      - name: Reconstruct exact dev11
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "${BASE_SHA256}  ModKit-Android-0.9.0-dev10-sources.zip" | sha256sum -c -
+          rm -rf "${MODKIT_DIR}" && mkdir -p "${MODKIT_DIR}"
+          unzip -q ModKit-Android-0.9.0-dev10-sources.zip -d "${MODKIT_DIR}"
+          python .ci/patch_modkit_android_compat.py "${MODKIT_DIR}"
+          cat .ci/dev11-patch/part00.gz.part .ci/dev11-patch/part01.gz.part .ci/dev11-patch/part02.gz.part .ci/dev11-patch/part03.gz.part > /tmp/dev11.patch.gz
+          echo "${DEV11_PATCH_GZ_SHA256}  /tmp/dev11.patch.gz" | sha256sum -c -
+          gunzip -c /tmp/dev11.patch.gz > /tmp/dev11.patch
+          echo "${DEV11_PATCH_SHA256}  /tmp/dev11.patch" | sha256sum -c -
+          cd "${MODKIT_DIR}"
+          git apply --check /tmp/dev11.patch
+          git apply /tmp/dev11.patch
+
+      - name: Apply dev16 through dev19
+        shell: bash
+        run: |
+          set -euo pipefail
+          for v in 16 17 18 19; do
+            cat ".ci/dev${v}-patch/"part*.b64.part | tr -d '\r\n\t ' | base64 --decode > "/tmp/dev${v}.patch.gz"
+            gzvar="DEV${v}_PATCH_GZ_SHA256"
+            rawvar="DEV${v}_PATCH_SHA256"
+            echo "${!gzvar}  /tmp/dev${v}.patch.gz" | sha256sum -c -
+            gunzip -c "/tmp/dev${v}.patch.gz" > "/tmp/dev${v}.patch"
+            echo "${!rawvar}  /tmp/dev${v}.patch" | sha256sum -c -
+            cd "${MODKIT_DIR}"
+            git apply --check "/tmp/dev${v}.patch"
+            git apply "/tmp/dev${v}.patch"
+            cd "$GITHUB_WORKSPACE"
+          done
+
+      - name: Apply exact dev20
+        shell: bash
+        run: |
+          set -euo pipefail
+          tr -d '\r\n\t ' < .ci/dev20-patch/dev20.patch.gz.b64 | base64 --decode > /tmp/dev20.patch.gz
+          echo "${DEV20_PATCH_GZ_SHA256}  /tmp/dev20.patch.gz" | sha256sum -c -
+          gunzip -c /tmp/dev20.patch.gz > /tmp/dev20.patch
+          echo "${DEV20_PATCH_SHA256}  /tmp/dev20.patch" | sha256sum -c -
+          cd "${MODKIT_DIR}"
+          git apply --check /tmp/dev20.patch
+          git apply /tmp/dev20.patch
+          grep -q "versionName '0.9.0-dev20'" android/app/build.gradle
+          grep -q 'version = "0.9.0.dev20"' pyproject.toml
+          grep -q '__version__ = "0.9.0-dev20"' modkit/__init__.py
+
+      - name: Verify and apply dev25 cumulative payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          root = Path('.ci/dev25-patch')
+          manifest = json.loads((root / 'MANIFEST.json').read_text())
+          parts = manifest['parts']
+          assert len(parts) == 8
+          for item in parts:
+              p = root / item['name']
+              data = p.read_bytes()
+              assert len(data) == item['size'], (p, len(data), item['size'])
+              assert hashlib.sha256(data).hexdigest() == item['sha256'], p
+          joined = b''.join((root / item['name']).read_bytes() for item in parts)
+          assert len(joined) == manifest['base64Bytes']
+          print('dev25 payload parts verified:', len(parts), 'base64 bytes:', len(joined))
+          PY
+          cat .ci/dev25-patch/part*.b64.part | tr -d '\r\n\t ' | base64 --decode > /tmp/dev25.patch.gz
+          echo "${DEV25_PATCH_GZ_SHA256}  /tmp/dev25.patch.gz" | sha256sum -c -
+          gunzip -c /tmp/dev25.patch.gz > /tmp/dev25.patch
+          echo "${DEV25_PATCH_SHA256}  /tmp/dev25.patch" | sha256sum -c -
+          cd "${MODKIT_DIR}"
+          git apply --check /tmp/dev25.patch
+          git apply /tmp/dev25.patch
+          grep -q "versionCode 30" android/app/build.gradle
+          grep -q "versionName '0.9.0-dev25'" android/app/build.gradle
+          grep -q 'version = "0.9.0.dev25"' pyproject.toml
+          grep -q '__version__ = "0.9.0-dev25"' modkit/__init__.py
+          test -f VALIDATION-DEV25.json
+          test -f RELEASE-0.9.0-DEV25-RU.md
+
+      - name: Full Python regression suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check pytest
+          cd "${MODKIT_DIR}"
+          python -m pytest tests -q
+
+      - name: Selftest and runtime contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "${MODKIT_DIR}"
+          python -m modkit selftest
+          python -m modkit runtime-check
+
+      - name: Build APK and lint
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "${MODKIT_DIR}/android"
+          gradle --no-daemon :app:assembleDebug :app:lintDebug
+
+      - name: Stage and verify artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "${MODKIT_DIR}"
+          zip -qr "$GITHUB_WORKSPACE/ModKit-Android-0.9.0-dev25-exact-sources.zip" . \
+            -x '.git/*' '.pytest_cache/*' '*/__pycache__/*' '*.pyc' \
+               'android/.gradle/*' 'android/app/build/*' 'build/*'
+          cd "$GITHUB_WORKSPACE"
+          unzip -t ModKit-Android-0.9.0-dev25-exact-sources.zip >/dev/null
+          sha256sum ModKit-Android-0.9.0-dev25-exact-sources.zip > ModKit-Android-0.9.0-dev25-exact-sources.zip.sha256
+
+          APK="$(find "${MODKIT_DIR}/android/app/build/outputs/apk/debug" -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          test -n "${APK}" && test -s "${APK}"
+          unzip -t "${APK}" >/dev/null
+          "${ANDROID_HOME}/build-tools/34.0.0/zipalign" -c -p -v 4 "${APK}" >/dev/null
+          "${ANDROID_HOME}/build-tools/34.0.0/apksigner" verify --verbose "${APK}" >/dev/null
+          cp "${APK}" ModKit-Android-0.9.0-dev25-debug.apk
+          sha256sum ModKit-Android-0.9.0-dev25-debug.apk > ModKit-Android-0.9.0-dev25-debug.apk.sha256
+
+      - name: Upload exact sources ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: ModKit-Android-0.9.0-dev25-exact-sources
+          path: |
+            ModKit-Android-0.9.0-dev25-exact-sources.zip
+            ModKit-Android-0.9.0-dev25-exact-sources.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ModKit-Android-0.9.0-dev25-debug
+          path: |
+            ModKit-Android-0.9.0-dev25-debug.apk
+            ModKit-Android-0.9.0-dev25-debug.apk.sha256
+          if-no-files-found: error
+          retention-days: 14
