@@ -1,0 +1,31 @@
+name: Apply ModKit dev27 sources
+
+on:
+  push:
+    branches: [Modkit1]
+    paths:
+      - '.github/workflows/dev27-bootstrap.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply exact dev27 patch
+        run: |
+          set -euo pipefail
+          cat .dev27/dev27.patch.gz.b64.* | base64 -d | gzip -d > /tmp/dev27.patch
+          git apply --check /tmp/dev27.patch
+          git apply /tmp/dev27.patch
+          rm -rf .dev27
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Implement ModKit 0.9.0-dev27 gameplay evidence graph"
+          git push origin HEAD:Modkit1
