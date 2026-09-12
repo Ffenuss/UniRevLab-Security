@@ -17,10 +17,24 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Apply exact dev27 patch
+      - name: Repair transport and apply exact dev27 patch
         run: |
           set -euo pipefail
-          cat .dev27/dev27.patch.gz.b64.* | base64 -d | gzip -d > /tmp/dev27.patch
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('.dev27/dev27.patch.gz.b64.02')
+          s = p.read_text()
+          if len(s) == 11999:
+              s = s[:7769] + 'B' + s[7769:]
+              p.write_text(s)
+          if len(s) != 12000:
+              raise SystemExit(f'unexpected part.02 size: {len(s)}')
+          PY
+          test "$(git hash-object .dev27/dev27.patch.gz.b64.02)" = "8a4f968ac3ee547a927fe667a24827971a6fbb45"
+          cat .dev27/dev27.patch.gz.b64.00 .dev27/dev27.patch.gz.b64.01 .dev27/dev27.patch.gz.b64.02 .dev27/dev27.patch.gz.b64.03 .dev27/dev27.patch.gz.b64.04 .dev27/dev27.patch.gz.b64.05 > /tmp/dev27.patch.gz.b64
+          echo '11f925570e77c5ae787ace171bfa4e874bd3b62153c6ac8c3bf1c470042d4d5b  /tmp/dev27.patch.gz.b64' | sha256sum -c -
+          base64 -d /tmp/dev27.patch.gz.b64 | gzip -d > /tmp/dev27.patch
+          echo 'a47f634dffdaec4bbcd101ecef5616f983d8b52bc3360c1d5ab94c8fc70b9177  /tmp/dev27.patch' | sha256sum -c -
           git apply --check /tmp/dev27.patch
           git apply /tmp/dev27.patch
           rm -rf .dev27
