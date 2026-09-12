@@ -1,0 +1,97 @@
+            fd, tmp = tempfile.mkstemp(prefix='modkit-split-', suffix='.apk')
++                    os.close(fd)
++                    try:
++                        with outer.open(info) as src, open(tmp, 'wb') as dst:
++                            while True:
++                                chunk=src.read(1024*1024)
++                                if not chunk: break
++                                dst.write(chunk)
++                        try:
++                            with zipfile.ZipFile(tmp) as nested:
++                                scan_zip(nested, f"{info.filename}!")
++                        except zipfile.BadZipFile:
++                            continue
++                    finally:
++                        try: os.unlink(tmp)
++                        except FileNotFoundError: pass
+             if len(hits) > max_hits:
+                 markers=[x for x in hits if x.get("kind")=="script/content-layer"][:32]
+                 normal=[x for x in hits if x.get("kind")!="script/content-layer"][:max(0,max_hits-len(markers))]
+diff --git a/pyproject.toml b/pyproject.toml
+index 62d0e6b..980b409 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
+ 
+ [project]
+ name = "modkit"
+-version = "0.9.0.dev29"
++version = "0.9.0.dev30"
+ description = "Offline Il2Cpp mod-menu generator: global-metadata.dat + libil2cpp.so -> an Android module"
+ readme = "README.md"
+ requires-python = ">=3.11"
+diff --git a/tests/test_apkset.py b/tests/test_apkset.py
+new file mode 100644
+index 0000000..645ee71
+--- /dev/null
++++ b/tests/test_apkset.py
+@@ -0,0 +1,47 @@
++import json
++import zipfile
++from pathlib import Path
++
++from modkit.mobile.apkset import inspect_apk_paths
++
++
++def _apk(path: Path, entries):
++    with zipfile.ZipFile(path, "w") as z:
++        z.writestr("AndroidManifest.xml", b"manifest")
++        for name, data in entries.items():
++            z.writestr(name, data)
++
++
++def test_installed_apk_set_selects_metadata_from_base_and_arm64_libil2cpp_from_split(tmp_path):
++    base = tmp_path / "base.apk"
++    arm64 = tmp_path / "split_config.arm64_v8a.apk"
++    _apk(base, {
++        "classes.dex": b"dex\n035\0" + b"x" * 64,
++        "assets/bin/Data/Managed/Metadata/global-metadata.dat": b"META",
++    })
++    _apk(arm64, {"lib/arm64-v8a/libil2cpp.so": b"\x7fELF" + b"I" * 128})
++    meta = tmp_path / "metadata.bin"
++    lib = tmp_path / "library.so"
++    report = tmp_path / "installed.json"
++    result = json.loads(inspect_apk_paths(json.dumps([str(base), str(arm64)]), meta, lib, report))
++    assert result["fullIl2cppPair"] is True
++    assert result["mode"] == "il2cpp-auto"
++    assert result["selected"]["metadata"]["split"] == "base.apk"
++    assert result["selected"]["library"]["split"] == "split_config.arm64_v8a.apk"
++    assert result["selected"]["library"]["abi"] == "arm64-v8a"
++    assert meta.read_bytes() == b"META"
++    assert lib.read_bytes().startswith(b"\x7fELF")
++    assert report.is_file()
++
++
++def test_installed_apk_set_without_complete_pair_stays_split_discovery(tmp_path):
++    base = tmp_path / "base.apk"
++    feature = tmp_path / "feature_shop.apk"
++    _apk(base, {"classes.dex": b"dex\n035\0" + b"health damage level shop purchase"})
++    _apk(feature, {"assets/StreamingAssets/game.lua": b"hero inventory cooldown"})
++    result = json.loads(inspect_apk_paths(json.dumps([str(base), str(feature)])))
++    assert result["fullIl2cppPair"] is False
++    assert result["mode"] == "split-discovery"
++    assert result["summary"]["splitCount"] == 2
++    assert result["summary"]["dexCount"] == 1
++    assert result["summary"]["contentMarkerCount"] >= 1
+diff --git a/tests/test_gameplay.py b/tests/test_gameplay.py
+new file mode 100644
+index 0000000..79aa8a3
+--- /dev/null
++++ b/tests/test_gameplay.py
+@@ -0,0 +1,17 @@
++
++
++def test_package_evidence_scans_nested_split_apks(tmp_path):
++    import zipfile
++    from modkit.mobile.gameplay import scan_apk_package_evidence
++    base=tmp_path/'b
