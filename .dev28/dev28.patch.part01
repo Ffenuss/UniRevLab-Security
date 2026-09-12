@@ -1,0 +1,166 @@
+turn;
+-    const float sx = screen_w / 1080.0f;
+-    const float sy = screen_h / 1920.0f;
+-    const float scale = sx < sy ? sx : sy;
+-    const float left = 24.0f * scale, top = 40.0f * scale;
+-    const float width = (screen_w < 900 ? screen_w - 2 * left : 620.0f * scale);
+-    const float row_h = 58.0f * scale, header_h = 62.0f * scale;
++    UiGeom g = ui_geom(screen_w, screen_h);
++    const float left = g.left, top = g.top, scale = g.scale, width = g.width;
+     if (!g_visible.load()) {
+         if (x >= left && x <= left + 72 * scale && y >= top && y <= top + 72 * scale) g_visible.store(true);
+         return;
+     }
+-    int max_visible = static_cast<int>((screen_h - (top + header_h) - 30 * scale) / row_h);
+-    if (max_visible < 1) max_visible = 1;
+-    int pages = (static_cast<int>(g_cfg->count) + max_visible - 1) / max_visible;
+-    if (pages < 1) pages = 1;
+-    if (y >= top && y <= top + header_h) {
+-        if (x >= left + width - 54 * scale) { g_visible.store(false); return; }
+-        if (pages > 1 && x >= left + width - 150 * scale && x < left + width - 102 * scale) {
+-            int p = g_page.load(); g_page.store(p > 0 ? p - 1 : pages - 1); return;
++
++    int filtered[kMaxControls]{};
++    int selected_tab = g_tab.load();
++    if (selected_tab < 0 || selected_tab >= static_cast<int>(TAB_COUNT)) { selected_tab = 0; g_tab.store(0); }
++    int filtered_count = collect_tab_indices(selected_tab, filtered);
++    int pages = (filtered_count + g.max_visible - 1) / g.max_visible; if (pages < 1) pages = 1;
++    int page = g_page.load(); if (page >= pages) { page = 0; g_page.store(0); }
++
++    if (y >= top && y <= top + g.title_h) {
++        if (x >= left + width - 42 * scale) { g_visible.store(false); return; }
++        if (x >= left + width - 84 * scale) { reset_controls(); return; }
++        if (pages > 1 && x >= left + width - 140 * scale && x < left + width - 112 * scale) {
++            g_page.store(page > 0 ? page - 1 : pages - 1); return;
+         }
+-        if (pages > 1 && x >= left + width - 102 * scale && x < left + width - 54 * scale) {
+-            int p = g_page.load(); g_page.store((p + 1) % pages); return;
++        if (pages > 1 && x >= left + width - 112 * scale && x < left + width - 84 * scale) {
++            g_page.store((page + 1) % pages); return;
+         }
+         return;
+     }
+-    float rows_top = top + header_h;
++
++    if (y >= top + g.title_h && y < top + g.header_h) {
++        float tab_w = width / static_cast<float>(TAB_COUNT);
++        int tab = static_cast<int>((x - left) / tab_w);
++        if (tab >= 0 && tab < static_cast<int>(TAB_COUNT)) {
++            g_tab.store(tab); g_page.store(0);
++        }
++        return;
++    }
++
++    float rows_top = top + g.header_h;
+     if (y < rows_top) return;
+-    int local = static_cast<int>((y - rows_top) / row_h);
+-    int page = g_page.load(); if (page >= pages) { page = 0; g_page.store(0); }
+-    int idx = page * max_visible + local;
+-    if (local < 0 || local >= max_visible || idx < 0 || idx >= static_cast<int>(g_cfg->count)) return;
++    int local = static_cast<int>((y - rows_top) / g.row_h);
++    int filtered_pos = page * g.max_visible + local;
++    if (local < 0 || local >= g.max_visible || filtered_pos < 0 || filtered_pos >= filtered_count) return;
++    int idx = filtered[filtered_pos];
+     const ConfigEntry &e = g_entries[idx];
+     if (e.kind == K_BOOL) {
+         g_state[idx].value = g_state[idx].value == 0.0f ? 1.0f : 0.0f;
+@@ -481,58 +596,141 @@ void handle_tap(int x, int y, int screen_w, int screen_h) {
+     apply_control(static_cast<uint32_t>(idx));
+ }
+ 
++void handle_touch(int action, int x, int y, int screen_w, int screen_h) {
++    UiGeom g = ui_geom(screen_w, screen_h);
++    const float icon = 72.0f * g.scale;
++    if (action == AMOTION_EVENT_ACTION_DOWN) {
++        g_drag_moved.store(0);
++        g_drag_start_x.store(x); g_drag_start_y.store(y);
++        if (!g_visible.load()) {
++            if (x >= g.left && x <= g.left + icon && y >= g.top && y <= g.top + icon) {
++                g_drag_mode.store(2);
++                g_drag_dx.store(x - static_cast<int>(g.left));
++                g_drag_dy.store(y - static_cast<int>(g.top));
++            }
++            return;
++        }
++        // Only the title body drags the panel. Reset/page/close buttons remain clickable.
++        if (y >= g.top && y <= g.top + g.title_h && x < g.left + g.width - 150.0f * g.scale) {
++            g_drag_mode.store(1);
++            g_drag_dx.store(x - static_cast<int>(g.left));
++            g_drag_dy.store(y - static_cast<int>(g.top));
++            return;
++        }
++        if (y >= g.top + g.header_h) {
++            int filtered[kMaxControls]{};
++            int tab = g_tab.load();
++            int count = collect_tab_indices(tab, filtered);
++            int pages = (count + g.max_visible - 1) / g.max_visible; if (pages < 1) pages = 1;
++            int page = g_page.load(); if (page >= pages) page = 0;
++            int local = static_cast<int>((y - (g.top + g.header_h)) / g.row_h);
++            int pos = page * g.max_visible + local;
++            if (local >= 0 && local < g.max_visible && pos >= 0 && pos < count) g_pressed_index.store(filtered[pos]);
++        }
++        return;
++    }
++    if (action == AMOTION_EVENT_ACTION_MOVE) {
++        int mode = g_drag_mode.load();
++        if (!mode) return;
++        int nx = x - g_drag_dx.load();
++        int ny = y - g_drag_dy.load();
++        int dx = x - g_drag_start_x.load(), dy = y - g_drag_start_y.load();
++        if (dx*dx + dy*dy > static_cast<int>(36.0f * g.scale * g.scale)) g_drag_moved.store(1);
++        g_menu_x.store(nx); g_menu_y.store(ny);
++        float h = mode == 2 ? icon : (g.header_h + g.row_h * 2.0f);
++        float w = mode == 2 ? icon : g.width;
++        clamp_menu_position(screen_w, screen_h, w, h, g.scale);
++        return;
++    }
++    if (action == AMOTION_EVENT_ACTION_UP) {
++        int mode = g_drag_mode.exchange(0);
++        bool moved = g_drag_moved.exchange(0) != 0;
++        if (mode) {
++            g_pressed_index.store(-1);
++            if (!moved && mode == 2) g_visible.store(true);
++            return;
++        }
++        handle_tap(x, y, screen_w, screen_h);
++        g_pressed_index.store(-1);
++    }
++}
++
+ void draw_overlay() {
+     if (!g_cfg || !ensure_gl()) return;
+     GLint vp[4]{}; glGetIntegerv(GL_VIEWPORT, vp);
+     int screen_w = vp[2], screen_h = vp[3];
+     if (screen_w <= 0 || screen_h <= 0) return;
+-    if (g_touch_up.exchange(0)) handle_tap(g_touch_x.load(), g_touch_y.load(), screen_w, screen_h);
++    static uint32_t last_touch_seq = 0;
++    uint32_t seq = g_touch_seq.load();
++    if (seq != last_touch_seq) {
++        last_touch_seq = seq;
++        handle_touch(g_touch_action.load(), g_touch_x.load(), g_touch_y.load(), screen_w, screen_h);
++    }
+ 
+     g_vertex_count = 0;
+-    const float sx = screen_w / 1080.0f, sy = screen_h / 1920.0f, scale = sx < sy ? sx : sy;
+-    const float left = 24.0f * scale, top = 40.0f * scale;
++    UiGeom g = ui_geom(screen_w, screen_h);
++    const float scale = g.scale;
+     if (!g_visible.load()) {
+-        add_quad(left, top, left + 72 * scale, top + 72 * scale, 0.08f,0.12f,0.20f,0.92f);
+-        add_text(left + 13*scale, top + 22*scale, "MK", 4.2f*scale, 0.85f,0.95f,1.0f,1.0f, 2);
++        clamp_menu_position(screen_w, screen_h, 72*scale, 72*scale, scale);
++        g = ui_geom(screen_w, screen_h);
++        add_quad(g.left, g.top, g.left + 72 * scale, g.top + 72 * scale, 0.08f,0.12f,0.20f,0.92f);
++        add_text(g.left + 13*scale, g.top + 22*scale, "MK", 4.2f*scale, 0.85f,0.95f,1.0f,1.0f, 2);
+     } else {
+-        const float width = (screen_w < 900 ? screen_w - 2 * left : 620.0f * scale);
+-        const float row_h = 58.0f * scale, header_h = 62.0f * scale;
+-        int max_visible = static_cast<int>((screen_h - (top + header_h) - 30*scale) / row_h);
+-        if (max_visible < 1) max_visible = 1;
+-        int pages = (static_cast<int>(g_cfg->count) + max_visible - 1) / max_visible; if (pages < 1) pages = 1;
++        int filtered[kMaxControls]{};
++        int selected_tab = g_tab.load();
++        if (selected_tab < 0 || selected_tab >= static_cast<int>(TAB_COUNT)) { selected_tab = 0; g_tab.store(0); }
++        int filtered_count = collect_tab_indices(selected_tab, filtered);
++        int pages = (filtered_count + g.max_visible - 1) / g.max_visible; if (pages < 1) pages = 1;
+         int page = g_page.load(); if (page >= pages) { page = 0
