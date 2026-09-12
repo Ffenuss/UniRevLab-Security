@@ -1,0 +1,61 @@
+1,12 @@ public class WorkerService extends Service {
+         app.result=new JSONObject(compact);
+         if(app.file("analysis.methods.jsonl").isFile()){
+             app.progress("Gameplay Discovery: общий Evidence Graph и игровые сущности…");
+-            String apk=app.file("game.apk").isFile()?app.file("game.apk").getPath():"";
++            File evidenceApk=app.file("installed-apk-set.zip").isFile()?app.file("installed-apk-set.zip"):app.file("game.apk");
++            String apk=evidenceApk.isFile()?evidenceApk.getPath():"";
+             PyObject gp=engine().callAttr("build_gameplay_discovery",app.file("metadata.bin").getPath(),app.file("library.so").getPath(),app.file("analysis.methods.jsonl").getPath(),app.file("analysis.evidence-graph.jsonl").getPath(),app.file("analysis.gameplay-coverage.json").getPath(),apk,app.file("analysis.json").getPath(),new Progress());
+             app.result.put("gameplayDiscovery",new JSONObject(gp.toString()));
+         }
++        if(app.file("installed-scan.json").isFile()){try{app.result.put("installedScan",new JSONObject(new String(Files.readAllBytes(app.file("installed-scan.json").toPath()),java.nio.charset.StandardCharsets.UTF_8)));}catch(Exception ignored){}}
+         compact=app.result.toString();
+         Files.write(app.file("analysis.summary.json").toPath(),compact.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+         getSharedPreferences("state",0).edit().remove("selections").apply();
+@@ -319,7 +402,9 @@ public class WorkerService extends Service {
+             }
+         }
+         app.progress("RE Workspace: корреляция DEX + metadata + dump + всех .so…");
+-        PyObject result=engine().callAttr("re_analyze_apk",app.file("game.apk").getPath(),fullReport.getPath(),meta==null?null:meta.getPath(),lib==null?null:lib.getPath(),rodPath,unityReport.isFile()?unityReport.getPath():null,il2cppPath,new Progress(),inputMode,true);
++        File reTarget=app.file("installed-apk-set.zip").isFile()?app.file("installed-apk-set.zip"):app.file("game.apk");
++        if(reTarget.getName().equals("installed-apk-set.zip"))inputMode="installed-apk-set+"+inputMode;
++        PyObject result=engine().callAttr("re_analyze_apk",reTarget.getPath(),fullReport.getPath(),meta==null?null:meta.getPath(),lib==null?null:lib.getPath(),rodPath,unityReport.isFile()?unityReport.getPath():null,il2cppPath,new Progress(),inputMode,true);
+         JSONObject obj=new JSONObject(result.toString());
+         JSONObject diag=obj.optJSONObject("pipelineDiagnostics"),proof=diag==null?null:diag.optJSONObject("methodVerification");String proofText=proof==null?"":(", method proof: "+proof.optInt("addressConfirmed",0)+" addr / "+proof.optInt("abiConfirmed",0)+" ABI / "+proof.optInt("xrefCorroborated",0)+" xref");
+         app.progress("RE-анализ готов. Находок: "+obj.optInt("findingCount",0)+", IL2CPP xrefs: "+obj.optInt("il2cppXrefs",0)+", context methods: "+obj.optInt("contextMethods",0)+proofText+".");
+diff --git a/modkit/__init__.py b/modkit/__init__.py
+index fea32bf..efb9c29 100644
+--- a/modkit/__init__.py
++++ b/modkit/__init__.py
+@@ -6,6 +6,6 @@ Pipeline
+     libil2cpp.so ────────┴─> [dump.cs | native metadata] ─> IR ─> rules ─> features ─> Android module
+ """
+ 
+-__version__ = "0.9.0-dev29"
++__version__ = "0.9.0-dev30"
+ 
+ MODKIT_BANNER = f"modkit {__version__}"
+diff --git a/modkit/mobile/apkset.py b/modkit/mobile/apkset.py
+new file mode 100644
+index 0000000..be5fb55
+--- /dev/null
++++ b/modkit/mobile/apkset.py
+@@ -0,0 +1,203 @@
++from __future__ import annotations
++
++import hashlib
++import json
++import os
++from pathlib import Path
++import re
++import zipfile
++
++
++def _check(cb, message=None):
++    if cb is None:
++        return
++    cancelled = getattr(cb, "isCancelled", None)
++    if callable(cancelled) and cancelled():
++        raise RuntimeError("Операция отменена")
++    if message:
++        progress = getattr(cb, "p
