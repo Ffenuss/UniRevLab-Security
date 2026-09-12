@@ -1,0 +1,15 @@
+features": {
++    "runtimeConfigVersion": 3,
++    "safeSystemChainPreflight": true,
++    "packedDynstrFallback": true,
++    "defaultKnownFlag": true,
++    "resetSkipsUnknownDefaults": true,
++    "legacyRuntimeConfigRead": ["v1", "v2"],
++    "failClosedBinding": true,
++    "gameSpecificProductionRules": false
++  },
++  "requiredActions": [
++    "pytest", "selftest", "runtime-check", "assembleDebug", "lintDebug",
++    "unzip", "zipalign", "apksigner"
++  ]
++}
