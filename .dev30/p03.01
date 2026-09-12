@@ -1,0 +1,74 @@
+            return
+         low_art=str(artifact).casefold()
+-        # Framework/resource dictionaries are useful conduits but terrible gameplay evidence.
+         if any(x in low_art for x in ("managed/resources/system.", "uwawrapper", "unity_builtin_extra")):
+             content_layer(artifact, value)
+             return
+@@ -887,30 +892,63 @@ def scan_apk_package_evidence(apk_path, *, max_total_bytes=48 * 1024 * 1024, max
+         seen.add(key)
+         for d in ds: per_domain[d]+=1
+         hits.append({"artifact": artifact, "kind": kind, "value": value[:192], "domains": ds, "status": "package-observed"})
+-    try:
+-        with zipfile.ZipFile(path) as z:
+-            for info in z.infolist():
+-                name = info.filename
+-                add(name, "apk-entry", name)
+-                low = name.casefold()
+-                candidate = (low.endswith('.dex') or low.endswith(('.json','.txt','.xml','.lua','.bytes','.config','.catalog'))
+-                             or 'streamingassets/' in low or 'addressable' in low or 'assets/' in low)
+-                if not candidate or info.file_size <= 0 or info.file_size > max_entry_bytes or total >= max_total_bytes:
+-                    continue
+-                take = min(info.file_size, max_entry_bytes, max_total_bytes-total)
+-                try:
+-                    with z.open(info) as f:
+-                        data = f.read(take)
+-                except Exception:
++
++    def scan_zip(z, prefix=""):
++        nonlocal total
++        for info in z.infolist():
++            name = f"{prefix}{info.filename}" if prefix else info.filename
++            add(name, "apk-entry", name)
++            low = info.filename.casefold()
++            candidate = (low.endswith('.dex') or low.endswith(('.json','.txt','.xml','.lua','.bytes','.config','.catalog'))
++                         or 'streamingassets/' in low or 'addressable' in low or 'assets/' in low)
++            if not candidate or info.file_size <= 0 or info.file_size > max_entry_bytes or total >= max_total_bytes:
++                continue
++            take = min(info.file_size, max_entry_bytes, max_total_bytes-total)
++            try:
++                with z.open(info) as f:
++                    data = f.read(take)
++            except Exception:
++                continue
++            total += len(data)
++            for m in printable.finditer(data):
++                try: value = m.group().decode('utf-8', 'ignore')
++                except Exception: continue
++                if len(value) > 192:
+                     continue
+-                total += len(data)
+-                for m in printable.finditer(data):
+-                    try: value = m.group().decode('utf-8', 'ignore')
+-                    except Exception: continue
+-                    if len(value) > 192:
++                add(name, "dex/string" if low.endswith('.dex') else "content-string", value)
++
++    try:
++        with zipfile.ZipFile(path) as outer:
++            names=[x.filename for x in outer.infolist()]
++            nested_infos=[x for x in outer.infolist() if x.filename.casefold().endswith('.apk')]
++            plain = not nested_infos or ('AndroidManifest.xml' in names and any(x.endswith('.dex') or x.startswith('lib/') for x in names))
++            if plain:
++                scan_zip(outer)
++            else:
++                import tempfile
++                for info in outer.infolist():
++                    if total >= max_total_bytes:
++                        break
++                    if not info.filename.casefold().endswith('.apk') or info.file_size <= 0:
+                         continue
+-                    add(name, "dex/string" if low.endswith('.dex') else "content-string", value)
+-            # Preserve script/content-layer markers even if gameplay evidence is sparse.
++                    # Nested APKs require random access. Spool one split at a time to
++                    # a temp file instead of retaining a potentially huge APK in RAM.
++        
