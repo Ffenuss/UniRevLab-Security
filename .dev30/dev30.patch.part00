@@ -1,0 +1,165 @@
+diff --git a/RELEASE-0.9.0-DEV30-RU.md b/RELEASE-0.9.0-DEV30-RU.md
+new file mode 100644
+index 0000000..999db95
+--- /dev/null
++++ b/RELEASE-0.9.0-DEV30-RU.md
+@@ -0,0 +1,27 @@
++# ModKit 0.9.0-dev30
++
++## Installed Game Scanner / APK-set discovery
++
++Dev30 добавляет автоматический анализ установленной игры или приложения без ручного поиска split APK.
++
++### Что делает ModKit
++
++- показывает launchable установленные приложения, игры поднимаются выше по Android `ApplicationInfo.CATEGORY_GAME`;
++- получает `sourceDir` и все `splitSourceDirs` выбранного пакета;
++- копирует base + splits только в private storage ModKit, оригиналы не изменяются;
++- собирает локальный APK-set и ведёт provenance каждого split;
++- ищет `global-metadata.dat` во всех split APK;
++- ищет `libil2cpp.so` во всех split APK и автоматически выбирает ARM64 (`arm64-v8a`);
++- если metadata и ARM64 libil2cpp найдены в разных splits, использует их как одну установленную сборку;
++- при полной IL2CPP-паре автоматически запускает Rodroid/metadata/Evidence Graph/Gameplay Discovery и готовит read-only Runtime Probe seed;
++- если полной пары нет, сканирует весь APK-set как единый target: DEX, все `.so`, Unity/content assets, monetization/trust-boundary evidence и Menu Builder review candidates;
++- package/content evidence для Gameplay Discovery теперь читает вложенные split APK, а не только base.apk;
++- сохраняет `installed-scan.json`, `installed-apk-set.zip` и при необходимости `game-native-split.apk` для точного provenance packaging target.
++
++### Fail-closed модель сохранена
++
++Installed scan не превращает строковые/DEX совпадения в executable control. `Discovery`, `WATCH/PROBE`, `RUNTIME TEST` и executable binding остаются разными уровнями доказательности. Серверные покупки/валюта остаются security/trust-boundary findings и не получают автоматический bypass.
++
++### Android package visibility
++
++Dev30 не запрашивает широкое `QUERY_ALL_PACKAGES`. Для списка установленных приложений используется Android `<queries>` для `ACTION_MAIN + CATEGORY_LAUNCHER`.
+diff --git a/VALIDATION-DEV30.json b/VALIDATION-DEV30.json
+new file mode 100644
+index 0000000..6a8ee3c
+--- /dev/null
++++ b/VALIDATION-DEV30.json
+@@ -0,0 +1,21 @@
++{
++  "schema": "modkit-validation-dev30-1.0",
++  "versionName": "0.9.0-dev30",
++  "versionCode": 35,
++  "focus": "installed package APK-set discovery and automatic IL2CPP pair selection",
++  "testsExpected": 301,
++  "runtimeContract": "builtin-runtime-v4 clang++ strict",
++  "installedScanner": {
++    "source": "PackageManager sourceDir + splitSourceDirs",
++    "packageVisibility": "launcher intent queries; no QUERY_ALL_PACKAGES",
++    "autoSelect": ["global-metadata.dat", "arm64-v8a/libil2cpp.so"],
++    "fallback": "multi-split DEX/native/Unity/content RE discovery",
++    "nestedPackageEvidence": true,
++    "readOnlyProbeSeedAfterIl2cpp": true
++  },
++  "safetyTruth": {
++    "staticEvidenceIsRuntimeConfirmation": false,
++    "discoveryCreatesExecutableBinding": false,
++    "serverPurchaseBypass": false
++  }
++}
+diff --git a/android/app/build.gradle b/android/app/build.gradle
+index a13fcdd..0b46a35 100644
+--- a/android/app/build.gradle
++++ b/android/app/build.gradle
+@@ -6,8 +6,8 @@ android {
+         applicationId 'dev.modkit.mobile'
+         minSdk 26
+         targetSdk 34
+-        versionCode 34
+-        versionName '0.9.0-dev29'
++        versionCode 35
++        versionName '0.9.0-dev30'
+         ndk { abiFilters 'arm64-v8a', 'x86_64' }
+         externalNativeBuild { cmake { arguments '-DANDROID_STL=c++_static' } }
+     }
+diff --git a/android/app/src/main/AndroidManifest.xml b/android/app/src/main/AndroidManifest.xml
+index 7ff452e..ffd4951 100644
+--- a/android/app/src/main/AndroidManifest.xml
++++ b/android/app/src/main/AndroidManifest.xml
+@@ -3,6 +3,9 @@
+ <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
+ <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+ <uses-permission android:name="android.permission.WAKE_LOCK"/>
++<queries>
++<intent><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent>
++</queries>
+ <application android:name=".App" android:label="ModKit" android:icon="@drawable/ic_modkit" android:allowBackup="false" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:supportsRtl="true">
+ <activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
+ <activity android:name=".ReWorkspaceActivity" android:exported="false"/>
+diff --git a/android/app/src/main/java/dev/modkit/mobile/MainActivity.java b/android/app/src/main/java/dev/modkit/mobile/MainActivity.java
+index 88b137a..7f24f89 100644
+--- a/android/app/src/main/java/dev/modkit/mobile/MainActivity.java
++++ b/android/app/src/main/java/dev/modkit/mobile/MainActivity.java
+@@ -2,6 +2,7 @@ package dev.modkit.mobile;
+ 
+ import android.app.*;
+ import android.content.*;
++import android.content.pm.*;
+ import android.database.Cursor;
+ import android.graphics.Color;
+ import android.graphics.Typeface;
+@@ -22,7 +23,7 @@ public class MainActivity extends Activity {
+     private App app;
+     private LinearLayout root,list;
+     private TextView status,files,summary,gameplay,pageLabel;
+-    private Button metadata,library,game,analyze,export,dumpExport,buildGame,report,cancel,prev,next,catalogToggle;
++    private Button metadata,library,game,installedGame,analyze,export,dumpExport,buildGame,report,cancel,prev,next,catalogToggle;
+     private EditText search;
+     private ProgressBar progress;
+     private final Handler handler=new Handler(Looper.getMainLooper());
+@@ -49,7 +50,7 @@ public class MainActivity extends Activity {
+         TextView title=text("ModKit",30);title.setTypeface(null,Typeface.BOLD);root.addView(title);
+         root.addView(text("Изменение IL2CPP-библиотеки на телефоне",16));
+         button("Как это работает",root,v->new AlertDialog.Builder(this).setTitle("От файлов до результата")
+-            .setMessage("1. Выберите global-metadata.dat и libil2cpp.so из одной сборки. Для готовой игры также выберите исходный APK.\n2. Rodroid Il2CppDumper V7 создаст полный dump.cs и script.json.\n3. Найдите метод, включите его и укажите возвращаемое значение.\n4. Сохраните ZIP либо соберите готовый APK игры.\n\nВыбранный метод будет возвращать константу: исходное тело и его побочные действия выполняться не будут. Изменения нужно проверить в разрешённой тестовой копии.\n\nСобранный APK получает тестовую подпись ModKit, поэтому устанавливается отдельно от официально подписанной версии. Обработка локальная; компьютер и интернет не нужны.")
++            .setMessage("1. Можно выбрать установленную игру/приложение: ModKit сам соберёт base + splits и найдёт global-metadata.dat/libil2cpp.so. Либо выберите файлы вручную.\n2. Rodroid Il2CppDumper V7 создаст полный dump.cs и script.json.\n3. Найдите метод, включите его и укажите возвращаемое значение.\n4. Сохраните ZIP либо соберите готовый APK игры.\n\nВыбранный метод будет возвращать константу: исходное тело и его побочные действия выполняться не будут. Изменения нужно проверить в разрешённой тестовой копии.\n\nСобранный APK получает тестовую подпись ModKit, поэтому устанавливается отдельно от официально подписанной версии. Обработка локальная; компьютер и интернет не нужны.")
+             .setPositiveButton("Понятно",null).show());
+         root.addView(text("Рабочие пространства",20));
+         button("RE Workspace · DEX / Unity / IL2CPP / все .so",root,v->startActivity(new Intent(this,ReWorkspaceActivity.class)));
+@@ -61,6 +62,7 @@ public class MainActivity extends Activity {
+         metadata=button("Выбрать global-metadata.dat",root,v->pick(10));
+         library=button("Выбрать libil2cpp.so (ARM64)",root,v->pick(11));
+         game=button("Выбрать исходный APK игры",root,v->pickApk());
++        installedGame=button("Сканировать установленную игру / приложение",root,v->showInstalledApps());
+         root.addView(text("2 · Анализ",20));
+         analyze=button("Анализировать файлы",root,v->start(new Intent().putExtra("op","analyze")));
+         progress=new ProgressBar(this);progress.setIndeterminate(true);root.addView(progress);
+@@ -87,6 +89,49 @@ public class MainActivity extends Activity {
+         if (Build.VERSION.SDK_INT>=33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS")!=android.content.pm.PackageManager.PERMISSION_GRANTED)
+             requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"},50);
+     }
++    private void showInstalledApps() {
++        PackageManager pm=getPackageManager();
++        Intent q=new Intent(Intent.ACTION_MAIN);q.addCategory(Intent.CATEGORY_LAUNCHER);
++        List<ResolveInfo> resolved=pm.queryIntentActivities(q,0);
++        final ArrayList<ResolveInfo> all=new ArrayList<>();
++        HashSet<String> seen=new HashSet<>();
++        for(ResolveInfo r:resolved){
++            if(r==null||r.activityInfo==null||r.activityInfo.applicationInfo==null)continue;
++            String pkg=r.activityInfo.packageName;
++            if(pkg==null||pkg.equals(getPackageName())||!seen.add(pkg))continue;
++            all.add(r);
++        }
++        Collections.sort(all,(a,b)->{
++            ApplicationInfo aa=a.activityInfo.applicationInfo,bb=b.activityInfo.applicationInfo;
++            boolean ga=Build.VERSION.SDK_INT>=26&&aa.category==ApplicationInfo.CATEGORY_GAME;
++            boolean gb=Build.VERSION.SDK_INT>=26&&bb.category==ApplicationInfo.CATEGORY_GAME;
++            if(ga!=gb)return ga?-1:1;
++            return String.valueOf(a.loadLabel(pm)).compareToIgnoreCase(String.valueOf(b.loadLabel(pm)));
++        });
++        LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(dp(16),dp(8),dp(16),0);
++        EditText filter=new EditText(this);filter.setHint("Поиск по названию или package");filter.setSingleLine(true);box.addView(filter);
++        ListView listView=new ListView(this);box.addView(listView,new LinearLayout.LayoutParams(-1,dp(460)));
++        final ArrayList<ResolveInfo> visible=new ArrayList<>();
++        final ArrayList<String> rows=new ArrayList<>();
++        final ArrayAdapter<String> adapter=new ArrayAdapter<>(this,android.R.layout.simple_list_item_1,rows);listView.setAdapter(adapter);
++        Runnable rebuild=()->{
++            String needle=filter.getText().toString().trim().toLowerCase(Locale.ROOT);visible.clear();rows.clear();
++            for(ResolveInfo r:all){String label=String.valueOf(r.loadLabel(pm));String pkg=r.activityInfo.packageName;
++                if(!needle.isEmpty()&&!label.toLowerCase(Locale.ROOT).contains(needle)&&!pkg.toLowerCase(Locale.ROOT).contains(needle))continue;
++                visible.add(r);boolean isGame=Build.VERSION.SDK_INT>=26&&r.activityInfo.applicationInfo.category==ApplicationInfo.CATEGORY_GAME;
++                rows.add((isGame?"🎮 ":"")+label+"\n"+pkg);
++            }adapter.notifyDataSetChanged();
++        };
++        filter.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int c,
