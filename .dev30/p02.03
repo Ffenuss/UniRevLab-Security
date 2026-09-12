@@ -1,0 +1,15 @@
+          low = name.casefold()
++                    if re.search(r"(?:^|/)classes\d*\.dex$", low):
++                        row["dexCount"] += 1
++                    if low.endswith(".so") and "/lib/" in "/" + low:
++                        row["nativeCount"] += 1
++                    if ("assets/bin/data/" in low or low.endswith("/libunity.so") or low.endswith("libunity.so")
++                            or "globalgamemanagers" in low):
++                        row["unityMarkers"] += 1
++                    if ("streamingassets/" in low or "addressable" in low or low.endswith((".bundle", ".lua"))):
++                        row["contentMarkers"] += 1
++                    if low.endswith("global-metadata.dat"):
++                        item = {"splitIndex": index, "split": path.name, "entry": name,
++                                "size": info.file_size, "score": _entry_score_metadata(name, index)}
++                        row["metadataEntries"].append(item)
++                        metad
