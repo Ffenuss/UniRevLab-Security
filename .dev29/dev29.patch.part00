@@ -1,0 +1,88 @@
+diff --git a/android/app/build.gradle b/android/app/build.gradle
+index 653558c..a13fcdd 100644
+--- a/android/app/build.gradle
++++ b/android/app/build.gradle
+@@ -6,8 +6,8 @@ android {
+         applicationId 'dev.modkit.mobile'
+         minSdk 26
+         targetSdk 34
+-        versionCode 33
+-        versionName '0.9.0-dev28'
++        versionCode 34
++        versionName '0.9.0-dev29'
+         ndk { abiFilters 'arm64-v8a', 'x86_64' }
+         externalNativeBuild { cmake { arguments '-DANDROID_STL=c++_static' } }
+     }
+diff --git a/android/app/src/main/cpp/modkit_runtime.cpp b/android/app/src/main/cpp/modkit_runtime.cpp
+index f70b1e6..ea7680e 100644
+--- a/android/app/src/main/cpp/modkit_runtime.cpp
++++ b/android/app/src/main/cpp/modkit_runtime.cpp
+@@ -28,6 +28,7 @@ constexpr uint32_t K_ACTION = 1;
+ constexpr uint32_t K_BOOL = 2;
+ constexpr uint32_t K_INT = 3;
+ constexpr uint32_t K_FLOAT = 4;
++constexpr uint32_t F_DEFAULT_KNOWN = 1u << 1;
+ constexpr uint32_t F_ABI_IL2CPP = 1u << 8;
+ constexpr uint32_t F_INSTANCE = 1u << 9;
+ constexpr uint32_t F_RESOLVER_RETURN_PTR = 1u << 10;
+@@ -535,11 +536,11 @@ void reset_controls() {
+     if (!g_cfg) return;
+     for (uint32_t i = 0; i < g_cfg->count; ++i) {
+         const ConfigEntry &e = g_entries[i];
+-        if (e.kind == K_ACTION) continue;
++        if (e.kind == K_ACTION || (e.flags & F_DEFAULT_KNOWN) == 0) continue;
+         g_state[i].value = e.default_value;
+         apply_control(i);
+     }
+-    MKLOGI("menu reset: restored defaults for non-action controls");
++    MKLOGI("menu reset: restored known defaults only");
+ }
+ 
+ void handle_tap(int x, int y, int screen_w, int screen_h) {
+diff --git a/modkit/__init__.py b/modkit/__init__.py
+index 3f8a3fd..fea32bf 100644
+--- a/modkit/__init__.py
++++ b/modkit/__init__.py
+@@ -6,6 +6,6 @@ Pipeline
+     libil2cpp.so ────────┴─> [dump.cs | native metadata] ─> IR ─> rules ─> features ─> Android module
+ """
+ 
+-__version__ = "0.9.0-dev28"
++__version__ = "0.9.0-dev29"
+ 
+ MODKIT_BANNER = f"modkit {__version__}"
+diff --git a/modkit/menu/builder.py b/modkit/menu/builder.py
+index 38d76da..34ddb01 100644
+--- a/modkit/menu/builder.py
++++ b/modkit/menu/builder.py
+@@ -889,8 +889,21 @@ def write_patch_payload(spec: MenuSpec, source_apk: str | Path, runtime_so: str
+         if host_path not in z.namelist():
+             raise ValueError(f"source APK does not contain {host_path}")
+         # Preflight the exact ELF mutation before writing a payload artifact.
+-        host = ElfFile(z.read(host_path))
+-        edit_preview = host.add_needed(dependency)
++        # Prefer an additive DT_NEEDED edit, but tightly packed production ELFs
++        # often have no .dynstr/.dynamic slack.  In that case use the same
++        # fail-closed system-dependency chain strategy as Patch Pack itself.
++        host_blob = z.read(host_path)
++        host = ElfFile(host_blob)
++        try:
++            edit_preview = host.add_needed(dependency)
++            autoload_strategy = "add-only"
++        except Exception as add_exc:
++            host = ElfFile(host_blob)
++            edit_preview = host.replace_needed_chain(
++                dependency, runtime_needed=tuple(runtime_elf.needed())
++            )
++            edit_preview["addNeededFailure"] = str(add_exc)
++            autoload_strategy = "safe-system-chain"
+         if dependency not in ElfFile(host.blob).needed():
+             raise ValueError("DT_NEEDED preflight did not persist")
+ 
+@@ -915,7 +928,7 @@ def write_patch_payload(spec: MenuSpec, source_apk: str | Path, runtime_so: str
+         "renderHostDetection": render_detection,
+         "menuSpecSha256": hashlib.sha256(spec_bytes).hexdigest(),
+         "bindingValidationSha256": hashlib.sha256(validation_bytes).hexdigest(),
+-        "autoload": [{"host": host_path, "dependency": dependency, "strategy": "safe-system-chain"}],
++        "autoload": [{"host": host_path, "dependency": dependency, "strategy": autoload_strategy}],
+         "preflight": 
