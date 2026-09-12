@@ -1,0 +1,34 @@
+));}
++        }
++        if(local.isEmpty())throw new IOException("Не удалось прочитать APK установленного пакета");
++        copyInstalledFile(local.get(0),app.file("game.apk"),"base APK → рабочая копия");buildInstalledApkSet(local,app.file("installed-apk-set.zip"));
++        if(!Python.isStarted())Python.start(new AndroidPlatform(this));PyObject apkset=Python.getInstance().getModule("modkit.mobile.apkset");
++        PyObject result=apkset.callAttr("inspect_apk_paths",localPaths.toString(),app.file("metadata.bin").getPath(),app.file("library.so").getPath(),app.file("installed-scan.json").getPath(),new Progress());
++        JSONObject scan=new JSONObject(result.toString()).put("packageName",packageName).put("label",label).put("copyErrors",new JSONArray(copyErrors));
++        try{PackageInfo pi=pm.getPackageInfo(packageName,0);scan.put("versionName",pi.versionName);scan.put("versionCode",Build.VERSION.SDK_INT>=28?pi.getLongVersionCode():pi.versionCode);}catch(Exception ignored){}
++        JSONObject selected=scan.optJSONObject("selected"),libSel=selected==null?null:selected.optJSONObject("library");if(libSel!=null){int idx=libSel.optInt("splitIndex",-1);if(idx>=0&&idx<local.size()&&idx!=0)copyInstalledFile(local.get(idx),app.file("game-native-split.apk"),"native split → рабочая копия");}
++        Files.write(app.file("installed-scan.json").toPath(),scan.toString(2).getBytes(java.nio.charset.StandardCharsets.UTF_8));
++        android.content.SharedPreferences.Editor prefs=getSharedPreferences("state",0).edit().putString("installed.package",label+" · "+packageName).putString("game.apk",label+" · base.apk");
++        if(app.file("metadata.bin").isFile())prefs.putString("metadata.bin","auto · "+selected.optJSONObject("metadata").optString("split")+"!global-metadata.dat");
++        if(app.file("library.so").isFile())prefs.putString("library.so","auto · "+libSel.optString("split")+"!libil2cpp.so");prefs.apply();
++        if(scan.optBoolean("fullIl2cppPair")){
++            app.progress("Installed scan: IL2CPP pair найдена автоматически — запускаю полный анализ…");analyze();
++            try{
++                menuProbePrepare();
++                File probe=app.file("menu-probe-prepare.json");if(probe.isFile()&&app.result!=null)app.result.put("installedProbe",new JSONObject(new String(Files.readAllBytes(probe.toPath()),java.nio.charset.StandardCharsets.UTF_8)));
++                if(app.result!=null)Files.write(app.file("analysis.summary.json").toPath(),app.result.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
++                JSONObject pre=probe.isFile()?new JSONObject(new String(Files.readAllBytes(probe.toPath()),java.nio.charset.StandardCharsets.UTF_8)).optJSONObject("preflight"):null;
++                app.progress("Installed scan готов: IL2CPP + Gameplay + Runtime Probe; payload "+(pre!=null&&pre.optBoolean("readyForPayload")?"READY":"REVIEW / native split может требоваться")+".");
++            }catch(Exception probeError){app.progress("Installed scan: анализ готов, Runtime Probe seed REVIEW — "+probeError.getMessage());}
++        }else splitDiscovery(scan);
++    }
++
+     private void importFile(Uri uri,String name,String display) throws Exception {
++        if("metadata.bin".equals(name)||"library.so".equals(name)||"game.apk".equals(name)){
++            deleteTree(app.file("installed-apks"));Files.deleteIfExists(app.file("installed-apk-set.zip").toPath());Files.deleteIfExists(app.file("installed-scan.json").toPath());Files.deleteIfExists(app.file("game-native-split.apk").toPath());
++            getSharedPreferences("state",0).edit().remove("installed.package").apply();
++        }
+         File temp=app.file(name+".tmp");
+         try {
+             try (InputStream in=getContentResolver().openInputStream(uri); OutputStream out=new FileOutputStream(temp)) {
+@@ -160,10 +24
