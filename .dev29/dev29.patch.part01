@@ -1,0 +1,90 @@
+edit_preview,
+     }
+     output_zip.parent.mkdir(parents=True, exist_ok=True)
+diff --git a/modkit/menu/runtime_config.py b/modkit/menu/runtime_config.py
+index 44fb3bd..6c67d02 100644
+--- a/modkit/menu/runtime_config.py
++++ b/modkit/menu/runtime_config.py
+@@ -31,6 +31,7 @@ K_INT = 3
+ K_FLOAT = 4
+ 
+ F_DEFAULT_BOOL = 1 << 0
++F_DEFAULT_KNOWN = 1 << 1
+ F_ABI_IL2CPP = 1 << 8
+ F_INSTANCE = 1 << 9
+ F_RESOLVER_RETURN_PTR = 1 << 10
+@@ -114,6 +115,8 @@ def encode_runtime_config(spec, *, render_host: str = "libunity.so") -> bytes:
+         hi = float(c.max_value if c.max_value is not None else 1.0)
+         default = float(c.default if c.default is not None else (0.0 if kind == K_BOOL else lo))
+         flags = F_DEFAULT_BOOL if (kind == K_BOOL and bool(c.default)) else 0
++        if c.default is not None:
++            flags |= F_DEFAULT_KNOWN
+         if c.call_abi == "il2cpp":
+             flags |= F_ABI_IL2CPP
+         resolver_rva = 0
+diff --git a/pyproject.toml b/pyproject.toml
+index 9b23366..62d0e6b 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
+ 
+ [project]
+ name = "modkit"
+-version = "0.9.0.dev28"
++version = "0.9.0.dev29"
+ description = "Offline Il2Cpp mod-menu generator: global-metadata.dat + libil2cpp.so -> an Android module"
+ readme = "README.md"
+ requires-python = ">=3.11"
+diff --git a/tests/test_menu_builder.py b/tests/test_menu_builder.py
+index ab5df53..bbf099e 100644
+--- a/tests/test_menu_builder.py
++++ b/tests/test_menu_builder.py
+@@ -723,3 +723,61 @@ def test_dev15_context_fields_survive_menu_seed():
+     assert c.context_status == 'verified-method-context'
+     assert c.context_confidence == 0.82
+     assert c.context_evidence[0]['kind'] == 'method-local-managed-callee'
++
++
++def test_dev29_runtime_config_marks_only_explicit_defaults_as_resettable():
++    from modkit.menu import MenuControl, MenuSpec
++    from modkit.menu.runtime_config import encode_runtime_config, decode_runtime_config, F_DEFAULT_KNOWN
++    spec = MenuSpec("Reset provenance", controls=[
++        MenuControl("unknown", "Unknown original", "toggle", rva=0x1040, binding="bool_setter",
++                    target_so="libil2cpp.so", default=None),
++        MenuControl("known", "Known original", "toggle", rva=0x1050, binding="bool_setter",
++                    target_so="libil2cpp.so", default=False),
++        MenuControl("speed", "Neutral speed", "slider_float", rva=0x1060, binding="number_setter",
++                    target_so="libil2cpp.so", min_value=0.25, max_value=3.0, default=1.0,
++                    value_type="System.Single"),
++    ])
++    cfg = decode_runtime_config(encode_runtime_config(spec))
++    rows = {row["id"]: row for row in cfg["controls"]}
++    assert (rows["unknown"]["flags"] & F_DEFAULT_KNOWN) == 0
++    assert rows["known"]["flags"] & F_DEFAULT_KNOWN
++    assert rows["speed"]["flags"] & F_DEFAULT_KNOWN
++
++
++def test_dev29_patch_payload_falls_back_to_safe_needed_chain_when_dynstr_is_packed(tmp_path):
++    import json
++    import zipfile
++    from modkit.menu import MenuControl, MenuSpec, write_patch_payload
++    from modkit.elf.reader import ElfFile
++    from modkit.selftest import fixtures
++
++    host_blob = bytearray(fixtures.so_blob())
++    host = ElfFile(bytes(host_blob))
++    dynstr = host.section('.dynstr')
++    raw = host_blob[dynstr.offset:dynstr.offset + dynstr.size]
++    trailing = len(raw) - len(raw.rstrip(b'\0'))
++    assert trailing > 1
++    # Simulate a production ELF whose .dynstr has no room for a new soname.
++    slack_start = dynstr.offset + dynstr.size - trailing
++    host_blob[slack_start:dynstr.offset + dynstr.size - 1] = b'X' * (trailing - 1)
++    packed = ElfFile(bytes(host_blob))
++    with __import__('pytest').raises(ValueError, match='trailing zero bytes'):
++        packed.add_needed('libmk.so')
++
++    apk = tmp_path / 'packed.apk'
++    with zipfile.ZipFile(apk, 'w') as z:
++        z.writestr('lib/arm64-v8a/libil2cpp.so', bytes(host_blob))
++    runtime =
