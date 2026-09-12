@@ -1,0 +1,35 @@
+tStream(source);OutputStream out=new FileOutputStream(dest)){
++            byte[] buf=new byte[1024*1024];int n;long total=0,size=Math.max(1,source.length());
++            while((n=in.read(buf))!=-1){check();out.write(buf,0,n);total+=n;if(total%(8L*1024*1024)<buf.length)new Progress().progress("Installed scan: "+label+" · "+(total*100/size)+"%");}
++        }
++    }
++    private void buildInstalledApkSet(List<File> apks,File output) throws Exception {
++        File temp=new File(output.getParentFile(),output.getName()+".tmp");
++        try(ZipOutputStream z=new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(temp)))){
++            z.setLevel(0);byte[] buf=new byte[1024*1024];
++            for(File apk:apks){check();ZipEntry e=new ZipEntry(apk.getName());z.putNextEntry(e);try(InputStream in=new FileInputStream(apk)){int n;while((n=in.read(buf))!=-1){check();z.write(buf,0,n);}}z.closeEntry();}
++        }
++        Files.move(temp.toPath(),output.toPath(),StandardCopyOption.REPLACE_EXISTING);
++    }
++    private String safeApkName(String sourceName,int index,boolean base){
++        if(base)return "base.apk";String name=sourceName==null?"":new File(sourceName).getName();
++        name=name.replaceAll("[^A-Za-z0-9._-]","_");if(name.isEmpty()||!name.toLowerCase(Locale.ROOT).endsWith(".apk"))name="split-"+index+".apk";
++        if("base.apk".equalsIgnoreCase(name))name="split-"+index+"-base.apk";return name;
++    }
++    private void splitDiscovery(JSONObject scan) throws Exception {
++        File set=app.file("installed-apk-set.zip"),full=app.file("re-analysis.json");
++        app.progress("Installed scan: полной ARM64 IL2CPP-пары нет — multi-split DEX/.so/Unity Discovery…");
++        File meta=app.file("metadata.bin"),lib=app.file("library.so");
++        PyObject result=engine().callAttr("re_analyze_apk",set.getPath(),full.getPath(),meta.isFile()?meta.getPath():null,lib.isFile()?lib.getPath():null,null,null,null,new Progress(),"installed-apk-set-auto-discovery",true);
++        JSONObject re=new JSONObject(result.toString());JSONObject menuSeed=null;File menuSide=app.file("re-analysis.menu.json");
++        if(menuSide.isFile())try{menuSeed=new JSONObject(new String(Files.readAllBytes(menuSide.toPath()),java.nio.charset.StandardCharsets.UTF_8));}catch(Exception ignored){}
++        JSONArray candidates=menuSeed==null?new JSONArray():menuSeed.optJSONArray("controlCandidates");if(candidates==null)candidates=new JSONArray();
++        JSONObject summary=new JSONObject().put("schema","modkit-installed-discovery-1.0").put("installedScanOnly",true).put("installedScan",scan).put("reDiscovery",re).put("candidate_count",candidates.length()).put("candidates",candidates);
++        app.result=summary;byte[] bytes=summary.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);Files.write(app.file("analysis.json").toPath(),bytes);Files.write(app.file("analysis.summary.json").toPath(),bytes);
++        try{engine().callAttr("menu_seed_from_re",full.getPath(),app.file("menu-spec.json").getPath(),app.file("menu-project").getPath(),"ModKit Installed Discovery",new Progress());}catch(Exception seedError){new Progress().progress("Installed scan: Menu seed REVIEW — "+seedError.getMessage());}
++        app.progress("Installed scan готов: splits "+scan.optJSONObject("summary").optInt("splitCount")+", findings "+re.optInt("findingCount")+", Menu candidates "+candidates.length()+".");
++    }
++    private void scanInstalled(String packageName,String requestedLabel) throws Exception {
++        if(packageName==null||packageName.trim().isEmpty())throw new IOException("Не выбран package");
++        PackageManager pm=getPackageManager();ApplicationInfo info=pm.getApplicationInfo(packageName,0);CharSequence loaded=pm.getApplicationLabel(info);String label=requestedLabel==null||requestedLabel.isEmpty()?String.valueOf(loaded):requestedLabel;
++        clearInstalledAnalysisState();File dir=app.file("installed-apks");if(!d
