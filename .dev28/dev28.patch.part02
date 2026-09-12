@@ -1,0 +1,144 @@
+; g_page.store(0); }
+-        int start = page * max_visible;
+-        int rows = static_cast<int>(g_cfg->count) - start; if (rows > max_visible) rows = max_visible; if (rows < 0) rows = 0;
+-        const float height = header_h + rows * row_h;
+-        add_quad(left, top, left + width, top + height, 0.055f,0.075f,0.12f,0.96f);
+-        add_quad(left, top, left + width, top + header_h, 0.08f,0.13f,0.22f,1.0f);
+-        add_text(left + 18*scale, top + 20*scale, g_cfg->title, 2.6f*scale, 0.90f,0.96f,1.0f,1.0f, 22);
++        int start = page * g.max_visible;
++        int rows = filtered_count - start; if (rows > g.max_visible) rows = g.max_visible; if (rows < 0) rows = 0;
++        const float height = g.header_h + rows * g.row_h;
++        clamp_menu_position(screen_w, screen_h, g.width, height > g.header_h ? height : g.header_h, scale);
++        g = ui_geom(screen_w, screen_h);
++        add_quad(g.left, g.top, g.left + g.width, g.top + height, 0.055f,0.075f,0.12f,0.96f);
++        add_quad(g.left, g.top, g.left + g.width, g.top + g.title_h, 0.08f,0.13f,0.22f,1.0f);
++        add_text(g.left + 18*scale, g.top + 20*scale, g_cfg->title, 2.6f*scale, 0.90f,0.96f,1.0f,1.0f, 22);
+         if (pages > 1) {
+-            add_text(left + width - 142*scale, top + 20*scale, "<", 2.6f*scale, 0.75f,0.85f,1.0f,1.0f, 1);
+-            add_text(left + width - 94*scale, top + 20*scale, ">", 2.6f*scale, 0.75f,0.85f,1.0f,1.0f, 1);
++            add_text(g.left + g.width - 136*scale, g.top + 20*scale, "<", 2.4f*scale, 0.75f,0.85f,1.0f,1.0f, 1);
++            add_text(g.left + g.width - 108*scale, g.top + 20*scale, ">", 2.4f*scale, 0.75f,0.85f,1.0f,1.0f, 1);
++        }
++        add_text(g.left + g.width - 78*scale, g.top + 20*scale, "R", 2.4f*scale, 0.70f,0.95f,0.78f,1.0f, 1);
++        add_text(g.left + g.width - 36*scale, g.top + 20*scale, "X", 2.4f*scale, 1.0f,0.55f,0.55f,1.0f, 1);
++
++        float tab_w = g.width / static_cast<float>(TAB_COUNT);
++        for (int tab = 0; tab < static_cast<int>(TAB_COUNT); ++tab) {
++            float x0 = g.left + tab * tab_w;
++            float y0 = g.top + g.title_h;
++            bool active = tab == selected_tab;
++            add_quad(x0, y0, x0 + tab_w, y0 + g.tabs_h,
++                     active ? 0.16f : 0.07f, active ? 0.32f : 0.10f, active ? 0.56f : 0.16f, 1.0f);
++            add_text(x0 + 10*scale, y0 + 14*scale, tab_label(tab), 1.7f*scale,
++                     active ? 1.0f : 0.72f, active ? 1.0f : 0.78f, active ? 1.0f : 0.88f, 1.0f, 3);
+         }
+-        add_text(left + width - 40*scale, top + 20*scale, "X", 2.6f*scale, 1.0f,0.55f,0.55f,1.0f, 1);
++
+         for (int i = 0; i < rows; ++i) {
+-            int control_index = start + i;
++            int control_index = filtered[start + i];
+             const ConfigEntry &e = g_entries[control_index];
+-            float y0 = top + header_h + i * row_h;
+-            if (i & 1) add_quad(left, y0, left + width, y0 + row_h, 0.07f,0.09f,0.14f,0.8f);
+-            add_text(left + 16*scale, y0 + 19*scale, e.label[0] ? e.label : e.id,
++            float y0 = g.top + g.header_h + i * g.row_h;
++            if (i & 1) add_quad(g.left, y0, g.left + g.width, y0 + g.row_h, 0.07f,0.09f,0.14f,0.8f);
++            if (g_pressed_index.load() == control_index)
++                add_quad(g.left, y0, g.left + g.width, y0 + g.row_h, 0.16f,0.24f,0.36f,0.45f);
++            add_text(g.left + 16*scale, y0 + 19*scale, e.label[0] ? e.label : e.id,
+                      2.0f*scale, 0.88f,0.91f,0.96f,1.0f, 24);
+-            float bx0 = left + width * 0.70f, bx1 = left + width - 14*scale;
++            float bx0 = g.left + g.width * 0.70f, bx1 = g.left + g.width - 14*scale;
+             if (e.kind == K_BOOL) {
+                 bool on = g_state[control_index].value != 0.0f;
+-                add_quad(bx0, y0 + 12*scale, bx1, y0 + row_h - 12*scale,
++                add_quad(bx0, y0 + 12*scale, bx1, y0 + g.row_h - 12*scale,
+                          on?0.18f:0.25f, on?0.62f:0.28f, on?0.32f:0.32f, 1.0f);
+                 add_text(bx0 + 12*scale, y0 + 20*scale, on?"ON":"OFF", 1.8f*scale, 1,1,1,1, 3);
+             } else if (e.kind == K_ACTION) {
+-                add_quad(bx0, y0 + 12*scale, bx1, y0 + row_h - 12*scale, 0.16f,0.36f,0.66f,1.0f);
++                add_quad(bx0, y0 + 12*scale, bx1, y0 + g.row_h - 12*scale, 0.16f,0.36f,0.66f,1.0f);
+                 add_text(bx0 + 12*scale, y0 + 20*scale, "RUN", 1.8f*scale, 1,1,1,1, 3);
+             } else {
+                 float denom = e.max_value - e.min_value;
+                 float t = denom != 0 ? (g_state[control_index].value - e.min_value) / denom : 0;
+                 if (t < 0) t = 0; if (t > 1) t = 1;
+-                float sx0 = left + width * 0.48f;
++                float sx0 = g.left + g.width * 0.48f;
+                 add_quad(sx0, y0 + 23*scale, bx1, y0 + 35*scale, 0.18f,0.22f,0.30f,1.0f);
+                 add_quad(sx0, y0 + 23*scale, sx0 + (bx1 - sx0) * t, y0 + 35*scale, 0.20f,0.58f,0.92f,1.0f);
+             }
+@@ -570,7 +768,8 @@ int32_t hooked_get_action(const AInputEvent *event) {
+     if ((masked == AMOTION_EVENT_ACTION_DOWN || masked == AMOTION_EVENT_ACTION_UP || masked == AMOTION_EVENT_ACTION_MOVE) && g_get_x && g_get_y) {
+         float x = g_get_x(event, 0), y = g_get_y(event, 0);
+         g_touch_x.store(static_cast<int>(x)); g_touch_y.store(static_cast<int>(y));
+-        if (masked == AMOTION_EVENT_ACTION_UP) g_touch_up.store(1);
++        g_touch_action.store(masked);
++        g_touch_seq.fetch_add(1, std::memory_order_release);
+     }
+     return action;
+ }
+diff --git a/modkit/__init__.py b/modkit/__init__.py
+index 43efc96c7532df8dbae72d6df7c361ce750bbf3e..3f8a3fdd12467a049b8f5ac83369ab1670c948a9 100644
+--- a/modkit/__init__.py
++++ b/modkit/__init__.py
+@@ -6,6 +6,6 @@ Pipeline
+     libil2cpp.so ────────┴─> [dump.cs | native metadata] ─> IR ─> rules ─> features ─> Android module
+ """
+ 
+-__version__ = "0.9.0-dev27"
++__version__ = "0.9.0-dev28"
+ 
+ MODKIT_BANNER = f"modkit {__version__}"
+diff --git a/modkit/menu/runtime_config.py b/modkit/menu/runtime_config.py
+index 83402eaf9f2e399210c890206bb617305b965b1b..44fb3bd5c366aa1e36f5535716e613296cbe4f4a 100644
+--- a/modkit/menu/runtime_config.py
++++ b/modkit/menu/runtime_config.py
+@@ -17,7 +17,7 @@ import unicodedata
+ from modkit.elf.reader import ElfFile
+ 
+ MAGIC = b"MKCFG01\0"
+-VERSION = 2
++VERSION = 3
+ MAX_CONTROLS = 64
+ CONFIG_CAPACITY = 16 * 1024
+ RESERVED_MARKER = b"MODKITCFG_RESERVED_V1\0"
+@@ -35,6 +35,33 @@ F_ABI_IL2CPP = 1 << 8
+ F_INSTANCE = 1 << 9
+ F_RESOLVER_RETURN_PTR = 1 << 10
+ 
++TAB_ALL = 0
++TAB_COMBAT = 1
++TAB_PLAYER = 2
++TAB_RESOURCES = 3
++TAB_WORLD = 4
++TAB_DEBUG = 5
++
++
++def _tab_for_category(category: str, title: str = "") -> int:
++    """Map a review-time MenuSpec category to one generic runtime tab.
++
++    This is UI-only metadata. It never changes executable binding eligibility.
++    """
++    text = f"{category} {title}".lower()
++    words = set(text.replace("/", " ").replace("-", " ").replace("_", " ").split())
++    if words & {"combat", "damage", "health", "hp", "cooldown", "attack", "defense", "defence"}:
++        return TAB_COMBAT
++    if words & {"player", "movement", "speed", "progression", "level", "xp", "character", "actor"}:
++        return TAB_PLAYER
++    if words & {"resource", "resources", "currency", "inventory", "gold", "coin", "coins", "gems", "mana", "energy", "stamina"}:
++        return TAB_RESOURCES
++    if words & {"world", "camera", "fov", "weather", "time", "environment"}:
++        return TAB_WORLD
++    if words & {"debug", "developer", "dev", "console", "diagnostic", "diagnostics"}:
++        return TAB_DEBUG
++    return TAB_ALL
++
+ _RU = str.maketrans({
+     "А":"A","Б":"B","В":"V","Г":"G","Д":"D","Е":"E","Ё":"E","Ж":"Zh","З":"Z","И":"I","Й":"I","К":"K","Л":"L","М":"M","Н":"N","О":"O","П":"P","Р":"R","С":"S","Т":"T","У":"U","Ф":"F","Х":"Kh","Ц":"Ts","Ч":"Ch","Ш":"Sh","Щ":"Sch","Ъ":"","Ы":"Y","Ь":"","Э":"E","Ю":"Yu","Я":"Ya",
+     "а":"a","б":"b","в":"v","г":"g","д":"d","е":"e","ё":"e","ж":"zh","з":"z","и":"i","й":"i","к":"k","л":"l","м":"m","н":"n","о":"o","п":"p","р":"r","с":"s","т":"t","у":"u","ф":"f","х":"kh","ц":"ts","ч":"ch","ш":"sh","щ":"sch","ъ":"","ы":"y","ь":"","э":"e","ю":"yu","я":"ya",
+@@ -101,8 +128,9 @@ def encode_runtime_config(spec, *, render_host: str = "libunity.so") -> bytes:
+             if c.resolver_kind == "return_ptr":
+                 flags |= F_RESOLVER_RETURN_PTR
+             resolver_rva = int(c.resolver_rva)
++        tab = _tab_for_
