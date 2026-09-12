@@ -81,14 +81,18 @@ jobs:
           cd /tmp/modkit-dev25
           git apply --check /tmp/dev27.patch
           git apply /tmp/dev27.patch
-          echo '--- build.gradle version ---'
-          grep -nE 'versionCode|versionName' android/app/build.gradle || true
-          echo '--- pyproject version ---'
-          grep -n '^version' pyproject.toml || true
-          echo '--- package version ---'
-          grep -n '__version__' modkit/__init__.py || true
-          echo '--- release files ---'
-          ls -l RELEASE-0.9.0-DEV27-RU.md VALIDATION-DEV27.json 2>&1 || true
+          python - <<'PY'
+          from pathlib import Path
+          replacements = [
+              (Path('pyproject.toml'), 'version = "0.9.0.dev26"', 'version = "0.9.0.dev27"'),
+              (Path('modkit/__init__.py'), '__version__ = "0.9.0-dev26"', '__version__ = "0.9.0-dev27"'),
+          ]
+          for path, old, new in replacements:
+              text = path.read_text()
+              if text.count(old) != 1:
+                  raise SystemExit(f'{path}: expected exactly one {old!r}, found {text.count(old)}')
+              path.write_text(text.replace(old, new, 1))
+          PY
           grep -q "versionCode 32" android/app/build.gradle
           grep -q "versionName '0.9.0-dev27'" android/app/build.gradle
           grep -q 'version = "0.9.0.dev27"' pyproject.toml
