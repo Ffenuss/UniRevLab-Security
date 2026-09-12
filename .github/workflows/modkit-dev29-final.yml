@@ -5,6 +5,7 @@ on:
     branches: [ Modkit1 ]
     paths:
       - '.github/workflows/modkit-dev29-final.yml'
+      - '.dev29/**'
   workflow_dispatch:
 
 permissions:
