@@ -1,0 +1,233 @@
+diff --git a/RELEASE-0.9.0-DEV28-RU.md b/RELEASE-0.9.0-DEV28-RU.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..6dd2e8b98f87fa69d31435b60d5ef191452ad537
+--- /dev/null
++++ b/RELEASE-0.9.0-DEV28-RU.md
+@@ -0,0 +1,29 @@
++# ModKit 0.9.0-dev28
++
++## Главное
++
++Dev28 развивает универсальный Menu Runtime поверх dev27 Evidence Graph и fail-closed binding. Production-код не содержит правил под конкретную игру.
++
++### Runtime Menu v3
++
++- вкладки `ALL / Combat / Player / Resources / World / Debug`;
++- категория передаётся из `MenuSpec` как UI-only metadata и не влияет на executable eligibility;
++- drag панели и свёрнутой кнопки использует общую геометрию с hit-testing;
++- после перемещения кнопки нажимаются в фактической позиции панели;
++- визуальная подсветка строки на нажатие;
++- `Reset All` возвращает non-action controls к исходным default и применяет только уже подтверждённые bindings;
++- runtime config schema v3, при этом чтение v1/v2 сохранено;
++- Menu Builder по-прежнему fail-closed: неподтверждённые discovery/review методы не попадают в executable runtime.
++
++### Безопасность binding
++
++Dev28 не добавляет game-specific offsets, автоматические purchase/currency bypass и не повышает review evidence до callable control. Exact RVA, ABI, semantic/context gates, resolver для instance methods и APK/ELF preflight остаются обязательными.
++
++## Проверки
++
++- 292/292 Python tests
++- strict host C++ compile contract
++- selftest
++- runtime-check
++- Android assembleDebug/lintDebug
++- unzip/zipalign/apksigner в GitHub Actions
+diff --git a/VALIDATION-DEV28.json b/VALIDATION-DEV28.json
+new file mode 100644
+index 0000000000000000000000000000000000000000..d5bbbbe92f3732c70246381a30f6ca18340070e7
+--- /dev/null
++++ b/VALIDATION-DEV28.json
+@@ -0,0 +1,36 @@
++{
++  "schema": "modkit-validation-dev28-1.0",
++  "version": "0.9.0-dev28",
++  "versionCode": 33,
++  "pythonTests": 292,
++  "features": {
++    "runtimeConfigVersion": 3,
++    "tabs": [
++      "ALL",
++      "Combat",
++      "Player",
++      "Resources",
++      "World",
++      "Debug"
++    ],
++    "dragSafeHitTesting": true,
++    "pressFeedback": true,
++    "resetAll": true,
++    "legacyRuntimeConfigRead": [
++      "v1",
++      "v2"
++    ],
++    "failClosedBinding": true,
++    "gameSpecificProductionRules": false
++  },
++  "requiredActions": [
++    "pytest",
++    "selftest",
++    "runtime-check",
++    "assembleDebug",
++    "lintDebug",
++    "unzip",
++    "zipalign",
++    "apksigner"
++  ]
++}
+diff --git a/android/app/build.gradle b/android/app/build.gradle
+index b6c00f9b2626f010cf43992a8fd015dca091c34d..653558c528cd2126b883ac34763e717660019ff0 100644
+--- a/android/app/build.gradle
++++ b/android/app/build.gradle
+@@ -6,8 +6,8 @@ android {
+         applicationId 'dev.modkit.mobile'
+         minSdk 26
+         targetSdk 34
+-        versionCode 32
+-        versionName '0.9.0-dev27'
++        versionCode 33
++        versionName '0.9.0-dev28'
+         ndk { abiFilters 'arm64-v8a', 'x86_64' }
+         externalNativeBuild { cmake { arguments '-DANDROID_STL=c++_static' } }
+     }
+diff --git a/android/app/src/main/cpp/modkit_runtime.cpp b/android/app/src/main/cpp/modkit_runtime.cpp
+index e0671a111999db23eff1bee737f97be52a4f8cdd..f70b1e62dcd0f80a1c2a99a76b4de4c28ad2f605 100644
+--- a/android/app/src/main/cpp/modkit_runtime.cpp
++++ b/android/app/src/main/cpp/modkit_runtime.cpp
+@@ -31,6 +31,13 @@ constexpr uint32_t K_FLOAT = 4;
+ constexpr uint32_t F_ABI_IL2CPP = 1u << 8;
+ constexpr uint32_t F_INSTANCE = 1u << 9;
+ constexpr uint32_t F_RESOLVER_RETURN_PTR = 1u << 10;
++constexpr uint32_t TAB_ALL = 0;
++constexpr uint32_t TAB_COMBAT = 1;
++constexpr uint32_t TAB_PLAYER = 2;
++constexpr uint32_t TAB_RESOURCES = 3;
++constexpr uint32_t TAB_WORLD = 4;
++constexpr uint32_t TAB_DEBUG = 5;
++constexpr uint32_t TAB_COUNT = 6;
+ 
+ #pragma pack(push, 1)
+ struct ConfigHeader {
+@@ -80,9 +87,20 @@ Module g_target{};
+ std::atomic<bool> g_ready{false};
+ std::atomic<bool> g_visible{true};
+ std::atomic<int> g_page{0};
++std::atomic<int> g_tab{0};
++std::atomic<int> g_menu_x{-1};
++std::atomic<int> g_menu_y{-1};
+ std::atomic<int> g_touch_x{-1};
+ std::atomic<int> g_touch_y{-1};
+-std::atomic<int> g_touch_up{0};
++std::atomic<int> g_touch_action{-1};
++std::atomic<uint32_t> g_touch_seq{0};
++std::atomic<int> g_drag_mode{0};  // 0 none, 1 panel, 2 collapsed icon
++std::atomic<int> g_drag_dx{0};
++std::atomic<int> g_drag_dy{0};
++std::atomic<int> g_drag_start_x{0};
++std::atomic<int> g_drag_start_y{0};
++std::atomic<int> g_drag_moved{0};
++std::atomic<int> g_pressed_index{-1};
+ 
+ using FnSwap = EGLBoolean (*)(EGLDisplay, EGLSurface);
+ using FnGetAction = int32_t (*)(const AInputEvent *);
+@@ -95,7 +113,7 @@ FnGetCoord g_get_y = nullptr;
+ bool valid_config() {
+     static const char magic[8] = {'M','K','C','F','G','0','1','\0'};
+     const auto *h = reinterpret_cast<const ConfigHeader *>(modkit_config_region);
+-    if (memcmp(h->magic, magic, sizeof(magic)) != 0 || h->version != 2 || h->count > kMaxControls) {
++    if (memcmp(h->magic, magic, sizeof(magic)) != 0 || (h->version != 2 && h->version != 3) || h->count > kMaxControls) {
+         return false;
+     }
+     const size_t need = sizeof(ConfigHeader) + static_cast<size_t>(h->count) * sizeof(ConfigEntry);
+@@ -438,38 +456,135 @@ void apply_control(uint32_t i) {
+     }
+ }
+ 
++struct UiGeom {
++    float scale = 1.0f;
++    float left = 0.0f;
++    float top = 0.0f;
++    float width = 0.0f;
++    float row_h = 0.0f;
++    float title_h = 0.0f;
++    float tabs_h = 0.0f;
++    float header_h = 0.0f;
++    int max_visible = 1;
++};
++
++uint32_t entry_tab(const ConfigEntry &e) {
++    if (!g_cfg || g_cfg->version < 3) return TAB_ALL;
++    uint32_t tab = static_cast<uint32_t>(e.reserved[0]);
++    return tab < TAB_COUNT ? tab : TAB_ALL;
++}
++
++const char *tab_label(int tab) {
++    switch (tab) {
++        case TAB_COMBAT: return "CMB";
++        case TAB_PLAYER: return "PLY";
++        case TAB_RESOURCES: return "RES";
++        case TAB_WORLD: return "WRL";
++        case TAB_DEBUG: return "DBG";
++        default: return "ALL";
++    }
++}
++
++int collect_tab_indices(int tab, int out[kMaxControls]) {
++    if (!g_cfg) return 0;
++    int count = 0;
++    for (uint32_t i = 0; i < g_cfg->count && count < static_cast<int>(kMaxControls); ++i) {
++        if (tab == static_cast<int>(TAB_ALL) || entry_tab(g_entries[i]) == static_cast<uint32_t>(tab)) {
++            out[count++] = static_cast<int>(i);
++        }
++    }
++    return count;
++}
++
++UiGeom ui_geom(int screen_w, int screen_h) {
++    UiGeom g{};
++    const float sx = screen_w / 1080.0f, sy = screen_h / 1920.0f;
++    g.scale = sx < sy ? sx : sy;
++    const int default_x = static_cast<int>(24.0f * g.scale);
++    const int default_y = static_cast<int>(40.0f * g.scale);
++    if (g_menu_x.load() < 0) g_menu_x.store(default_x);
++    if (g_menu_y.load() < 0) g_menu_y.store(default_y);
++    g.left = static_cast<float>(g_menu_x.load());
++    g.top = static_cast<float>(g_menu_y.load());
++    const float max_width = 620.0f * g.scale;
++    const float room = screen_w - g.left - 16.0f * g.scale;
++    g.width = room < max_width ? room : max_width;
++    if (g.width < 320.0f * g.scale) g.width = 320.0f * g.scale;
++    g.row_h = 58.0f * g.scale;
++    g.title_h = 62.0f * g.scale;
++    g.tabs_h = 42.0f * g.scale;
++    g.header_h = g.title_h + g.tabs_h;
++    g.max_visible = static_cast<int>((screen_h - (g.top + g.header_h) - 24.0f * g.scale) / g.row_h);
++    if (g.max_visible < 1) g.max_visible = 1;
++    return g;
++}
++
++void clamp_menu_position(int screen_w, int screen_h, float width, float height, float scale) {
++    int x = g_menu_x.load(), y = g_menu_y.load();
++    const int margin = static_cast<int>(8.0f * scale);
++    int max_x = screen_w - static_cast<int>(width) - margin;
++    int max_y = screen_h - static_cast<int>(height) - margin;
++    if (max_x < margin) max_x = margin;
++    if (max_y < margin) max_y = margin;
++    if (x < margin) x = margin; if (x > max_x) x = max_x;
++    if (y < margin) y = margin; if (y > max_y) y = max_y;
++    g_menu_x.store(x); g_menu_y.store(y);
++}
++
++void reset_controls() {
++    if (!g_cfg) return;
++    for (uint32_t i = 0; i < g_cfg->count; ++i) {
++        const ConfigEntry &e = g_entries[i];
++        if (e.kind == K_ACTION) continue;
++        g_state[i].value = e.default_value;
++        apply_control(i);
++    }
++    MKLOGI("menu reset: restored defaults for non-action controls");
++}
++
+ void handle_tap(int x, int y, int screen_w, int screen_h) {
+     if (!g_cfg) re
