@@ -1,0 +1,52 @@
+ADY":"не найдена полностью")+
++                "\nRE findings: "+(rs==null?0:rs.optInt("findingCount"))+" · Menu candidates: "+(rs==null?0:rs.optInt("controlCandidateCount"))+
++                "\nВсе base/split APK просканированы как один APK-set.");
++        } else {
+             gameplay.setText(gameplaySummary(shown.optJSONObject("gameplayDiscovery")));
+             JSONArray a=shown.optJSONArray("candidates");
+             int candidateCount=a!=null?a.length():shown.optInt("candidate_count",0);
+diff --git a/android/app/src/main/java/dev/modkit/mobile/WorkerService.java b/android/app/src/main/java/dev/modkit/mobile/WorkerService.java
+index fe18a56..3113ede 100644
+--- a/android/app/src/main/java/dev/modkit/mobile/WorkerService.java
++++ b/android/app/src/main/java/dev/modkit/mobile/WorkerService.java
+@@ -2,6 +2,7 @@ package dev.modkit.mobile;
+ 
+ import android.app.*;
+ import android.content.*;
++import android.content.pm.*;
+ import android.net.Uri;
+ import android.os.*;
+ import android.provider.DocumentsContract;
+@@ -12,6 +13,8 @@ import org.json.JSONArray;
+ import java.io.*;
+ import java.nio.file.Files;
+ import java.nio.file.StandardCopyOption;
++import java.util.*;
++import java.util.zip.*;
+ 
+ public class WorkerService extends Service {
+     private App app;
+@@ -54,7 +57,8 @@ public class WorkerService extends Service {
+         new Thread(() -> {
+             try {
+                 String op=intent.getStringExtra("op");
+-                if ("import".equals(op)) importFile(Uri.parse(intent.getStringExtra("uri")),intent.getStringExtra("name"),intent.getStringExtra("display"));
++                if ("scan_installed".equals(op)) scanInstalled(intent.getStringExtra("package"),intent.getStringExtra("label"));
++                else if ("import".equals(op)) importFile(Uri.parse(intent.getStringExtra("uri")),intent.getStringExtra("name"),intent.getStringExtra("display"));
+                 else if ("analyze".equals(op)) analyze();
+                 else if ("deep_method".equals(op)) deepMethod(intent.getIntExtra("method_id",-1));
+                 else if ("report".equals(op)) reportFile(Uri.parse(intent.getStringExtra("uri")));
+@@ -107,7 +111,84 @@ public class WorkerService extends Service {
+         if(f.isDirectory()){File[] children=f.listFiles();if(children!=null)for(File c:children)deleteTree(c);}
+         if(!f.delete()&&f.exists())throw new IOException("Не удалось очистить старый RE-артефакт: "+f.getName());
+     }
++    private void clearInstalledAnalysisState() throws Exception {
++        app.result=null;
++        for(String name:new String[]{"metadata.bin","library.so","game.apk","game-native-split.apk","analysis.json","analysis.summary.json","analysis.ui.jsonl","analysis.methods.jsonl","analysis.methods.jsonl.idx","analysis.methods.jsonl.pages.idx","analysis.methods.jsonl.rva.idx","analysis.methods.meta.json","analysis.candidates.jsonl","analysis.discoveries.jsonl","analysis.evidence-graph.jsonl","analysis.evidence-graph.jsonl.idx","analysis.evidence-graph.meta.json","analysis.fields.jsonl","analysis.resolver-index.json","analysis.autopilot-index.jsonl","analysis.gameplay-coverage.json","re-analysis.json","re-analysis.ui.json","re-analysis.menu.json","menu-spec.json","menu-result.json","menu-preflight.json","menu-validation.json"})
++            Files.deleteIfExists(app.file(name).toPath());
++        deleteTree(app.file("analysis-deep"));deleteTree(app.file("rodroid"));deleteTree(app.file("menu-project"));deleteTree(app.file("installed-apks"));
++        Files.deleteIfExists(app.file("installed-apk-set.zip").toPath());Files.deleteIfExists(app.file("installed-scan.json").toPath());
++        getSharedPreferences("state",0).edit().remove("selections").remove("metadata.bin").remove("library.so").remove("game.apk").apply();
++    }
++    private void copyInstalledFile(File source,File dest,String label) throws Exception {
++        try(InputStream in=new FileInpu
