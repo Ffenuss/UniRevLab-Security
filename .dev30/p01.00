@@ -1,0 +1,34 @@
+int d){}public void onTextChanged(CharSequence s,int a,int b,int c){rebuild.run();}public void afterTextChanged(Editable e){}});
++        rebuild.run();
++        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Установленная игра / приложение").setView(box).setNegativeButton("Отмена",null).create();
++        listView.setOnItemClickListener((parent,view,pos,id)->{
++            if(pos<0||pos>=visible.size())return;ResolveInfo r=visible.get(pos);String pkg=r.activityInfo.packageName,label=String.valueOf(r.loadLabel(pm));dialog.dismiss();
++            start(new Intent().putExtra("op","scan_installed").putExtra("package",pkg).putExtra("label",label));
++        });
++        dialog.show();
++    }
++
+     private void pick(int code) {
+         startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE),code);
+     }
+@@ -160,8 +205,8 @@ public class MainActivity extends Activity {
+     private void refresh() {
+         if(revision==app.revision)return;revision=app.revision;
+         boolean busy=app.busy.get();status.setText(app.status);progress.setVisibility(busy?View.VISIBLE:View.GONE);cancel.setVisibility(busy?View.VISIBLE:View.GONE);
+-        metadata.setEnabled(!busy);library.setEnabled(!busy);game.setEnabled(!busy);analyze.setEnabled(!busy&&app.file("metadata.bin").exists()&&app.file("library.so").exists());export.setEnabled(!busy&&app.result!=null);dumpExport.setEnabled(!busy&&app.result!=null);buildGame.setEnabled(!busy&&app.result!=null);report.setEnabled(!busy&&app.result!=null);refreshCatalogToggle();
+-        files.setText("Метаданные: "+getSharedPreferences("state",0).getString("metadata.bin","не выбраны")+"\nБиблиотека: "+getSharedPreferences("state",0).getString("library.so","не выбрана")+"\nAPK игры: "+getSharedPreferences("state",0).getString("game.apk","не выбран"));
++        metadata.setEnabled(!busy);library.setEnabled(!busy);game.setEnabled(!busy);installedGame.setEnabled(!busy);analyze.setEnabled(!busy&&app.file("metadata.bin").exists()&&app.file("library.so").exists());export.setEnabled(!busy&&app.result!=null);dumpExport.setEnabled(!busy&&app.result!=null);buildGame.setEnabled(!busy&&app.result!=null);report.setEnabled(!busy&&app.result!=null);refreshCatalogToggle();
++        files.setText("Метаданные: "+getSharedPreferences("state",0).getString("metadata.bin","не выбраны")+"\nБиблиотека: "+getSharedPreferences("state",0).getString("library.so","не выбрана")+"\nAPK игры: "+getSharedPreferences("state",0).getString("game.apk","не выбран")+"\nУстановленный пакет: "+getSharedPreferences("state",0).getString("installed.package","не выбран"));
+         long currentDeepStamp=app.file("analysis-deep").lastModified();boolean deepChanged=deepStamp!=currentDeepStamp;deepStamp=currentDeepStamp;
+         boolean resultChanged=shown!=app.result;
+         if(resultChanged) {
+@@ -170,7 +215,14 @@ public class MainActivity extends Activity {
+             renderRows();
+         } else if(deepChanged&&fullCatalog&&!busy) renderRows();
+         if(shown==null){summary.setText("Дамп: Rodroid Il2CppDumper V7 · источник истины dump.cs/script.json.");gameplay.setText("");}
+-        else {
++        else if(shown.optBoolean("installedScanOnly")){
++            JSONObject scan=shown.optJSONObject("installedScan"),rs=shown.optJSONObject("reDiscovery");JSONObject ss=scan==null?null:scan.optJSONObject("summary");
++            gameplay.setText("");summary.setText("Installed APK-set · "+(scan==null?"split-discovery":scan.optString("mode","split-discovery"))+
++                "\nSplits: "+(ss==null?0:ss.optInt("splitCount"))+" · DEX: "+(ss==null?0:ss.optInt("dexCount"))+" · .so: "+(ss==null?0:ss.optInt("nativeCount"))+
++                "\nIL2CPP pair: "+(scan!=null&&scan.optBoolean("fullIl2cppPair")?"RE
