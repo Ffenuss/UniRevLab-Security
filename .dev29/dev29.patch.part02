@@ -1,0 +1,78 @@
+ tmp_path / 'libmk.so'
++    runtime.write_bytes(fixtures.runtime_so_blob())
++    spec = MenuSpec('Packed', controls=[MenuControl(
++        'debug', 'Debug', 'toggle', rva=0x1040, binding='bool_setter',
++        target_so='libil2cpp.so', default=None,
++    )])
++    pack = tmp_path / 'payload.zip'
++    result = write_patch_payload(spec, apk, runtime, pack)
++    assert result['inspection']['blocked'] is False
++    with zipfile.ZipFile(pack) as z:
++        manifest = json.loads(z.read('modkit-payload.json'))
++    assert manifest['autoload'][0]['strategy'] == 'safe-system-chain'
++    assert manifest['preflight']['strategy'] == 'needed-chain'
++    assert manifest['preflight']['displacedDependency'] == 'liblog.so'
+diff --git a/tests/test_mobile.py b/tests/test_mobile.py
+index 28615b6..aee2ff6 100644
+--- a/tests/test_mobile.py
++++ b/tests/test_mobile.py
+@@ -1259,3 +1259,11 @@ def test_dev27_package_scan_is_discovery_only_and_filters_framework_noise(tmp_pa
+     assert not any('grant' in x.get('value','').lower() for x in currency)
+     assert not any('keepalive' in x.get('value','').lower() for x in hits if x.get('domains'))
+     assert not any('resource' in (x.get('domains') or []) for x in hits)
++
++
++def test_dev29_runtime_reset_skips_controls_without_known_default():
++    from pathlib import Path
++    src = Path('android/app/src/main/cpp/modkit_runtime.cpp').read_text(encoding='utf-8')
++    assert 'F_DEFAULT_KNOWN = 1u << 1' in src
++    assert '(e.flags & F_DEFAULT_KNOWN) == 0' in src
++    assert 'restored known defaults only' in src
+diff --git a/mnt/data/modkit-dev28/RELEASE-0.9.0-DEV29-RU.md b/RELEASE-0.9.0-DEV29-RU.md
+new file mode 100644
+index 0000000..0bb7f6a
+--- /dev/null
++++ b/RELEASE-0.9.0-DEV29-RU.md
+@@ -0,0 +1,30 @@
++# ModKit 0.9.0-dev29
++
++## Главное
++
++Dev29 закрывает две проблемы, обнаруженные при end-to-end тестировании Menu Runtime на split-APK с плотно упакованным native ELF. Production-код остаётся универсальным и не содержит правил под конкретную игру.
++
++### Safe autoload для packed ELF
++
++- `write_patch_payload` сначала пробует обычный additive `DT_NEEDED`;
++- если `.dynstr/.dynamic` не имеют безопасного slack, применяется уже проверенная стратегия `safe-system-chain`;
++- вытесняется только allowlisted system dependency, которую сам runtime напрямую сохраняет в своей dependency chain;
++- preview и PatchPack inspector используют одинаковую fail-closed модель;
++- ни один ELF section/segment не переносится и не расширяется наугад.
++
++### Reset All с provenance default
++
++- runtime-config v3 получил флаг `F_DEFAULT_KNOWN`;
++- `Reset All` вызывает setter только когда исходный/нейтральный default явно известен в `MenuSpec`;
++- bool-control с `default=None` может переключаться пользователем, но Reset All не записывает в него выдуманный `false`;
++- action controls по-прежнему не участвуют в reset;
++- схема остаётся v3, старые v1/v2 продолжают читаться.
++
++## Проверки
++
++- 295/295 Python tests
++- selftest OK
++- runtime-check OK (`builtin-runtime-v3 clang++ strict`)
++- packed-dynstr regression
++- default-provenance/reset regression
++- Android assembleDebug/lintDebug + unzip/zipalign/apksigner в GitHub Actions
+diff --git a/mnt/data/modkit-dev28/VALIDATION-DEV29.json b/VALIDATION-DEV29.json
+new file mode 100644
+index 0000000..4027b39
+--- /dev/null
++++ b/VALIDATION-DEV29.json
+@@ -0,0 +1,20 @@
++{
++  "schema": "modkit-validation-dev29-1.0",
++  "version": "0.9.0-dev29",
++  "versionCode": 34,
++  "pythonTests": 295,
++  "
