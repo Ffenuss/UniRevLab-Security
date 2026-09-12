@@ -1,0 +1,137 @@
+category(getattr(c, "category", ""), c.title or c.id)
+         rows += ENTRY.pack(kind, flags, int(c.rva), resolver_rva, lo, hi, default,
+-                           _fixed(c.id, 48), _fixed(c.title or c.id, 80), b"\0" * 4)
++                           _fixed(c.id, 48), _fixed(c.title or c.id, 80), bytes((tab, 0, 0, 0)))
+     blob = header + bytes(rows)
+     if len(blob) > CONFIG_CAPACITY:
+         raise ValueError(f"runtime configuration is {len(blob)} bytes; capacity is {CONFIG_CAPACITY}")
+@@ -113,18 +141,18 @@ def decode_runtime_config(blob: bytes) -> dict:
+     if len(blob) < HEADER.size:
+         raise ValueError("runtime config is truncated")
+     magic, version, count, target, render, title, _ = HEADER.unpack_from(blob, 0)
+-    if magic != MAGIC or version not in (1, VERSION):
++    if magic != MAGIC or version not in (1, 2, VERSION):
+         raise ValueError("runtime config magic/version mismatch")
+     if count > MAX_CONTROLS:
+         raise ValueError("runtime config control count exceeds limit")
+-    entry_struct = ENTRY if version == VERSION else ENTRY_V1
++    entry_struct = ENTRY if version >= 2 else ENTRY_V1
+     need = HEADER.size + count * entry_struct.size
+     if need > len(blob):
+         raise ValueError("runtime config entries are truncated")
+     controls = []
+     pos = HEADER.size
+     for _i in range(count):
+-        if version == VERSION:
++        if version >= 2:
+             kind, flags, rva, resolver_rva, lo, hi, default, cid, label, _pad = ENTRY.unpack_from(blob, pos)
+         else:
+             kind, flags, rva, lo, hi, default, cid, label, _pad = ENTRY_V1.unpack_from(blob, pos)
+@@ -135,11 +163,14 @@ def decode_runtime_config(blob: bytes) -> dict:
+         resolver_kind = None
+         if resolver_rva:
+             resolver_kind = "return_ptr" if (flags & F_RESOLVER_RETURN_PTR) else "out_ptr_bool"
++        tab = int(_pad[0]) if version >= 3 and _pad else TAB_ALL
+         controls.append({"kind": kind, "flags": flags, "rva": rva, "resolverRva": resolver_rva or None,
+                          "resolverKind": resolver_kind,
+                          "callAbi": call_abi, "isStatic": is_static, "min": lo, "max": hi,
+-                         "default": default, "id": _cstr(cid), "label": _cstr(label)})
+-    return {"schema": "modkit-runtime-config-2.0" if version == VERSION else "modkit-runtime-config-1.0",
++                         "default": default, "id": _cstr(cid), "label": _cstr(label),
++                         "tab": tab})
++    schema = "modkit-runtime-config-3.0" if version == 3 else ("modkit-runtime-config-2.0" if version == 2 else "modkit-runtime-config-1.0")
++    return {"schema": schema,
+             "version": version, "targetSo": _cstr(target), "renderHost": _cstr(render),
+             "title": _cstr(title), "controls": controls, "bytesUsed": need}
+ 
+diff --git a/modkit/selftest/__init__.py b/modkit/selftest/__init__.py
+index 6ede6462687b5d3c4af471673a604d5dcb72ba2d..ffda0f9e3cfcef1a1c5be1bf3e5a6b990b9688a7 100644
+--- a/modkit/selftest/__init__.py
++++ b/modkit/selftest/__init__.py
+@@ -117,7 +117,7 @@ def compile_builtin_runtime() -> list[str]:
+     ], capture_output=True, text=True)
+     if proc.returncode != 0:
+         raise AssertionError(f"built-in runtime v2 failed host compile:\n{proc.stdout}\n{proc.stderr}")
+-    return [f"builtin-runtime-v2 {Path(compiler).name} strict"]
++    return [f"builtin-runtime-v3 {Path(compiler).name} strict"]
+ 
+ 
+ def runtime_v2_check(tmp: Path) -> dict:
+@@ -136,7 +136,7 @@ def runtime_v2_check(tmp: Path) -> dict:
+     ])
+     cfg = encode_runtime_config(spec)
+     decoded = decode_runtime_config(cfg)
+-    assert decoded["version"] == 2 and len(decoded["controls"]) == 2
++    assert decoded["version"] == 3 and len(decoded["controls"]) == 2
+     assert decoded["controls"][0]["resolverRva"] == 0x1044
+     assert decoded["controls"][0]["isStatic"] is False
+     patched, report = patch_runtime_blob(fixtures.runtime_so_blob(), cfg)
+diff --git a/pyproject.toml b/pyproject.toml
+index 85255cf6c03c1d722e3c78effb4308ad9d99db4b..9b2336699aa7eaffb98f76d47ce1caf54a6cc1fb 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
+ 
+ [project]
+ name = "modkit"
+-version = "0.9.0.dev27"
++version = "0.9.0.dev28"
+ description = "Offline Il2Cpp mod-menu generator: global-metadata.dat + libil2cpp.so -> an Android module"
+ readme = "README.md"
+ requires-python = ">=3.11"
+diff --git a/tests/test_runtime_config.py b/tests/test_runtime_config.py
+index b9fb70f3f804efb2e99650f462645311723a8528..b312183110492939b0b67dd3944e2a7e408d346e 100644
+--- a/tests/test_runtime_config.py
++++ b/tests/test_runtime_config.py
+@@ -39,7 +39,7 @@ def test_runtime_config_roundtrips_il2cpp_instance_resolver():
+     )])
+     decoded = decode_runtime_config(encode_runtime_config(spec))
+     row = decoded["controls"][0]
+-    assert decoded["version"] == 2
++    assert decoded["version"] == 3
+     assert row["rva"] == 0x2000
+     assert row["resolverRva"] == 0x3000
+     assert row["resolverKind"] == "out_ptr_bool"
+@@ -105,3 +105,15 @@ def test_generic_runtime_rejects_numeric_value_abi_mismatch():
+             'double', 'Double', 'slider_float', rva=0x1000, binding='number_setter',
+             min_value=0, max_value=10, value_type='System.Double'
+         )]))
++
++
++def test_runtime_config_encodes_generic_ui_tabs():
++    spec = MenuSpec("Tabs", controls=[
++        MenuControl("damage", "Damage", "toggle", category="Combat", rva=0x1000, binding="bool_setter"),
++        MenuControl("speed", "Move Speed", "slider_float", category="Movement", rva=0x2000, binding="number_setter", min_value=0.5, max_value=3.0),
++        MenuControl("gold", "Gold", "slider_int", category="Currency", rva=0x3000, binding="number_setter", min_value=0, max_value=100),
++        MenuControl("time", "Time Scale", "slider_float", category="World", rva=0x4000, binding="number_setter", min_value=0.5, max_value=2.0),
++        MenuControl("dbg", "Debug", "toggle", category="Debug", rva=0x5000, binding="bool_setter"),
++    ])
++    rows = decode_runtime_config(encode_runtime_config(spec))["controls"]
++    assert [r["tab"] for r in rows] == [1, 2, 3, 4, 5]
+diff --git a/tests/test_runtime_cpp_contract.py b/tests/test_runtime_cpp_contract.py
+index 68f3266eab65c0600a79089416febf15cf177d3f..7720276639efa050137ee8763a7efdc5405422e2 100644
+--- a/tests/test_runtime_cpp_contract.py
++++ b/tests/test_runtime_cpp_contract.py
+@@ -4,16 +4,19 @@ import re
+ from modkit.menu.runtime_config import VERSION, ENTRY, F_ABI_IL2CPP, F_INSTANCE, F_RESOLVER_RETURN_PTR
+ 
+ 
+-def test_android_runtime_cpp_matches_python_config_v2_contract():
++def test_android_runtime_cpp_matches_python_config_v3_contract():
+     src = Path("android/app/src/main/cpp/modkit_runtime.cpp").read_text(encoding="utf-8")
+-    assert VERSION == 2
++    assert VERSION == 3
+     assert ENTRY.size == 168
+     assert "uint64_t resolver_rva;" in src
+     assert 'static_assert(sizeof(ConfigEntry) == 168' in src
+-    assert re.search(r"h->version\s*!=\s*2", src)
++    assert "h->version != 2 && h->version != 3" in src
+     assert "F_ABI_IL2CPP = 1u << 8" in src
+     assert "F_INSTANCE = 1u << 9" in src
+     assert "F_RESOLVER_RETURN_PTR = 1u << 10" in src
++    assert "TAB_COUNT = 6" in src
++    assert "g_menu_x" in src and "g_menu_y" in src
++    assert "handle_touch" in src
+     assert F_ABI_IL2CPP == 1 << 8
+     assert F_INSTANCE == 1 << 9
+     assert F_RESOLVER_RETURN_PTR == 1 << 10
