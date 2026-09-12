@@ -1,45 +1,152 @@
-name: Apply ModKit dev27 sources
+name: Build ModKit 0.9.0-dev27 Final
 
 on:
   push:
-    branches: [Modkit1]
+    branches: [ Modkit1 ]
     paths:
       - '.github/workflows/dev27-bootstrap.yml'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  apply:
+  build:
     runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      NDK_PIN: 26.3.11579264
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          fetch-depth: 0
-      - name: Repair transport and apply exact dev27 patch
+          python-version: '3.12'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Install Android toolchain
         run: |
           set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-34' 'build-tools;34.0.0' "ndk;${NDK_PIN}" 'cmake;3.22.1'
+
+      - name: Reconstruct exact dev26
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check pyyaml
+          python - <<'PY'
+          import os, subprocess, yaml
+          from pathlib import Path
+          wf = yaml.safe_load(Path('.github/workflows/modkit-dev26-final.yml').read_text())
+          build = wf['jobs']['build']
+          env = os.environ.copy()
+          env.update({str(k): str(v) for k, v in (build.get('env') or {}).items()})
+          wanted = {'Reconstruct exact dev25', 'Verify and apply exact dev26'}
+          found = []
+          for step in build['steps']:
+              if step.get('name') not in wanted:
+                  continue
+              found.append(step['name'])
+              subprocess.run(['bash', '-euo', 'pipefail', '-c', step['run']], check=True, env=env)
+          assert set(found) == wanted, found
+          PY
+          grep -q "versionCode 31" /tmp/modkit-dev25/android/app/build.gradle
+          grep -q "versionName '0.9.0-dev26'" /tmp/modkit-dev25/android/app/build.gradle
+
+      - name: Verify and apply exact dev27
+        run: |
+          set -euo pipefail
+          cp .dev27/dev27.patch.gz.b64.02 /tmp/dev27-part02
           python - <<'PY'
           from pathlib import Path
-          p = Path('.dev27/dev27.patch.gz.b64.02')
+          p = Path('/tmp/dev27-part02')
           s = p.read_text()
           if len(s) == 11999:
               s = s[:7769] + 'B' + s[7769:]
               p.write_text(s)
           if len(s) != 12000:
-              raise SystemExit(f'unexpected part.02 size: {len(s)}')
+              raise SystemExit(f'unexpected dev27 part02 size: {len(s)}')
           PY
-          test "$(git hash-object .dev27/dev27.patch.gz.b64.02)" = "8a4f968ac3ee547a927fe667a24827971a6fbb45"
-          cat .dev27/dev27.patch.gz.b64.00 .dev27/dev27.patch.gz.b64.01 .dev27/dev27.patch.gz.b64.02 .dev27/dev27.patch.gz.b64.03 .dev27/dev27.patch.gz.b64.04 .dev27/dev27.patch.gz.b64.05 > /tmp/dev27.patch.gz.b64
+          test "$(git hash-object --no-filters /tmp/dev27-part02)" = "8a4f968ac3ee547a927fe667a24827971a6fbb45"
+          cat .dev27/dev27.patch.gz.b64.00 .dev27/dev27.patch.gz.b64.01 /tmp/dev27-part02 .dev27/dev27.patch.gz.b64.03 .dev27/dev27.patch.gz.b64.04 .dev27/dev27.patch.gz.b64.05 > /tmp/dev27.patch.gz.b64
           echo '11f925570e77c5ae787ace171bfa4e874bd3b62153c6ac8c3bf1c470042d4d5b  /tmp/dev27.patch.gz.b64' | sha256sum -c -
           base64 -d /tmp/dev27.patch.gz.b64 | gzip -d > /tmp/dev27.patch
           echo 'a47f634dffdaec4bbcd101ecef5616f983d8b52bc3360c1d5ab94c8fc70b9177  /tmp/dev27.patch' | sha256sum -c -
+          cd /tmp/modkit-dev25
           git apply --check /tmp/dev27.patch
           git apply /tmp/dev27.patch
-          rm -rf .dev27
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "Implement ModKit 0.9.0-dev27 gameplay evidence graph"
-          git push origin HEAD:Modkit1
+          grep -q "versionCode 32" android/app/build.gradle
+          grep -q "versionName '0.9.0-dev27'" android/app/build.gradle
+          grep -q 'version = "0.9.0.dev27"' pyproject.toml
+          grep -q '__version__ = "0.9.0-dev27"' modkit/__init__.py
+          test -s RELEASE-0.9.0-DEV27-RU.md
+          test -s VALIDATION-DEV27.json
+
+      - name: Full Python regression suite
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check pytest
+          cd /tmp/modkit-dev25
+          python -m pytest tests -q
+
+      - name: Selftest and runtime contract
+        run: |
+          set -euo pipefail
+          cd /tmp/modkit-dev25
+          python -m modkit selftest
+          python -m modkit runtime-check
+
+      - name: Build APK
+        run: |
+          set -euo pipefail
+          cd /tmp/modkit-dev25/android
+          gradle --no-daemon :app:assembleDebug
+
+      - name: Android lint
+        run: |
+          set -euo pipefail
+          cd /tmp/modkit-dev25/android
+          gradle --no-daemon :app:lintDebug
+
+      - name: Stage and verify release artifacts
+        run: |
+          set -euo pipefail
+          cd /tmp/modkit-dev25
+          zip -qr "$GITHUB_WORKSPACE/ModKit-Android-0.9.0-dev27-exact-sources.zip" . \
+            -x '.git/*' '.pytest_cache/*' '*/__pycache__/*' '*.pyc' 'android/.gradle/*' 'android/app/build/*' 'build/*'
+          cd "$GITHUB_WORKSPACE"
+          unzip -t ModKit-Android-0.9.0-dev27-exact-sources.zip >/dev/null
+          sha256sum ModKit-Android-0.9.0-dev27-exact-sources.zip > ModKit-Android-0.9.0-dev27-exact-sources.zip.sha256
+          APK="$(find /tmp/modkit-dev25/android/app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          test -n "$APK" && test -s "$APK"
+          unzip -t "$APK" >/dev/null
+          "$ANDROID_HOME/build-tools/34.0.0/zipalign" -c -p -v 4 "$APK" >/dev/null
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose "$APK" >/dev/null
+          cp "$APK" ModKit-Android-0.9.0-dev27-debug.apk
+          sha256sum ModKit-Android-0.9.0-dev27-debug.apk > ModKit-Android-0.9.0-dev27-debug.apk.sha256
+
+      - name: Upload exact sources ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: ModKit-Android-0.9.0-dev27-exact-sources
+          path: |
+            ModKit-Android-0.9.0-dev27-exact-sources.zip
+            ModKit-Android-0.9.0-dev27-exact-sources.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ModKit-Android-0.9.0-dev27-debug
+          path: |
+            ModKit-Android-0.9.0-dev27-debug.apk
+            ModKit-Android-0.9.0-dev27-debug.apk.sha256
+          if-no-files-found: error
+          retention-days: 14
