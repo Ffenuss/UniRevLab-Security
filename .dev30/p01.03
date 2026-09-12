@@ -1,0 +1,6 @@
+ir.mkdirs()&&!dir.isDirectory())throw new IOException("Не удалось создать каталог APK-set");
++        ArrayList<String> sources=new ArrayList<>();sources.add(info.sourceDir);if(info.splitSourceDirs!=null)Collections.addAll(sources,info.splitSourceDirs);
++        ArrayList<File> local=new ArrayList<>();JSONArray localPaths=new JSONArray();ArrayList<String> copyErrors=new ArrayList<>();
++        for(int i=0;i<sources.size();i++){String source=sources.get(i);if(source==null)continue;File src=new File(source),dst=new File(dir,safeApkName(source,i,i==0));
++            try{copyInstalledFile(src,dst,(i==0?"base":"split "+i));local.add(dst);localPaths.put(dst.getPath());}
++            catch(Exception e){if(i==0)throw new IOException("Не удалось прочитать base APK установленного пакета: "+e.getMessage());copyErrors.add(src.getName()+": "+e.getMessage());new Progress().progress("Installed scan: split пропущен — "+src.getName()
