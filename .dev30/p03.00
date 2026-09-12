@@ -1,0 +1,68 @@
+ata_candidates.append(item | {"apkPath": str(path)})
++                    if low.endswith("libil2cpp.so"):
++                        abi = _split_abi(name)
++                        if abi:
++                            abis.add(abi)
++                        item = {"splitIndex": index, "split": path.name, "entry": name, "abi": abi,
++                                "size": info.file_size, "score": _entry_score_library(name, abi, index)}
++                        row["il2cppEntries"].append(item)
++                        library_candidates.append(item | {"apkPath": str(path)})
++        except zipfile.BadZipFile as exc:
++            row["error"] = f"invalid-apk: {exc}"
++        report["splits"].append(row)
++
++    report["availableAbis"] = sorted(abis)
++    metadata = max(metadata_candidates, key=lambda x: (x["score"], x["size"]), default=None)
++    arm64 = [x for x in library_candidates if x.get("abi") == "arm64-v8a"]
++    library = max(arm64, key=lambda x: (x["score"], x["size"]), default=None)
++    best_any_library = max(library_candidates, key=lambda x: (x["score"], x["size"]), default=None)
++
++    if metadata:
++        report["selected"]["metadata"] = {k: metadata.get(k) for k in ("splitIndex", "split", "entry", "size")}
++        if metadata_out:
++            _check(cb, f"Installed scan: извлечение global-metadata.dat из {metadata['split']}…")
++            _extract(Path(metadata["apkPath"]), metadata["entry"], metadata_out, cb)
++    if library:
++        report["selected"]["library"] = {k: library.get(k) for k in ("splitIndex", "split", "entry", "abi", "size")}
++        if library_out:
++            _check(cb, f"Installed scan: извлечение ARM64 libil2cpp.so из {library['split']}…")
++            _extract(Path(library["apkPath"]), library["entry"], library_out, cb)
++    elif best_any_library:
++        report["selected"]["unsupportedLibrary"] = {k: best_any_library.get(k) for k in ("splitIndex", "split", "entry", "abi", "size")}
++
++    report["fullIl2cppPair"] = bool(metadata and library)
++    report["mode"] = "il2cpp-auto" if report["fullIl2cppPair"] else "split-discovery"
++    report["summary"] = {
++        "splitCount": len(report["splits"]),
++        "dexCount": sum(int(x.get("dexCount") or 0) for x in report["splits"]),
++        "nativeCount": sum(int(x.get("nativeCount") or 0) for x in report["splits"]),
++        "unityMarkerCount": sum(int(x.get("unityMarkers") or 0) for x in report["splits"]),
++        "contentMarkerCount": sum(int(x.get("contentMarkers") or 0) for x in report["splits"]),
++        "metadataCandidates": len(metadata_candidates),
++        "il2cppCandidates": len(library_candidates),
++        "arm64Il2cppCandidates": len(arm64),
++    }
++    if report_out:
++        Path(report_out).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
++    return json.dumps(report, ensure_ascii=False, separators=(",", ":"))
+diff --git a/modkit/mobile/gameplay.py b/modkit/mobile/gameplay.py
+index 7a245f5..f01fd92 100644
+--- a/modkit/mobile/gameplay.py
++++ b/modkit/mobile/gameplay.py
+@@ -845,7 +845,13 @@ def graph_method(graph_path, metadata_method_id):
+ 
+ 
+ def scan_apk_package_evidence(apk_path, *, max_total_bytes=48 * 1024 * 1024, max_entry_bytes=8 * 1024 * 1024, max_hits=384):
+-    """Bounded discovery-only scan of APK names/strings. Never creates bindings."""
++    """Bounded discovery-only scan of an APK or APK-set. Never creates bindings.
++
++    An installed package may be represented by a base APK plus multiple split APKs.
++    ModKit stores those splits in one ZIP for analysis; nested APKs are opened one
++    at a time so package/content evidence is not lost merely because it lives in a
++    feature/config split rather than base.apk.
++    """
+     path = Path(apk_path) if apk_path else None
+     if not path or not path.is_file():
+         return []
+@@ -870,7 +876,6 @@ def scan_apk_package_evidence(apk_path, *, max_total_bytes=48 * 1024 * 1024, max
+         if not value:
