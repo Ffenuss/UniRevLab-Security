@@ -1,0 +1,126 @@
+rogress", None)
++        if callable(progress):
++            progress(message)
++
++
++def _sha256_file(path: Path) -> str:
++    h = hashlib.sha256()
++    with path.open("rb") as f:
++        while True:
++            chunk = f.read(1024 * 1024)
++            if not chunk:
++                break
++            h.update(chunk)
++    return h.hexdigest()
++
++
++def _split_abi(name: str) -> str | None:
++    m = re.search(r"(?:^|/)lib/([^/]+)/libil2cpp\.so$", name, re.I)
++    if m:
++        return m.group(1)
++    low = name.casefold()
++    if "arm64" in low or "aarch64" in low:
++        return "arm64-v8a"
++    if "armeabi" in low or "armv7" in low:
++        return "armeabi-v7a"
++    if "x86_64" in low:
++        return "x86_64"
++    if re.search(r"(?:^|[/_.-])x86(?:[/_.-]|$)", low):
++        return "x86"
++    return None
++
++
++def _entry_score_metadata(entry: str, split_index: int) -> int:
++    low = entry.casefold()
++    score = 20
++    if low.endswith("assets/bin/data/managed/metadata/global-metadata.dat"):
++        score += 100
++    elif low.endswith("managed/metadata/global-metadata.dat"):
++        score += 80
++    elif low.endswith("global-metadata.dat"):
++        score += 50
++    if split_index == 0:
++        score += 10
++    return score
++
++
++def _entry_score_library(entry: str, abi: str | None, split_index: int) -> int:
++    low = entry.casefold()
++    score = 10
++    if abi == "arm64-v8a":
++        score += 120
++    elif abi == "armeabi-v7a":
++        score += 30
++    elif abi:
++        score += 10
++    if low == "lib/arm64-v8a/libil2cpp.so":
++        score += 30
++    if split_index == 0:
++        score += 5
++    return score
++
++
++def _extract(apk_path: Path, entry: str, destination: str | os.PathLike, cb=None):
++    dest = Path(destination)
++    tmp = Path(str(dest) + ".tmp")
++    try:
++        with zipfile.ZipFile(apk_path) as z, z.open(entry) as src, tmp.open("wb") as out:
++            while True:
++                _check(cb)
++                chunk = src.read(1024 * 1024)
++                if not chunk:
++                    break
++                out.write(chunk)
++        tmp.replace(dest)
++    finally:
++        try:
++            tmp.unlink()
++        except FileNotFoundError:
++            pass
++
++
++def inspect_apk_paths(paths_json, metadata_out=None, library_out=None, report_out=None, cb=None):
++    """Inspect one installed package represented by base.apk + split APK paths.
++
++    The caller is responsible for obtaining/copying package paths.  This function
++    never mutates the source APKs.  It chooses an exact global-metadata.dat and an
++    ARM64 libil2cpp.so when present anywhere in the set, and records every split
++    so non-IL2CPP targets can still be sent to generic multi-split discovery.
++    """
++    paths = json.loads(paths_json) if isinstance(paths_json, str) else list(paths_json or [])
++    paths = [Path(str(p)) for p in paths if p and Path(str(p)).is_file()]
++    if not paths:
++        raise ValueError("APK set пуст")
++
++    report = {
++        "schema": "modkit-installed-apk-set-1.0",
++        "splits": [],
++        "selected": {"metadata": None, "library": None},
++        "availableAbis": [],
++        "fullIl2cppPair": False,
++        "mode": "split-discovery",
++    }
++    metadata_candidates = []
++    library_candidates = []
++    abis = set()
++
++    for index, path in enumerate(paths):
++        _check(cb, f"Installed scan: {index + 1}/{len(paths)} · {path.name}")
++        row = {
++            "index": index,
++            "name": path.name,
++            "path": str(path),
++            "size": path.stat().st_size,
++            "sha256": _sha256_file(path),
++            "dexCount": 0,
++            "nativeCount": 0,
++            "metadataEntries": [],
++            "il2cppEntries": [],
++            "unityMarkers": 0,
++            "contentMarkers": 0,
++        }
++        try:
++            with zipfile.ZipFile(path) as z:
++                for info in z.infolist():
++                    name = info.filename
++           
