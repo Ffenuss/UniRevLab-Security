@@ -3,13 +3,17 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 
 
-def test_dev37_simple_mode_and_file_workspace_are_wired():
-    main=(ROOT/'android/app/src/main/java/dev/modkit/mobile/MainActivity.java').read_text(encoding='utf-8')
+def test_dev37_analysis_and_file_workspace_are_wired_without_legacy_shell():
+    home=(ROOT/'android/app/src/main/java/dev/modkit/mobile/HomeActivity.java').read_text(encoding='utf-8')
+    full=(ROOT/'android/app/src/main/java/dev/modkit/mobile/FullModeActivity.java').read_text(encoding='utf-8')
+    compat=(ROOT/'android/app/src/main/java/dev/modkit/mobile/SimpleModeActivity.java').read_text(encoding='utf-8')
     manifest=(ROOT/'android/app/src/main/AndroidManifest.xml').read_text(encoding='utf-8')
     worker=(ROOT/'android/app/src/main/java/dev/modkit/mobile/WorkerService.java').read_text(encoding='utf-8')
-    assert 'SimpleModeActivity.class' in main
-    assert 'FileWorkspaceActivity.class' in main
-    assert '.SimpleModeActivity' in manifest and '.FileWorkspaceActivity' in manifest
+    assert 'AutoAnalysisActivity.class' in home
+    assert 'FullModeActivity.class' in home
+    assert 'FileWorkspaceActivity.class' in full
+    assert 'AutoAnalysisActivity.class' in compat and 'finish();' in compat
+    assert '.AutoAnalysisActivity' in manifest and '.FileWorkspaceActivity' in manifest
     assert 'simple_prepare' in worker and 'simple_build' in worker
     assert 'workspace_inspect' in worker and 'workspace_build' in worker
 
