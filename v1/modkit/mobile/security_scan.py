@@ -2,8 +2,8 @@
 
 No sockets are opened and no authentication is attempted. The report records API/server
 endpoints and locations of crypto/key-handling configuration. It does not extract or use
-credential values. The automatic workspace pass also invokes the passive artifact-family
-scanner so Lua/JS/Hermes/Flutter/Cocos coverage is part of Simple Mode rather than a hidden tool.
+credential values. The automatic workspace pass also exposes the artifact-family report
+so Lua/JS/Hermes/Flutter/Cocos/native evidence is part of the unified automatic analysis.
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ import zipfile
 
 from . import artifact_families
 
-SCHEMA = "modkit-security-surfaces-1.2"
+SCHEMA = "modkit-security-surfaces-1.3"
 MAX_ENTRY_BYTES = 64 * 1024 * 1024
 MAX_FINDINGS = 6000
 PRINTABLE = re.compile(rb"[\x20-\x7e]{5,}")
@@ -214,17 +214,41 @@ def _workspace_apks(root: Path) -> list[Path]:
     return paths
 
 
+def _artifact_report(root: Path, apk_paths: list[Path]) -> tuple[dict[str, Any], bool]:
+    """Reuse the current full-analysis enriched report instead of downgrading it.
+
+    TargetPreparationService deletes this file whenever the target changes, so an
+    embedded-enriched report in the current workspace belongs to the current target.
+    If no enriched report exists, standalone security scans still create the static
+    artifact inventory as before.
+    """
+    path = root / "artifact-families.json"
+    if path.is_file():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(existing, dict) and existing.get("embeddedEnriched") and isinstance(existing.get("artifacts"), list):
+                return existing, True
+        except Exception:
+            pass
+    return artifact_families.scan_apk_paths(apk_paths, path), False
+
+
 def scan_workspace(workdir: str | Path, output_path: str | Path | None = None) -> dict[str, Any]:
     root = Path(workdir)
     apk_paths = _workspace_apks(root)
     artifact_output = root / "artifact-families.json"
-    artifact_report = artifact_families.scan_apk_paths(apk_paths, artifact_output)
+    artifact_report, reused_enriched = _artifact_report(root, apk_paths)
     out = scan_apk_paths(apk_paths, None)
     out["artifactFamilies"] = {
         "schema": artifact_report.get("schema"),
         "total": artifact_report.get("total", 0),
         "familyCounts": artifact_report.get("familyCounts", {}),
         "recoveryCounts": artifact_report.get("recoveryCounts", {}),
+        "deepHermes": artifact_report.get("deepHermes", {}),
+        "deepNative": artifact_report.get("deepNative", {}),
+        "deepFlutter": artifact_report.get("deepFlutter", {}),
+        "embeddedEnriched": bool(artifact_report.get("embeddedEnriched")),
+        "reusedEnrichedReport": reused_enriched,
         "report": artifact_output.name,
     }
     if output_path:
