@@ -1,0 +1,157 @@
+"""Human-oriented catalogue for ModKit Simple Mode.
+
+All static findings remain available, but default UI priority favors app-owned and
+high-signal evidence. Automatic building remains fail-closed: only an existing
+validated local MenuSpec binding is selectable for build.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+from pathlib import Path
+from typing import Any, Iterable
+import zipfile
+
+SCHEMA = "modkit-simple-mode-1.2"
+
+_FRAMEWORK_PREFIXES = (
+    "android.", "androidx.", "java.", "javax.", "kotlin.", "kotlinx.", "org.jetbrains.",
+    "com.google.", "com.android.", "okhttp3.", "retrofit2.", "org.chromium.",
+)
+_SDK_PREFIXES = (
+    "com.facebook.", "com.tiktok.", "com.linecorp.", "com.adjust.", "com.appsflyer.",
+    "com.google.android.gms.", "com.google.firebase.", "com.revenuecat.", "com.stripe.",
+    "com.paypal.", "com.squareup.", "io.sentry.", "com.braze.", "com.onesignal.",
+)
+_GAMEPLAY_WORDS = (
+    "health", "hp", "damage", "dmg", "attack", "speed", "timescale", "cooldown", "cd",
+    "currency", "gold", "coin", "gem", "diamond", "wallet", "level", "experience", "xp",
+    "inventory", "mana", "energy", "stamina", "camera", "fov", "weather", "quest",
+)
+
+
+def _json(path: Path) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()[:20]
+
+
+def _str(v: Any) -> str:
+    if v is None:
+        return ""
+    if isinstance(v, (dict, list)):
+        try:
+            return json.dumps(v, ensure_ascii=False, separators=(",", ":"))
+        except Exception:
+            return str(v)
+    return str(v)
+
+
+def _first(row: dict, *keys: str) -> str:
+    for key in keys:
+        value = row.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _class_hint(row: dict, title: str = "") -> str:
+    cls = _first(row, "class", "className", "class_name", "owner")
+    if cls:
+        return cls
+    if "::" in title:
+        return title.split("::", 1)[0]
+    return title
+
+
+def _ownership(row: dict, title: str = "", source: str = "") -> str:
+    explicit = _first(row, "ownershipKind")
+    if explicit:
+        return explicit.upper().replace("-", "_")
+    role = _first(row, "evidenceRole")
+    cls = _class_hint(row, title).casefold()
+    if cls.startswith(_FRAMEWORK_PREFIXES) or role == "framework/third-party":
+        return "FRAMEWORK"
+    if ".sdk." in cls or cls.startswith(_SDK_PREFIXES):
+        return "BUNDLED_SDK"
+    if source == "SecuritySurface":
+        return "SECURITY"
+    if source == "EngineDetection":
+        return "ENGINE"
+    if source in {"Gameplay", "Analysis", "DeepResolver", "RE", "MenuSpec"}:
+        return "APP_OR_GAME"
+    return "UNKNOWN"
+
+
+def _contains_server(row: dict) -> bool:
+    """Classify explicit server/trust findings without treating every economy word as remote.
+
+    Currency/reward/gameplay labels are not automatically server-side. They become audit
+    findings only when the evidence says server/backend/remote or when the finding is an
+    authentication/payment/network/key surface.
+    """
+    trust = " ".join(_str(row.get(k)) for k in (
+        "trustBoundary", "authority", "serverAuthority", "remoteAuthority", "localAuthority",
+    )).casefold()
+    if any(x in trust for x in ("server", "backend", "remote", "platform-backed")):
+        return True
+    if "local" in trust and not any(x in trust for x in ("not-confirmed", "unknown")):
+        return False
+    joined = " ".join(_str(row.get(k)) for k in (
+        "domain", "category", "title", "description", "note", "kind", "surface",
+    )).casefold()
+    return any(x in joined for x in (
+        "server", "backend", "api endpoint", "host:port", "websocket", "network stack",
+        "authentication", "session", "oauth", "access token", "refresh token", "credential",
+        "billing", "purchase", "payment", "entitlement", "subscription", "license",
+        "crypto / key", "key storage", "tls certificate", "certificate pin",
+    ))
+
+
+def _describe(title: str, row: dict, category: str = "", ownership: str = "") -> str:
+    explicit = _first(row, "description", "explanation", "note", "summary", "reason", "detail")
+    if explicit:
+        text = explicit[:1200]
+    else:
+        low = (title + " " + category).casefold()
+        mapping = [
+            (("health", "hp", "god", "immortal"), "Локальное здоровье/получение урона; точность зависит от подтверждённой точки исполнения."),
+            (("damage", "dmg", "attack"), "Расчёт или множитель урона; проверьте конкретный method/field locator."),
+            (("speed", "timescale", "time scale"), "Локальная скорость времени/симуляции."),
+            (("cooldown", "cd"), "Таймер или коэффициент перезарядки."),
+            (("camera", "fov", "zoom"), "Параметры камеры/угла обзора."),
+            (("currency", "diamond", "gold", "coin", "gem", "wallet"), "Экономическая/валютная поверхность. Серверный trust определяется отдельно по evidence."),
+            (("premium", "entitlement", "purchase", "billing"), "Граница доверия покупки/доступа; показывается для аудита, серверный обход не генерируется."),
+            (("session", "auth", "token", "login"), "Поверхность аутентификации/сессии для defensive trust-аудита."),
+            (("crypto", "key", "cipher", "encrypt"), "Криптографическая/key-handling поверхность. Статическая находка не означает утечку секретного ключа."),
+            (("endpoint", "websocket", "grpc", "retrofit", "okhttp"), "Сетевая/API поверхность, найденная пассивным статическим сканированием."),
+        ]
+        text = "Статическая/структурная находка ModKit. Откройте доказательства для источника и степени подтверждения."
+        for needles, value in mapping:
+            if any(n in low for n in needles):
+                text = value
+                break
+    if ownership == "FRAMEWORK":
+        return "Фреймворк/системная библиотека, низкий приоритет. " + text
+    if ownership == "BUNDLED_SDK":
+        return "Bundled SDK/третья сторона. Отделяйте её от собственной игровой логики. " + text
+    return text
+
+
+def _card_id(source: str, title: str, row: dict) -> str:
+    stable = _first(row, "id", "finding_id", "findingId", "metadataMethodId", "methodId", "rva")
+    return f"{source}:{stable or _sha256_text(title + _str(row))}"
+
+
+def _actionable_locator(row: dict, source: str, status_raw: str, title: str) -> tuple[str | None, dict | None]:
+    if status_raw.upper() not in {
+        "CONFIRMED", "VERIFIED", "READY", "PATCHABLE", "PACKAGE_OBSERVED",
+        "FIELD_OBSERVED", "FOUND_STATIC", "SCRIPT_CONTENT_SEARCH",
+    }:
+        return None, None
+    ownership = _ownership(row, title, source)
