@@ -235,7 +235,7 @@ def _scan_library(apk: Path, entry: str, extracted: Path) -> dict[str, Any]:
             "entry": entry,
             "abi": _abi(entry),
             "size": extracted.stat().st_size,
-            "architecture": info.get("machine"),
+            "architecture": info.get("arch"),
             "pie": info.get("pie"),
             "soname": info.get("soname"),
             "needed": info.get("needed") or [],
