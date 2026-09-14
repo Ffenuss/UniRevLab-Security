@@ -1,5 +1,8 @@
-"""README-level checks: the documented commands and layout must exist."""
+"""Repository-level capability guards.
 
+Historical checkpoints still verify the underlying reverse-engineering capabilities, but they no
+longer require those capabilities to be rendered by the removed legacy dashboard.
+"""
 from __future__ import annotations
 
 import json
@@ -79,45 +82,43 @@ def test_native_workspace_surfaces_static_xrefs():
 def test_android_surfaces_semantic_xref_verification():
     re_ui = (ROOT / 'android/app/src/main/java/dev/modkit/mobile/ReWorkspaceActivity.java').read_text(encoding='utf-8')
     menu = (ROOT / 'android/app/src/main/java/dev/modkit/mobile/MenuBuilderActivity.java').read_text(encoding='utf-8')
-    worker = (ROOT / 'modkit/mobile/engine.py').read_text(encoding='utf-8')
+    engine = (ROOT / 'modkit/mobile/engine.py').read_text(encoding='utf-8')
     assert 'controlCandidateLines' in re_ui
-    assert 'semanticVerification' in worker
+    assert 'semanticVerification' in engine
     assert 'semantic_verified' in menu
-    assert 'augment_control_semantics' in worker
+    assert 'augment_control_semantics' in engine
 
 
-def test_android_surfaces_dev15_method_context_verification():
+def test_android_surfaces_method_context_verification():
     re_ui = (ROOT / 'android/app/src/main/java/dev/modkit/mobile/ReWorkspaceActivity.java').read_text(encoding='utf-8')
     menu = (ROOT / 'android/app/src/main/java/dev/modkit/mobile/MenuBuilderActivity.java').read_text(encoding='utf-8')
-    worker = (ROOT / 'modkit/mobile/engine.py').read_text(encoding='utf-8')
+    engine = (ROOT / 'modkit/mobile/engine.py').read_text(encoding='utf-8')
     correlate = (ROOT / 'modkit/reworkspace/correlate.py').read_text(encoding='utf-8')
     assert 'relationshipLines' in re_ui
-    assert 'methodContextVerification' in worker
-    assert 'il2cppMethodContext' in worker
+    assert 'methodContextVerification' in engine
+    assert 'il2cppMethodContext' in engine
     assert 'context_verified' in menu
-    assert 'selected_method_rvas' in worker
+    assert 'selected_method_rvas' in engine
     assert 'technical-rendering-or-quality-surface' in correlate
 
 
 def test_android_re_workspace_reuses_selected_split_il2cpp_pair():
     worker = (ROOT / 'android/app/src/main/java/dev/modkit/mobile/WorkerService.java').read_text(encoding='utf-8')
     engine = (ROOT / 'modkit/mobile/engine.py').read_text(encoding='utf-8')
-    main = (ROOT / 'android/app/src/main/java/dev/modkit/mobile/MainActivity.java').read_text(encoding='utf-8')
     re_ui = (ROOT / 'android/app/src/main/java/dev/modkit/mobile/ReWorkspaceActivity.java').read_text(encoding='utf-8')
     strings = (ROOT / 'android/app/src/main/res/values/strings.xml').read_text(encoding='utf-8')
     assert 'selected-external-pair+reused-rodroid' in worker
     assert 'mainAnalysis.isFile()&&mainSummary.isFile()&&mainRod.isDirectory()' in worker
     assert 'pipelineDiagnostics' in engine and 'inputSources' in engine
-    assert 'matchRank' in main and 'точное слово в имени/классе' in strings
+    assert 'точное слово в имени/классе' in strings
     assert 'IL2CPP input:' in engine and 'IL2CPP control shortlist' in re_ui
     assert 're-analysis.ui.json' in re_ui and '_atomic_stream_json' in engine
 
 
 def test_dev20_checkpoint_documents_native_only_and_compact_menu_seed():
-    root = Path(__file__).resolve().parents[1]
-    release = (root / 'RELEASE-0.9.0-DEV20-RU.md').read_text(encoding='utf-8')
-    correlate = (root / 'modkit/reworkspace/correlate.py').read_text(encoding='utf-8')
-    engine = (root / 'modkit/mobile/engine.py').read_text(encoding='utf-8')
+    release = (ROOT / 'RELEASE-0.9.0-DEV20-RU.md').read_text(encoding='utf-8')
+    correlate = (ROOT / 'modkit/reworkspace/correlate.py').read_text(encoding='utf-8')
+    engine = (ROOT / 'modkit/mobile/engine.py').read_text(encoding='utf-8')
     assert 'unique-managed-interval' in correlate
     assert 'nativeOnlyChains' in correlate
     assert 'gameplayRelevance' in correlate
@@ -125,52 +126,46 @@ def test_dev20_checkpoint_documents_native_only_and_compact_menu_seed():
     assert 'modkit-re-menu-seed-1.0' in engine
 
 
-def test_dev23_android_surfaces_deep_resolver_and_fail_closed_menu_seed():
-    main = (ROOT / 'android/app/src/main/java/dev/modkit/mobile/MainActivity.java').read_text(encoding='utf-8')
+def test_deep_resolver_and_fail_closed_menu_seed_remain_wired():
     worker = (ROOT / 'android/app/src/main/java/dev/modkit/mobile/WorkerService.java').read_text(encoding='utf-8')
     menu = (ROOT / 'android/app/src/main/java/dev/modkit/mobile/MenuBuilderActivity.java').read_text(encoding='utf-8')
     engine = (ROOT / 'modkit/mobile/engine.py').read_text(encoding='utf-8')
-    assert 'deep_method' in main and 'deep_method' in worker
-    assert 'deep_resolve_method' in worker and 'analysis-deep' in worker
+    assert 'deep_method' in worker and 'deep_resolve_method' in worker and 'analysis-deep' in worker
     assert 'Создать review-список из Deep Resolver' in menu
     assert 'menu_seed_from_deep' in engine
     assert 'semanticVerified + contextVerified' in engine
-    assert "runtimeTruth" in engine and "not-observed" in engine
+    assert 'runtimeTruth' in engine and 'not-observed' in engine
 
 
-def test_dev23_production_resolver_has_no_test_application_rules():
+def test_production_resolver_has_no_test_application_rules():
     banned = ('Drova', 'AFK', 'MotionPlayer', 'Just2D', 'SetFxSpeedLifeTime')
     roots = [ROOT / 'modkit', ROOT / 'android/app/src/main/java']
     for base in roots:
         for path in base.rglob('*'):
-            if not path.is_file() or '__pycache__' in path.parts:
-                continue
-            if path.suffix not in {'.py', '.java', '.kt', '.cpp', '.h', '.hpp', '.c'}:
+            if not path.is_file() or '__pycache__' in path.parts or path.suffix not in {'.py', '.java', '.kt', '.cpp', '.h', '.hpp', '.c'}:
                 continue
             text = path.read_text(encoding='utf-8', errors='ignore')
             for token in banned:
                 assert token not in text, f'{token} leaked into production logic: {path.relative_to(ROOT)}'
 
 
-def test_dev24_surfaces_indirect_thunk_virtual_and_deep_menu_pipeline():
+def test_indirect_thunk_virtual_and_deep_menu_pipeline():
     flow = (ROOT / 'modkit/reworkspace/arm64_flow.py').read_text(encoding='utf-8')
     engine = (ROOT / 'modkit/mobile/engine.py').read_text(encoding='utf-8')
-    main = (ROOT / 'android/app/src/main/java/dev/modkit/mobile/MainActivity.java').read_text(encoding='utf-8')
     worker = (ROOT / 'android/app/src/main/java/dev/modkit/mobile/WorkerService.java').read_text(encoding='utf-8')
     menu = (ROOT / 'android/app/src/main/java/dev/modkit/mobile/MenuBuilderActivity.java').read_text(encoding='utf-8')
+    re_ui = (ROOT / 'android/app/src/main/java/dev/modkit/mobile/ReWorkspaceActivity.java').read_text(encoding='utf-8')
     assert 'canonicalize_thunk' in flow and 'scan_blr_calls' in flow
     assert 'virtualCandidates' in flow and 'function_pointer_slots' in flow
     assert "_DEEP_RESOLVER_SCHEMA = 'modkit-deep-method-resolution-1.2'" in engine
     assert '_deep_cache_identity' in engine and '_deep_cached_result' in engine
     assert 'menu_auto_prepare_from_deep' in engine
     assert 'menu_auto_prepare_deep' in worker and 'menu_auto_build_apk_deep' in worker
-    assert 'Создать review-список из Deep Resolver' in menu
-    assert 'menu_smart_build_apk' in menu
-    assert 'incomingThunkCalls' in main and 'incomingIndirectCalls' in main
-    assert 'incomingVirtualCandidates' in main and 'functionPointerSlots' in main
+    assert 'Создать review-список из Deep Resolver' in menu and 'menu_smart_build_apk' in menu
+    assert 'relationshipLines' in re_ui
 
 
-def test_dev24_indirect_resolution_remains_fail_closed_for_virtual_dispatch():
+def test_indirect_resolution_remains_fail_closed_for_virtual_dispatch():
     flow = (ROOT / 'modkit/reworkspace/arm64_flow.py').read_text(encoding='utf-8')
     engine = (ROOT / 'modkit/mobile/engine.py').read_text(encoding='utf-8')
     assert 'candidate-only-no-static-receiver-type' in flow
@@ -179,34 +174,32 @@ def test_dev24_indirect_resolution_remains_fail_closed_for_virtual_dispatch():
     assert "'status': 'not-observed'" in engine and "'confirmed': False" in engine
 
 
-def test_dev25_receiver_vtable_proof_is_generic_and_menu_linked():
+def test_receiver_vtable_proof_is_generic_and_menu_linked():
     engine = (ROOT / 'modkit/mobile/engine.py').read_text(encoding='utf-8')
-    main = (ROOT / 'android/app/src/main/java/dev/modkit/mobile/MainActivity.java').read_text(encoding='utf-8')
+    re_ui = (ROOT / 'android/app/src/main/java/dev/modkit/mobile/ReWorkspaceActivity.java').read_text(encoding='utf-8')
     assert 'vtable_entries_for_type' in engine
     assert '_resolve_virtual_dispatch_for_target' in engine
     assert 'confirmed-unique-slot-domain-intersection' in engine
     assert 'generic-methodref-requires-methodspec-proof' in engine
-    assert 'incomingVirtualCalls' in main
-    assert 'virtual exact' in main
+    assert 'relationshipLines' in re_ui
 
 
-def test_dev32_home_uses_recycler_navigation_and_resource_localization():
-    import re
-    main = (ROOT / 'android/app/src/main/java/dev/modkit/mobile/MainActivity.java').read_text(encoding='utf-8')
+def test_v11_home_uses_unified_routes_and_resource_localization():
+    home = (ROOT / 'android/app/src/main/java/dev/modkit/mobile/HomeActivity.java').read_text(encoding='utf-8')
+    full = (ROOT / 'android/app/src/main/java/dev/modkit/mobile/FullModeActivity.java').read_text(encoding='utf-8')
     gradle = (ROOT / 'android/app/build.gradle').read_text(encoding='utf-8')
     manifest = (ROOT / 'android/app/src/main/AndroidManifest.xml').read_text(encoding='utf-8')
     ru = (ROOT / 'android/app/src/main/res/values/strings.xml').read_text(encoding='utf-8')
     en = (ROOT / 'android/app/src/main/res/values-en/strings.xml').read_text(encoding='utf-8')
-    assert 'RecyclerView listView' in main and 'new ListView' not in main
+    assert 'AutoAnalysisActivity.class' in home and 'FullModeActivity.class' in home
+    assert 'DecompilerActivity.class' in full and 'ReWorkspaceActivity.class' in full
     assert 'androidx.recyclerview:recyclerview:1.3.2' in gradle
     for key in ('nav_discovery', 'nav_probe', 'nav_menu', 'nav_reports'):
-        assert f'R.string.{key}' in main
         assert f'name="{key}"' in ru and f'name="{key}"' in en
     assert 'android:label="@string/app_name"' in manifest
-    assert not re.search(r'[А-Яа-яЁё]', main)
 
 
-def test_dev32_ru_en_resource_key_sets_match():
+def test_ru_en_resource_key_sets_match():
     import xml.etree.ElementTree as ET
     ru_root = ET.parse(ROOT / 'android/app/src/main/res/values/strings.xml').getroot()
     en_root = ET.parse(ROOT / 'android/app/src/main/res/values-en/strings.xml').getroot()
@@ -231,31 +224,28 @@ def test_dev34_parallel_index_checkpoint_is_versioned_and_fail_closed():
     validation = json.loads((ROOT / 'VALIDATION-DEV34.json').read_text(encoding='utf-8'))
     gradle = (ROOT / 'android/app/build.gradle').read_text(encoding='utf-8')
     pyproject = (ROOT / 'pyproject.toml').read_text(encoding='utf-8')
-    main = (ROOT / 'android/app/src/main/java/dev/modkit/mobile/MainActivity.java').read_text(encoding='utf-8')
     correlate = (ROOT / 'modkit/reworkspace/correlate.py').read_text(encoding='utf-8')
     assert validation['version'] == '0.9.0-dev34'
     assert 'versionCode 45' in gradle and "versionName '0.9.0-dev40'" in gradle
     assert 'version = "0.9.0.dev40"' in pyproject
     assert '_scan_items_bounded' in correlate and 'nativeSynchronous' in correlate
-    assert 'analysis.methods.jsonl.search.idx' in main and 'searchDebounce' in main
     assert validation['invariants']['largeElfRemainsSequential'] is True
     assert validation['invariants']['searchIndexDoesNotPromoteRuntimeTruth'] is True
 
 
-
-def test_dev36_decompiler_is_upstream_jadx_apkset_workspace():
+def test_decompiler_is_upstream_jadx_apkset_workspace():
     gradle = (ROOT / 'android/app/build.gradle').read_text(encoding='utf-8')
     manifest = (ROOT / 'android/app/src/main/AndroidManifest.xml').read_text(encoding='utf-8')
-    main = (ROOT / 'android/app/src/main/java/dev/modkit/mobile/MainActivity.java').read_text(encoding='utf-8')
+    full = (ROOT / 'android/app/src/main/java/dev/modkit/mobile/FullModeActivity.java').read_text(encoding='utf-8')
     engine = (ROOT / 'android/app/src/main/java/dev/modkit/mobile/DecompilerEngine.java').read_text(encoding='utf-8')
     assert "io.github.skylot:jadx-core:1.5.6" in gradle
     assert "io.github.skylot:jadx-dex-input:1.5.6" in gradle
-    assert 'DecompilerActivity' in manifest and 'workspace_decompiler' in main
+    assert 'DecompilerActivity' in manifest and 'DecompilerActivity.class' in full
     assert 'installed-target.json' in engine and 'optJSONArray("splits")' in engine
     assert 'game.apk' in engine
 
 
-def test_dev36_decompiler_is_lazy_bounded_and_smali_capable():
+def test_decompiler_is_lazy_bounded_and_smali_capable():
     engine = (ROOT / 'android/app/src/main/java/dev/modkit/mobile/DecompilerEngine.java').read_text(encoding='utf-8')
     activity = (ROOT / 'android/app/src/main/java/dev/modkit/mobile/DecompilerActivity.java').read_text(encoding='utf-8')
     assert 'setThreadsCount(1)' in engine and 'NoOpCodeCache.INSTANCE' in engine
@@ -265,7 +255,7 @@ def test_dev36_decompiler_is_lazy_bounded_and_smali_capable():
     assert 'Mode { JAVA, SMALI, RESOURCES }' in activity
 
 
-def test_dev36_decompiler_keeps_runtime_offline_and_native_claims_honest():
+def test_decompiler_keeps_runtime_offline_and_native_claims_honest():
     manifest = (ROOT / 'android/app/src/main/AndroidManifest.xml').read_text(encoding='utf-8')
     ru = (ROOT / 'android/app/src/main/res/values/strings.xml').read_text(encoding='utf-8')
     engine = (ROOT / 'android/app/src/main/java/dev/modkit/mobile/DecompilerEngine.java').read_text(encoding='utf-8')
