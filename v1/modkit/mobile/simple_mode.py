@@ -521,6 +521,19 @@ def build_catalog(workdir: str | Path, output_path: str | Path | None = None) ->
         add(_security_summary(security, "endpoints", "Network / API Endpoints", "Найдены статические API/HTTP/WebSocket/host:port точки. Откройте детали для уникальных endpoint и точных файлов."))
         add(_security_summary(security, "crypto", "Crypto / Key Handling", "Найдены crypto/key-handling и TLS pinning markers. Это карта кода, а не доказательство утечки секретного ключа."))
 
+    artifacts = _json(root / "artifact-families.json")
+    if isinstance(artifacts, dict):
+        for row in artifacts.get("artifacts", []) or []:
+            if not isinstance(row, dict):
+                continue
+            card = _generic_card(row, "ArtifactFamily", "Runtime/Script")
+            if card:
+                card["ownership"] = "APP_OR_GAME"
+                family = str(row.get("family") or "runtime")
+                recovery = str(row.get("recoveryLevel") or "FOUND_STATIC")
+                card["description"] = f"{family} · {recovery}. Артефакт найден во всех выбранных APK/split; symbols/strings участвуют в gameplay-поиске."
+                add(_quality(card))
+
     sources = [
         ("analysis.json", "Analysis"),
         ("analysis.gameplay-coverage.json", "Gameplay"),
