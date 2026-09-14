@@ -9,9 +9,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from modkit.mobile import artifact_families, flutter_deep, hermes_deep, native_deep
+from modkit.mobile import artifact_families, flutter_deep, hermes_deep, lua_deep, native_deep
 
-SCHEMA = "modkit-embedded-analysis-1.1"
+SCHEMA = "modkit-embedded-analysis-1.2"
 
 
 def _artifacts(report: dict[str, Any]) -> list[dict[str, Any]]:
@@ -94,6 +94,21 @@ def run_workspace(
         runs.append({"engineId": "artifact-family-suite", "status": "FAILED", "error": str(exc)})
 
     try:
+        lua_report = lua_deep.scan_workspace(root, root / "lua-deep.json")
+        runs.append({
+            "engineId": lua_deep.ENGINE_ID,
+            "status": "SUCCESS" if lua_report.get("available") else "UNAVAILABLE",
+            "chunkCount": int(lua_report.get("chunkCount") or 0),
+            "findingCount": int(lua_report.get("findingCount") or 0),
+            "errorCount": len(lua_report.get("errors") or []),
+        })
+        _merge_findings(static_report, lua_report, summary_key="deepLua",
+                        default_engine=lua_deep.ENGINE_ID, default_kind="LUA_BYTECODE",
+                        default_category="Runtime/Lua")
+    except Exception as exc:
+        runs.append({"engineId": lua_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
+
+    try:
         deep = hermes_deep.scan_workspace(root, root / "hermes-deep.json")
         runs.append({
             "engineId": "hermes.deep-embedded",
@@ -150,6 +165,7 @@ def run_workspace(
         "executesTargetCode": False,
         "runs": runs,
         "artifactReport": artifact_path.name,
+        "luaReport": "lua-deep.json",
         "nativeReport": "native-deep.json",
         "flutterReport": "flutter-deep.json",
         "successful": sum(1 for run in runs if run.get("status") == "SUCCESS"),
