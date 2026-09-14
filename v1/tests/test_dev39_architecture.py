@@ -18,6 +18,6 @@ def test_dev39_security_scan_remains_passive():
     assert 'activeConnectionAttempted' in sec and 'credentialValueExtraction' in sec and 'keyValueExtraction' in sec
     assert 'socket.socket' not in sec and 'requests.' not in sec and 'urllib.request' not in sec
 
-def test_dev39_version():
+def test_dev39_guards_survive_v1_release_identity():
     g=(ROOT/'android/app/build.gradle').read_text(encoding='utf-8'); p=(ROOT/'pyproject.toml').read_text(encoding='utf-8')
-    assert 'versionCode 45' in g and '0.9.0-dev40' in g and '0.9.0.dev40' in p
+    assert 'versionCode 46' in g and "versionName '1.0.0'" in g and 'version = "1.0.0"' in p
