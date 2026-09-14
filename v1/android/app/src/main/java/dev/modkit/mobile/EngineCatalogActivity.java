@@ -17,7 +17,7 @@ import com.chaquo.python.android.AndroidPlatform;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Human-readable view of bundled engines and external bridge contracts. */
+/** Human-readable view of bundled engines and optional cross-check contracts. */
 public class EngineCatalogActivity extends AppCompatActivity {
     private int dp(int n) { return (int)(n * getResources().getDisplayMetrics().density); }
     private boolean dark(){return(getResources().getConfiguration().uiMode&android.content.res.Configuration.UI_MODE_NIGHT_MASK)==android.content.res.Configuration.UI_MODE_NIGHT_YES;}
@@ -29,14 +29,14 @@ public class EngineCatalogActivity extends AppCompatActivity {
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         ScrollView scroll=new ScrollView(this);LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(dp(18),dp(18),dp(18),dp(28));scroll.addView(root);setContentView(scroll);
-        TextView title=text("Движки ModKit 1.0",28);title.setTypeface(null,android.graphics.Typeface.BOLD);root.addView(title);
-        root.addView(text("Единый registry выбирает analyzer / decoder / decompiler / reconstructor / runtime backend по типу артефакта. ✓ = выполняется внутри APK, ○ = внешний движок подключён через Evidence Bridge.",14));
-        Button bridge=new Button(this);bridge.setText("Импорт Ghidra / Rizin / Cpp2IL / Hermes / Frida…");bridge.setOnClickListener(v->startActivity(new Intent(this,EngineBridgeActivity.class)));root.addView(bridge);
+        TextView title=text("Движки ModKit 1.1",28);title.setTypeface(null,android.graphics.Typeface.BOLD);root.addView(title);
+        root.addView(text("Полный анализ сам выбирает analyzer / decoder / decompiler / reconstructor / runtime backend по типу артефакта. ✓ = движок физически работает внутри ModKit и запускается автоматически. ○ = только необязательная внешняя сверка; для обычного анализа она не требуется.",14));
+        Button bridge=new Button(this);bridge.setText("Дополнительная сверка внешних результатов");bridge.setOnClickListener(v->startActivity(new Intent(this,EngineBridgeActivity.class)));root.addView(bridge);
         try {
             if(!Python.isStarted()) Python.start(new AndroidPlatform(this));
             PyObject module=Python.getInstance().getModule("modkit.engines");
             JSONObject catalog=new JSONObject(module.callAttr("catalog_json").toString());
-            root.addView(text("Всего entry points: "+catalog.optInt("count")+" · встроено: "+catalog.optInt("bundled")+" · bridge/optional: "+catalog.optInt("optional"),14));
+            root.addView(text("Всего entry points: "+catalog.optInt("count")+" · встроено: "+catalog.optInt("bundled")+" · внешняя сверка/optional: "+catalog.optInt("optional"),14));
             JSONArray engines=catalog.optJSONArray("engines");
             if(engines!=null) for(int i=0;i<engines.length();i++){
                 JSONObject e=engines.optJSONObject(i);if(e==null)continue;
