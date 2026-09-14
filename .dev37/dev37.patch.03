@@ -1,0 +1,140 @@
+t n;while((n=in.read(buf))!=-1){check();z.write(buf,0,n);}}z.closeEntry();}ZipEntry readme=new ZipEntry("INSTALL.txt");z.putNextEntry(readme);z.write(("ModKit edited APK-set. Install all APKs together. Certificate SHA-256: "+identity.fingerprintSha256+"\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));z.closeEntry();}
++            Files.move(tmp.toPath(),bundle.toPath(),StandardCopyOption.REPLACE_EXISTING);copyFileToUri(bundle,uri,"Сохранение APK-set");saved=true;app.progress(setDone);
++        }finally{bundle.delete();deleteTree(signedDir);if(!saved)try{DocumentsContract.deleteDocument(getContentResolver(),uri);}catch(Exception ignored){}}
++    }
++
+     private void splitDiscovery(JSONObject scan) throws Exception {
+         File set=app.file("installed-apk-set.zip"),full=app.file("re-analysis.json");
+         app.progress("Installed scan: полной ARM64 IL2CPP-пары нет — multi-split DEX/.so/Unity Discovery…");
+@@ -492,6 +517,26 @@ public class WorkerService extends Service {
+         File unsigned=app.file("patchpack-unsigned.apk");
+         try{verifyInstalledTarget();File patchApk=targetPatchApk();engine().callAttr("patchpack_apply_unsigned",patchApk.getPath(),app.file("patchpack.zip").getPath(),unsigned.getPath(),app.file("patchpack-report.json").getPath(),new Progress());exportSignedTarget(uri,unsigned,"Patch Pack APK собран и подписан.","Patch Pack применён к owning split; весь APK-set переподписан одним ключом.");}finally{unsigned.delete();}
+     }
++    private void workspaceInspect(String source) throws Exception {
++        if(source==null||source.isEmpty())throw new IOException("Не выбран source APK для File Workspace");File src=new File(source);if(!src.isFile())throw new IOException("Source APK больше не существует");File pack=app.file("workspace-patch.zip");if(!pack.isFile())throw new IOException("Workspace Patch Pack отсутствует");
++        PyObject result=engine().callAttr("patchpack_inspect",src.getPath(),pack.getPath(),app.file("workspace-report.json").getPath(),new Progress());JSONObject obj=new JSONObject(result.toString());app.progress(obj.optBoolean("blocked")?"File Workspace: Patch Pack BLOCKED":"File Workspace: Patch Pack совместим; можно собирать APK/APK-set.");
++    }
++    private void workspaceBuild(String source,Uri uri) throws Exception {
++        if(source==null||source.isEmpty())throw new IOException("Не выбран source APK для File Workspace");File src=new File(source),pack=app.file("workspace-patch.zip"),unsigned=app.file("workspace-unsigned.apk");if(!src.isFile()||!pack.isFile())throw new IOException("Workspace source/patch отсутствует");
++        try{engine().callAttr("patchpack_apply_unsigned",src.getPath(),pack.getPath(),unsigned.getPath(),app.file("workspace-report.json").getPath(),new Progress());exportSignedTargetForSource(uri,unsigned,src,"Изменённый APK собран и подписан.","Изменён owning split; APK-set переподписан одним ключом.");}finally{unsigned.delete();}
++    }
++    private void simplePrepare() throws Exception {
++        if(!app.file("game.apk").isFile()&&!app.file("installed-target.json").isFile())throw new IOException("Сначала выберите установленное приложение/игру или APK");
++        if(app.file("analysis.json").isFile()||app.file("re-analysis.json").isFile()){try{menuSmartPrepare();}catch(Exception e){new Progress().progress("Simple Mode: Menu prepare остаётся REVIEW — "+e.getMessage());}}
++        if(!Python.isStarted())Python.start(new AndroidPlatform(this));PyObject mod=Python.getInstance().getModule("modkit.mobile.simple_mode");PyObject out=mod.callAttr("build_catalog",getFilesDir().getPath(),app.file("simple-catalog.json").getPath());JSONObject obj=new JSONObject(out.toString());app.progress("Simple Mode: показано "+obj.optInt("total")+" находок; READY "+obj.optInt("buildable")+", server/trust audit "+obj.optInt("serverAudit")+".");
++    }
++    private void simpleBuild(Uri uri,String controlsJson) throws Exception {
++        if(controlsJson==null)controlsJson="[]";if(!app.file("menu-spec.json").isFile())menuSmartPrepare();
++        File backup=app.file("menu-spec.simple-source.json");Files.copy(app.file("menu-spec.json").toPath(),backup.toPath(),StandardCopyOption.REPLACE_EXISTING);
++        if(!Python.isStarted())Python.start(new AndroidPlatform(this));PyObject mod=Python.getInstance().getModule("modkit.mobile.simple_mode");JSONObject filtered=new JSONObject(mod.callAttr("filter_menu_spec",app.file("menu-spec.json").getPath(),controlsJson).toString());if(filtered.optInt("buildable",0)<=0){Files.copy(backup.toPath(),app.file("menu-spec.json").toPath(),StandardCopyOption.REPLACE_EXISTING);throw new IOException("Выбранные пункты не имеют подтверждённых локальных executable bindings");}
++        invalidateMenuChecks();menuProject();app.progress("Simple Mode: выбранных подтверждённых controls "+filtered.optInt("buildable")+"; выполняю preflight и сборку…");menuBuildApk(uri);
++    }
++
+     private void invalidateMenuChecks() throws IOException {Files.deleteIfExists(app.file("menu-validation.json").toPath());Files.deleteIfExists(app.file("menu-preflight.json").toPath());}
+     private void menuSeedDeep() throws Exception {
+         if(!app.file("analysis-deep").isDirectory())throw new IOException("Сначала выполните Deep Resolver хотя бы для одного метода");
+diff --git a/android/app/src/main/res/values-en/strings.xml b/android/app/src/main/res/values-en/strings.xml
+index da9c1a6..1a67d01 100644
+--- a/android/app/src/main/res/values-en/strings.xml
++++ b/android/app/src/main/res/values-en/strings.xml
+@@ -34,4 +34,9 @@
+     <string name="decompiler_export_running">Full decompilation and ZIP packaging…</string>
+     <string name="decompiler_export_done">Done: decompiled ZIP saved.</string>
+ 
++    <string name="simple_section">Quick mode</string>
++    <string name="simple_button">Simple mode · find and build a mod automatically</string>
++    <string name="simple_note">Shows all semantic findings from DEX / native / IL2CPP / Lua / Cocos / resources and trust audits. Automatic build is allowed only for validated local bindings.</string>
++    <string name="workspace_files">Application files · open / edit / Patch Pack</string>
++
+ </resources>
+\ No newline at end of file
+diff --git a/android/app/src/main/res/values/strings.xml b/android/app/src/main/res/values/strings.xml
+index 034d973..654c446 100644
+--- a/android/app/src/main/res/values/strings.xml
++++ b/android/app/src/main/res/values/strings.xml
+@@ -34,4 +34,9 @@
+     <string name="decompiler_export_running">Полная декомпиляция и упаковка ZIP…</string>
+     <string name="decompiler_export_done">Готово: decompiled ZIP сохранён.</string>
+ 
++    <string name="simple_section">Быстрый режим</string>
++    <string name="simple_button">Для глупых · найти и собрать мод автоматически</string>
++    <string name="simple_note">Показывает все смысловые находки из DEX / native / IL2CPP / Lua / Cocos / ресурсов и trust-аудита. Сборка разрешена только для подтверждённых локальных bindings.</string>
++    <string name="workspace_files">Файлы приложения · открыть / редактировать / Patch Pack</string>
++
+ </resources>
+\ No newline at end of file
+diff --git a/modkit/__init__.py b/modkit/__init__.py
+index 5d66c73..c922923 100644
+--- a/modkit/__init__.py
++++ b/modkit/__init__.py
+@@ -6,6 +6,6 @@ Pipeline
+     libil2cpp.so ────────┴─> [dump.cs | native metadata] ─> IR ─> rules ─> features ─> Android module
+ """
+ 
+-__version__ = "0.9.0-dev36"
++__version__ = "0.9.0-dev37"
+ 
+ MODKIT_BANNER = f"modkit {__version__}"
+diff --git a/modkit/mobile/apkset.py b/modkit/mobile/apkset.py
+index 14dcfed..b94ef65 100644
+--- a/modkit/mobile/apkset.py
++++ b/modkit/mobile/apkset.py
+@@ -198,6 +198,9 @@ def inspect_apk_paths(paths_json, metadata_out=None, library_out=None, report_ou
+             "metadataEntries": [],
+             "il2cppEntries": [],
+             "unityMarkers": 0,
++            "cocosMarkers": 0,
++            "luaEntries": 0,
++            "jsEntries": 0,
+             "contentMarkers": 0,
+         }
+         try:
+@@ -222,8 +225,15 @@ def inspect_apk_paths(paths_json, metadata_out=None, library_out=None, report_ou
+                     if ("assets/bin/data/" in low or low.endswith("/libunity.so") or low.endswith("libunity.so")
+                             or "globalgamemanagers" in low):
+                         row["unityMarkers"] += 1
+-                    if ("streamingassets/" in low or "addressable" in low or low.endswith((".bundle", ".lua"))):
++                    if ("streamingassets/" in low or "addressable" in low or low.endswith((".bundle", ".lua", ".luac", ".luae", ".js", ".jsc"))):
+                         row["contentMarkers"] += 1
++                    base = low.rsplit("/", 1)[-1]
++                    if base in {"libcocos2dcpp.so", "libcocos.so", "libcocos2d.so"} or "jsb-adapter" in low or low.endswith((".csb", ".ccb")):
++                        row["cocosMarkers"] += 1
++                    if low.endswith((".lua", ".luac", ".luae")) or "liblua" in base or "xlua" in low or "slua" in low:
++                        row["luaEntries"] += 1
++                    if low.endswith((".js", ".jsc")) or "jsb-adapter" in low:
++                        row["jsEntries"] += 1
+                     if low.endswith("global-metadata.dat"):
+                         validation = _validate_metadata(z, info)
+                         item = {"splitIndex": index, "split": path.name, "entry": name,
+@@ -274,6 +284,20 @@ def inspect_apk_paths(paths_json, metadata_out=None, library_out=None, report_ou
+     report["fullIl2cppPair"] = bool(metadata and library)
+     report["pairConfidence"] = "HIGH" if report["fullIl2cppPair"] else "NONE"
+     report["mode"] = "il2cpp-auto" if report["fullIl2cppPair"] else "split-discovery"
++    total_unity = sum(int(r.get("unityMarkers", 0)) for r in report["splits"])
++    total_cocos = sum(int(r.get("cocosMarkers", 0)) for r in report["splits"])
++    total_lua = sum(int(r.get("luaEntries", 0)) for r in report["splits"])
++    total_js = sum(int(r.get("jsEntries", 0)) for r in report["splits"])
++    detected = []
++    if report["fullIl2cppPair"]: detected.append("unity-il2cpp")
++    elif total_unity: detected.append("unity")
++    if total_cocos:
++        detected.append("cocos-creator" if total_js else "cocos2d-x")
++    if total_lua: detected.append("lua-runtime")
++    if total_js: detected.append("javascript-runtime")
++    if sum(int(r.get("dexCount", 0)) for r in report["splits"]): detected.append("android-dex")
++    if sum(int(r.get("nativeCount", 0)) for r in report["splits"]): detected.append("native-elf")
++    report["engineDetection"] = {"detected": detected, "unityMarkers": total_unity, "cocosMarkers": total_cocos, "luaEntries": total_lua, "jsEntries": total_js}
+     if scan_trust:
+         from modkit.reworkspace.trust import SURFACE_NAMES
+         surfaces = {}
+diff --git a/modkit/mobile/simple_mode.py b/modkit/mobile/simple_mode.py
+new file mode 100644
+index 0000000..b280156
+--- /dev/null
++++ b/modkit/mobile/simple_mode.py
+@@ -0,0 +1,336 @@
++"""Human-oriented one-pass catalogue for ModKit Simple Mode.
++
++The module intentionally separates *what was found* from *what is safe to build*.
++Static, server/trust-boundary and read-only probe evidence stays visible, but only
++controls with an executable, validated local binding are marked bu
