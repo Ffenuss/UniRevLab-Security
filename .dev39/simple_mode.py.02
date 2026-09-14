@@ -1,0 +1,134 @@
+                names = z.namelist()
+        except Exception:
+            continue
+        low_names = [n.casefold() for n in names]
+        joined_sample = " ".join(low_names[: min(len(low_names), 5000)])
+        def mark(key: str, value: str) -> None:
+            token = f"{key}:{value}"
+            if token not in seen:
+                seen.add(token); evidence[key].append(value)
+        for name, low in zip(names, low_names):
+            base = low.rsplit("/", 1)[-1]
+            if base.startswith("classes") and base.endswith(".dex"): mark("android_dex", name)
+            if low.endswith(".so"): mark("native", name)
+            if base == "libil2cpp.so" or low.endswith("global-metadata.dat"): mark("unity_il2cpp", name)
+            if base in {"libunity.so", "libmain.so"}: mark("unity_mono", name)
+            if base in {"libcocos2dcpp.so", "libcocos.so", "libcocos2d.so"}: mark("cocos2dx_cpp", name)
+            if low.endswith((".lua", ".luac", ".luae")) or "liblua" in base or "xlua" in low or "slua" in low:
+                mark("lua_runtime", name)
+                if "cocos" in joined_sample or any(x.startswith(("assets/src/", "assets/res/")) for x in low_names):
+                    mark("cocos2dx_lua", name)
+            if low.endswith((".js", ".jsc")) and ("jsb-adapter" in low or low.startswith("assets/src/")):
+                mark("cocos2dx_js", name)
+            if "jsb-adapter" in low or (low.endswith((".prefab", ".scene")) and ("assets/" in low or "res/" in low)):
+                mark("cocos_creator", name)
+            if low.endswith((".csb", ".ccb")): mark("cocos2dx_cpp", name)
+    return {"schema": "modkit-engine-detection-1.0", "detected": [k for k, v in evidence.items() if v], "evidence": evidence}
+
+
+def _security_summary(obj: dict, kind: str, title: str, description: str) -> dict | None:
+    groups = obj.get("groups") if isinstance(obj.get("groups"), dict) else {}
+    group = groups.get(kind) if isinstance(groups, dict) else None
+    if not isinstance(group, dict) or int(group.get("count", 0) or 0) <= 0:
+        return None
+    row = {"kind": kind, "title": title, "description": description, "trustBoundary": "server", "status": "FOUND_STATIC", "summary": group}
+    card = _generic_card(row, "SecuritySummary", "Security/Connection")
+    if card:
+        card["ownership"] = "SECURITY"; card["important"] = True; card["lowSignal"] = False; card["priority"] = 88
+    return card
+
+
+def build_catalog(workdir: str | Path, output_path: str | Path | None = None) -> dict:
+    root = Path(workdir)
+    cards: list[dict] = []
+    seen: set[str] = set()
+    def add(card: dict | None) -> None:
+        if not card:
+            return
+        key = str(card.get("menuControlId") or card.get("id") or f"{card.get('source')}|{card.get('title')}|{card.get('category')}|{card.get('status')}")
+        if key in seen:
+            return
+        seen.add(key); cards.append(card)
+
+    menu = _json(root / "menu-spec.json")
+    if isinstance(menu, dict):
+        for row in menu.get("controls", []) or []:
+            if isinstance(row, dict): add(_menu_card(row))
+
+    deep = root / "analysis-deep"
+    if deep.is_dir():
+        for p in sorted(deep.glob("method-*.json")):
+            obj = _json(p)
+            if isinstance(obj, dict): add(_generic_card(obj, "DeepResolver"))
+
+    security = _json(root / "security-surfaces.json")
+    if isinstance(security, dict):
+        add(_security_summary(security, "endpoints", "Network / API Endpoints", "Найдены статические API/HTTP/WebSocket/host:port точки. Откройте детали для уникальных endpoint и точных файлов."))
+        add(_security_summary(security, "crypto", "Crypto / Key Handling", "Найдены crypto/key-handling и TLS pinning markers. Это карта кода, а не доказательство утечки секретного ключа."))
+
+    sources = [
+        ("analysis.json", "Analysis"),
+        ("analysis.gameplay-coverage.json", "Gameplay"),
+        ("re-analysis.ui.json", "RE"),
+        ("re-analysis.menu.json", "RE"),
+        ("installed-scan.json", "InstalledScan"),
+        ("security-surfaces.json", "SecuritySurface"),
+    ]
+    wanted = {"candidates", "discoveries", "cards", "findings", "controlCandidates", "controls", "methods", "surfaces"}
+    for name, source in sources:
+        obj = _json(root / name)
+        if not isinstance(obj, (dict, list)):
+            continue
+        for key, row in _iter_rows(obj, wanted):
+            add(_generic_card(row, source, key))
+
+    engine = detect_engines(_apk_paths(root))
+    pretty = {
+        "unity_il2cpp": "Unity / IL2CPP", "unity_mono": "Unity runtime", "cocos2dx_cpp": "Cocos2d-x C++",
+        "cocos2dx_lua": "Cocos2d-x Lua", "cocos2dx_js": "Cocos2d-x JavaScript", "cocos_creator": "Cocos Creator",
+        "lua_runtime": "Lua/xLua/SLua runtime", "android_dex": "Android DEX", "native": "Native ELF/.so",
+    }
+    for key in engine["detected"]:
+        ev = engine["evidence"].get(key, [])
+        add(_quality({
+            "id": f"engine:{key}", "title": pretty.get(key, key), "category": "Engine/Runtime", "source": "EngineDetection",
+            "status": "CONFIRMED", "buildable": False, "selectable": False, "actionable": False, "locator": None,
+            "menuControlId": None, "description": "Автоматически обнаруженный runtime/движок; используется для выбора анализатора.",
+            "serverAudit": False, "ownership": "ENGINE", "evidence": {"markers": ev},
+        }))
+
+    cards.sort(key=lambda c: (-int(c.get("priority", 0)), str(c.get("category", "")).casefold(), str(c.get("title", "")).casefold()))
+    counts: dict[str, int] = {}
+    for card in cards:
+        counts[str(card.get("status") or "UNKNOWN")] = counts.get(str(card.get("status") or "UNKNOWN"), 0) + 1
+    out = {
+        "schema": SCHEMA, "engineDetection": engine, "cards": cards, "counts": counts,
+        "total": len(cards), "buildable": sum(1 for c in cards if c.get("buildable")),
+        "actionable": sum(1 for c in cards if c.get("actionable")),
+        "important": sum(1 for c in cards if c.get("important")),
+        "frameworkNoise": sum(1 for c in cards if c.get("ownership") == "FRAMEWORK"),
+        "bundledSdk": sum(1 for c in cards if c.get("ownership") == "BUNDLED_SDK"),
+        "serverAudit": sum(1 for c in cards if c.get("serverAudit")),
+        "policy": {
+            "showAllFindings": True, "defaultView": "important", "buildOnlyValidatedLocalBindings": True,
+            "serverBypassGenerated": False, "serverFindingsMode": "audit+local-simulation-only",
+            "readyStatusMeansExactLocalLocator": True, "autoBuildStillRequiresValidatedExecutableBinding": True,
+        },
+    }
+    if output_path:
+        Path(output_path).write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+    return out
+
+
+def filter_menu_spec(menu_json_path: str | Path, selected_ids_json: str, output_path: str | Path | None = None) -> dict:
+    path = Path(menu_json_path)
+    raw = _json(path)
+    if not isinstance(raw, dict):
+        raise ValueError("menu spec is missing or invalid")
+    try:
+        selected = json.loads(selected_ids_json)
+    except Exception as exc:
+        raise ValueError(f"invalid selection json: {exc}") from exc
+    if not isinstance(selected, list):
+        raise ValueError("selection must be a JSON list")
+    wanted = {str(x) fo
