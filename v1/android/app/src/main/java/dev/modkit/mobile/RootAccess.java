@@ -1,6 +1,7 @@
 package dev.modkit.mobile;
 
 import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
@@ -53,14 +54,19 @@ final class RootAccess {
         }
 
         JSONObject toJson() {
-            return new JSONObject()
-                    .put("schema", "modkit-root-capability-1.0")
-                    .put("granted", granted)
-                    .put("uid", uid)
-                    .put("identity", identity)
-                    .put("capabilities", new JSONArray(capabilities))
-                    .put("hints", new JSONArray(hints))
-                    .put("detail", detail);
+            JSONObject out = new JSONObject();
+            try {
+                out.put("schema", "modkit-root-capability-1.0");
+                out.put("granted", granted);
+                out.put("uid", uid);
+                out.put("identity", identity);
+                out.put("capabilities", new JSONArray(capabilities));
+                out.put("hints", new JSONArray(hints));
+                out.put("detail", detail);
+            } catch (JSONException ignored) {
+                // JSONObject serialization must never break the capability probe/UI path.
+            }
+            return out;
         }
     }
 
