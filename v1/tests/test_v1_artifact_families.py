@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import json
 import zipfile
 
 from modkit.engines import catalog
@@ -17,8 +16,8 @@ def _apk(path: Path, entries: dict[str, bytes]) -> Path:
 
 def test_artifact_family_scanner_is_split_aware_and_honest(tmp_path: Path):
     base = _apk(tmp_path / "base.apk", {
-        "assets/main.lua": b"function Player.takeDamage(x) return x end\n",
-        "assets/index.android.bundle": b"function setHealth(v){ return v; } // react-native\n",
+        "assets/main.lua": b"-- player\nfunction Player.takeDamage(x) return x end\n",
+        "assets/index.android.bundle": b"// bundle\nfunction setHealth(v){ return v; } // react-native\n",
         "assets/flutter_assets/vm_snapshot_data": b"snapshot-readable-marker",
         "lib/arm64-v8a/libapp.so": b"ELF dart_aot PlayerHealth damage currency",
     })
@@ -34,10 +33,19 @@ def test_artifact_family_scanner_is_split_aware_and_honest(tmp_path: Path):
     assert report["familyCounts"]["hermes"] >= 1
     assert report["familyCounts"]["flutter"] >= 2
     assert report["familyCounts"]["cocos"] >= 1
-    by_entry = {row["entry"]: row for row in report["artifacts"]}
+    artifact_rows = [row for row in report["artifacts"] if row["kind"] == "ARTIFACT_FAMILY"]
+    by_entry = {row["entry"]: row for row in artifact_rows}
     assert by_entry["assets/main.lua"]["recoveryLevel"] == "DECOMPILED_SOURCE"
     assert by_entry["assets/game.luac"]["recoveryLevel"] == "DISASSEMBLED_METADATA"
     assert by_entry["lib/arm64-v8a/libapp.so"]["recoveryLevel"] == "NATIVE_AOT"
+    assert by_entry["lib/arm64-v8a/libcocos2dcpp.so"]["recoveryLevel"] == "NATIVE_ENGINE"
+    symbols = [row for row in report["artifacts"] if row["kind"] == "SCRIPT_SYMBOL"]
+    damage = next(row for row in symbols if row["title"] == "Player.takeDamage")
+    health = next(row for row in symbols if row["title"] == "setHealth")
+    assert damage["status"] == "SCRIPT_CONTENT_SEARCH" and damage["entry"] == "assets/main.lua" and damage["line"] == 2
+    assert health["entry"] == "assets/index.android.bundle" and health["line"] == 2
+    assert report["symbolCount"] >= 2
+    assert report["artifactCount"] == sum(report["familyCounts"].values())
     assert report["executesTargetCode"] is False
 
 
