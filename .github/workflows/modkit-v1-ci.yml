@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 70
     env:
-      NDK_PIN: 26.3.11579264
+      NDK_PIN: 26.1.10909125
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
