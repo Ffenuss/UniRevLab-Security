@@ -34,6 +34,7 @@ public class FullAnalysisService extends Service {
     @Override public int onStartCommand(Intent intent,int flags,int startId){
         if(intent!=null&&"cancel".equals(intent.getAction())){app.cancelled.set(true);progress("Отмена запрошена — завершаю текущий безопасный шаг…");return START_NOT_STICKY;}
         startForeground(91,note("Подготовка полного анализа…"));
+        getSharedPreferences("state",0).edit().putBoolean("running",true).apply();
         new Thread(()->{
             boolean chain=true;
             try{
@@ -90,10 +91,20 @@ public class FullAnalysisService extends Service {
                 progress(app.cancelled.get()?"Полный анализ отменён.":"Полный анализ: "+e.getMessage()+" · продолжаю доступными анализаторами.");
                 if(app.cancelled.get())chain=false;
             }finally{
+                boolean handedOff=false;
                 if(chain&&!app.cancelled.get()){
                     progress("Реконструкция готова · передаю в изолированный Evidence Graph pipeline…");
-                    startForegroundService(new Intent(this,AutomaticEvidenceService.class));
-                }else{app.busy.set(false);app.revision++;}
+                    try{
+                        startForegroundService(new Intent(this,AutomaticEvidenceService.class));
+                        handedOff=true;
+                    }catch(Exception handoffError){
+                        progress("Не удалось запустить Evidence Graph: "+handoffError.getMessage());
+                    }
+                }
+                if(!handedOff){
+                    getSharedPreferences("state",0).edit().putBoolean("running",false).apply();
+                    app.busy.set(false);app.revision++;
+                }
                 stopForeground(true);stopSelf();
             }
         },"modkit-full-analysis").start();
