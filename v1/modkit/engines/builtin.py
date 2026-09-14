@@ -67,5 +67,18 @@ def build_default_registry() -> EngineRegistry:
           notes="Optional rooted local runtime pack; static analysis and root-procfs do not depend on it."),
         E("ptrace.bridge", "Native debugger/ptrace bridge", "1.0", K.RUNTIME, (A.PROCESS,), S.ENTRY_POINT,
           "adapter:ptrace", ("attach-contract", "register-snapshot-import", "breakpoint-evidence-import"), priority=70),
+
+        # Compatibility IDs are retained so saved reports/automation from the pre-1.0 registry keep
+        # resolving. They are aliases only and remain explicitly non-bundled.
+        E("ghidra.external", "Ghidra external compatibility alias", "1.0", K.DECOMPILER, (A.ELF,), S.ENTRY_POINT,
+          "compat-alias:ghidra.bridge", ("compatibility-alias",), priority=95, notes="Use ghidra.bridge for new integrations."),
+        E("rizin.external", "Rizin external compatibility alias", "1.0", K.DISASSEMBLER, (A.ELF, A.DEX), S.ENTRY_POINT,
+          "compat-alias:rizin.bridge", ("compatibility-alias",), priority=95, notes="Use rizin.bridge for new integrations."),
+        E("frida.external", "Frida external compatibility alias", "1.0", K.RUNTIME, (A.PROCESS,), S.OPTIONAL,
+          "compat-alias:frida.local-bridge", ("compatibility-alias",), priority=95, notes="Use frida.local-bridge for new integrations."),
+        E("flutter.external", "Flutter external compatibility alias", "1.0", K.RECONSTRUCTOR, (A.FLUTTER, A.ELF), S.ENTRY_POINT,
+          "compat-alias:flutter.deep-bridge", ("compatibility-alias",), priority=95, notes="Use flutter.deep-bridge for new integrations."),
+        E("hermes.external", "Hermes external compatibility alias", "1.0", K.DECOMPILER, (A.HERMES, A.JAVASCRIPT), S.ENTRY_POINT,
+          "compat-alias:hermes.deep-bridge", ("compatibility-alias",), priority=95, notes="Use hermes.deep-bridge for new integrations."),
     ]
     return EngineRegistry(engines)
