@@ -9,7 +9,6 @@ import hashlib
 import json
 from pathlib import Path
 from typing import Any
-import zipfile
 
 SCHEMA = "modkit-external-engine-evidence-1.0"
 SUPPORTED = {
@@ -72,23 +71,44 @@ def _parse_text(text: str) -> list[dict[str, Any]]:
     return rows
 
 
+def _jsonl(text: str) -> list[Any] | None:
+    values: list[Any] = []
+    nonempty = 0
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        nonempty += 1
+        try:
+            values.append(json.loads(line))
+        except Exception:
+            return None
+        if len(values) >= MAX_RECORDS:
+            break
+    return values if nonempty else None
+
+
 def _read_candidate(path: Path) -> tuple[str, Any]:
-    suffix = path.suffix.lower()
     data = path.read_bytes()
-    if suffix == ".json":
-        return "json", json.loads(data.decode("utf-8", "replace"))
+    text = data.decode("utf-8", "replace")
+    suffix = path.suffix.lower()
+    stripped = text.lstrip("\ufeff \t\r\n")
+    # Android's document picker may copy a JSON export into a neutral .dat name. Sniff content
+    # before trusting the local temporary suffix so structured evidence stays structured.
+    if suffix == ".json" or stripped.startswith(("{", "[")):
+        try:
+            return "json", json.loads(stripped)
+        except Exception:
+            pass
     if suffix in {".jsonl", ".ndjson"}:
-        values = []
-        for line in data.decode("utf-8", "replace").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try: values.append(json.loads(line))
-            except Exception: values.append({"text": line})
-            if len(values) >= MAX_RECORDS:
-                break
-        return "jsonl", values
-    return "text", data.decode("utf-8", "replace")
+        values = _jsonl(text)
+        if values is not None:
+            return "jsonl", values
+    if "\n" in text:
+        values = _jsonl(text)
+        if values is not None and len(values) > 1:
+            return "jsonl", values
+    return "text", text
 
 
 def normalize_file(tool: str, input_path: str | Path, output_path: str | Path | None = None) -> dict[str, Any]:
@@ -102,10 +122,7 @@ def normalize_file(tool: str, input_path: str | Path, output_path: str | Path | 
         raise ValueError("bridge input is too large")
 
     source_kind, payload = _read_candidate(source)
-    if source_kind in {"json", "jsonl"}:
-        records = _flatten_json(payload)
-    else:
-        records = _parse_text(str(payload))
+    records = _flatten_json(payload) if source_kind in {"json", "jsonl"} else _parse_text(str(payload))
     out = {
         "schema": SCHEMA,
         "tool": tool_key,
