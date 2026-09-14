@@ -60,16 +60,25 @@ def test_simple_mode_runs_full_reconstruction_before_evidence_pipeline():
     assert '"full-reconstruction.json"' in service
     assert '"artifact-families.json"' in service
     assert 'putExtra("op","simple_prepare")' in service
+    assert 'new Intent(this,FullAnalysisService.class).setAction("cancel")' in service
+    assert '"cancel".equals(intent.getAction())' in service
 
 
-def test_external_bridge_normalizes_without_executing_imported_code(tmp_path: Path):
+def test_external_bridge_normalizes_and_simple_mode_correlates_it(tmp_path: Path):
     source = tmp_path / "ghidra.json"
     source.write_text(json.dumps({"functions": [{"name": "Player_takeDamage", "address": "0x1234", "size": 48}]}), encoding="utf-8")
     out = normalize_file("ghidra", source)
     assert out["engineId"] == "ghidra.bridge"
-    assert out["recordCount"] >= 1
+    assert out["recordCount"] >= 1 and out["findingCount"] >= 1
+    assert out["findings"][0]["title"] == "Player_takeDamage"
+    assert out["findings"][0]["trusted"] is False
     assert out["executesImportedCode"] is False
     assert out["status"] == "IMPORTED_EVIDENCE"
+    simple = read("modkit/mobile/simple_mode.py")
+    assert 'root.glob("external-evidence-*.json")' in simple
+    assert 'card["externalCorroborating"] = True' in simple
+    assert 'card["status"] = "IMPORTED_EVIDENCE"' in simple
+    assert 'card["actionable"] = False' in simple
 
 
 def test_full_evidence_export_and_engine_catalog_exist():
