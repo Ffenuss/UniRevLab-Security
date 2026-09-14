@@ -70,7 +70,7 @@ public class FullAnalysisService extends Service {
                 }
 
                 if(app.cancelled.get()){chain=false;progress("Полный анализ отменён пользователем.");return;}
-                progress("3/4 · Apktool 3.0.2: resources + manifest + полный smali workspace…");
+                progress("3/4 · Apktool "+ApktoolEngine.APKTOOL_VERSION+": resources + manifest + полный smali workspace…");
                 try{
                     JSONObject apktool=ApktoolEngine.analyze(this,inputs,app.cancelled);
                     Files.write(app.file("apktool-analysis.json").toPath(),apktool.toString(2).getBytes(StandardCharsets.UTF_8));
@@ -82,7 +82,7 @@ public class FullAnalysisService extends Service {
                 }
 
                 if(app.cancelled.get()){chain=false;progress("Полный анализ отменён пользователем.");return;}
-                progress("4/4 · Lua/JS/Hermes deep/Flutter/Cocos + embedded correlation…");
+                progress("4/4 · Lua/JS/Hermes deep + ARM64 deep + Flutter AOT + Cocos correlation…");
                 try{Python.getInstance().getModule("modkit.mobile.embedded_pipeline").callAttr("run_workspace",getFilesDir().getPath(),app.file("artifact-families.json").getPath(),app.file("embedded-analysis.json").getPath());}
                 catch(Throwable e){progress("Embedded pipeline частичен: "+e.getMessage()+" · Evidence Graph всё равно будет построен.");}
                 if(app.cancelled.get()){chain=false;progress("Полный анализ отменён пользователем.");}
