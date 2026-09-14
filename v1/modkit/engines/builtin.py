@@ -8,11 +8,7 @@ from .registry import EngineRegistry
 
 
 def build_default_registry() -> EngineRegistry:
-    """Single source of truth for analysis/reconstruction entry points.
-
-    Optional engines are visible to planners and UI but are never reported as available/bundled.
-    This allows future integrations without hard-coding them into WorkerService or activities.
-    """
+    """Single source of truth for built-in engines and external bridge contracts."""
     engines = [
         E("apkset.inventory", "APK / split inventory", "1.0", K.INVENTORY, (A.APK, A.APK_SET), S.BUILTIN,
           "modkit.mobile.apkset", ("split-aware", "sha256", "ownership"), priority=10),
@@ -30,9 +26,22 @@ def build_default_registry() -> EngineRegistry:
           "android:dev.modkit.mobile.RodroidRunner", ("metadata", "types", "fields", "methods", "rva", "offsets"), priority=20),
         E("unity.discovery", "Unity / IL2CPP discovery", "1.0", K.ANALYZER, (A.APK, A.APK_SET, A.IL2CPP, A.UNITY_ASSET), S.BUILTIN,
           "modkit.mobile.unityscan", ("engine-detection", "metadata-pair", "addressables", "unity-assets"), priority=20),
-        E("semantic.gameplay", "Gameplay semantic evidence", "1.0", K.SEMANTIC, (A.DEX, A.IL2CPP, A.ELF, A.RESOURCE), S.BUILTIN,
+        E("lua.static", "Lua / xLua / SLua analyzer", "1.0", K.DECOMPILER, (A.LUA,), S.BUILTIN,
+          "modkit.mobile.artifact_families", ("source", "bytecode-header", "version", "function-index", "strings", "split-aware"), priority=25,
+          notes="Plain Lua source is recoverable; compiled/encrypted chunks remain explicitly bytecode/opaque."),
+        E("javascript.static", "JavaScript / React Native bundle analyzer", "1.0", K.DECOMPILER, (A.JAVASCRIPT,), S.BUILTIN,
+          "modkit.mobile.artifact_families", ("source", "bundle", "function-index", "react-native-markers", "split-aware"), priority=25),
+        E("hermes.static", "Hermes bytecode static analyzer", "1.0", K.DISASSEMBLER, (A.HERMES,), S.BUILTIN,
+          "modkit.mobile.artifact_families", ("hbc-inventory", "strings", "bytecode-metadata", "split-aware"), priority=25,
+          notes="Does not falsely claim original JavaScript recovery from HBC."),
+        E("flutter.static", "Flutter / Dart AOT artifact analyzer", "1.0", K.RECONSTRUCTOR, (A.FLUTTER, A.ELF), S.BUILTIN,
+          "modkit.mobile.artifact_families", ("flutter-assets", "snapshots", "libapp", "libflutter", "dart-aot", "native-correlation"), priority=25,
+          notes="AOT/snapshot recovery level is reported honestly; original Dart source is not claimed."),
+        E("cocos.static", "Cocos2d-x / Cocos Creator analyzer", "1.0", K.ANALYZER, (A.COCOS, A.JAVASCRIPT, A.ELF), S.BUILTIN,
+          "modkit.mobile.artifact_families", ("engine-detection", "project-js", "jsc", "native-engine", "split-aware"), priority=25),
+        E("semantic.gameplay", "Gameplay semantic evidence", "1.0", K.SEMANTIC, (A.DEX, A.IL2CPP, A.ELF, A.RESOURCE, A.LUA, A.JAVASCRIPT, A.COCOS), S.BUILTIN,
           "modkit.mobile.gameplay", ("ownership", "evidence-graph", "health", "damage", "currency", "movement"), priority=40),
-        E("security.passive", "Passive security surface analyzer", "1.0", K.SECURITY, (A.APK, A.APK_SET, A.DEX, A.ELF, A.RESOURCE), S.BUILTIN,
+        E("security.passive", "Passive security surface analyzer", "1.0", K.SECURITY, (A.APK, A.APK_SET, A.DEX, A.ELF, A.RESOURCE, A.LUA, A.JAVASCRIPT), S.BUILTIN,
           "modkit.mobile.security_scan", ("network", "tls", "crypto", "auth", "storage", "webview"), priority=40,
           safe_defaults={"active_network": False, "secret_extraction": False}),
         E("runtime.root-procfs", "Root procfs runtime session", "1.0", K.RUNTIME, (A.PROCESS,), S.BUILTIN,
@@ -41,25 +50,22 @@ def build_default_registry() -> EngineRegistry:
         E("report.evidence-bundle", "Evidence Bundle exporter", "1.0", K.REPORTER, (A.EVIDENCE,), S.BUILTIN,
           "android:dev.modkit.mobile.EvidenceBundleExporter", ("json", "jsonl", "hashes", "toolchain", "runtime-snapshot"), priority=20),
 
-        # Prepared entry points. They are intentionally not bundled or claimed as available.
-        E("apktool.external", "Apktool decoder/rebuilder", "entry", K.DECODER, (A.APK, A.APK_SET, A.RESOURCE), S.ENTRY_POINT,
-          "adapter:apktool", ("resources", "smali", "rebuild"), priority=60, license_note="Apache-2.0"),
-        E("ghidra.external", "Ghidra native decompiler", "entry", K.DECOMPILER, (A.ELF,), S.ENTRY_POINT,
-          "adapter:ghidra", ("native-pseudocode", "cfg", "xrefs"), priority=60, license_note="Apache-2.0"),
-        E("rizin.external", "Rizin analysis backend", "entry", K.DISASSEMBLER, (A.ELF, A.DEX), S.ENTRY_POINT,
-          "adapter:rizin", ("disassembly", "cfg", "xrefs"), priority=60),
-        E("cpp2il.external", "Cpp2IL IL2CPP recovery", "entry", K.RECONSTRUCTOR, (A.IL2CPP,), S.ENTRY_POINT,
-          "adapter:cpp2il", ("managed-il", "metadata", "cross-check"), priority=60),
-        E("flutter.external", "Flutter / Dart AOT recovery", "entry", K.RECONSTRUCTOR, (A.FLUTTER, A.ELF), S.ENTRY_POINT,
-          "adapter:flutter", ("dart-aot", "snapshot", "functions"), priority=60),
-        E("hermes.external", "React Native Hermes decoder", "entry", K.DECOMPILER, (A.HERMES, A.JAVASCRIPT), S.ENTRY_POINT,
-          "adapter:hermes", ("hbc", "disassembly", "javascript-view"), priority=60),
-        E("lua.external", "Lua bytecode/source analyzer", "entry", K.DECOMPILER, (A.LUA,), S.ENTRY_POINT,
-          "adapter:lua", ("lua-source", "bytecode", "strings"), priority=60),
-        E("frida.external", "Frida runtime instrumentation", "entry", K.RUNTIME, (A.PROCESS,), S.OPTIONAL,
-          "adapter:frida", ("attach", "modules", "method-trace", "native-trace"), priority=70,
-          notes="Optional local runtime pack; never required for static analysis."),
-        E("ptrace.external", "Native ptrace debugger", "entry", K.RUNTIME, (A.PROCESS,), S.ENTRY_POINT,
-          "adapter:ptrace", ("attach", "registers", "breakpoints"), priority=70),
+        E("apktool.bridge", "Apktool import/export bridge", "1.0", K.DECODER, (A.APK, A.APK_SET, A.RESOURCE), S.ENTRY_POINT,
+          "adapter:apktool", ("decoded-tree-import", "smali-import", "rebuild-output-import"), priority=60, license_note="Apache-2.0"),
+        E("ghidra.bridge", "Ghidra native analysis bridge", "1.0", K.DECOMPILER, (A.ELF,), S.ENTRY_POINT,
+          "adapter:ghidra", ("symbol-import", "pseudocode-import", "cfg-import", "xref-import", "evidence-export"), priority=60, license_note="Apache-2.0"),
+        E("rizin.bridge", "Rizin analysis bridge", "1.0", K.DISASSEMBLER, (A.ELF, A.DEX), S.ENTRY_POINT,
+          "adapter:rizin", ("disassembly-import", "cfg-import", "xref-import", "evidence-export"), priority=60),
+        E("cpp2il.bridge", "Cpp2IL IL2CPP cross-check bridge", "1.0", K.RECONSTRUCTOR, (A.IL2CPP,), S.ENTRY_POINT,
+          "adapter:cpp2il", ("managed-il-import", "metadata-import", "rodroid-cross-check"), priority=60),
+        E("flutter.deep-bridge", "Deep Flutter/Dart recovery bridge", "1.0", K.RECONSTRUCTOR, (A.FLUTTER, A.ELF), S.ENTRY_POINT,
+          "adapter:flutter-deep", ("symbol-map-import", "function-map-import", "snapshot-cross-check"), priority=60),
+        E("hermes.deep-bridge", "Hermes deep decoder bridge", "1.0", K.DECOMPILER, (A.HERMES, A.JAVASCRIPT), S.ENTRY_POINT,
+          "adapter:hermes-deep", ("hbc-disassembly-import", "function-map-import", "source-map-import"), priority=60),
+        E("frida.local-bridge", "Frida local runtime bridge", "1.0", K.RUNTIME, (A.PROCESS,), S.OPTIONAL,
+          "adapter:frida", ("server-detection", "attach-contract", "module-events", "trace-import"), priority=70,
+          notes="Optional rooted local runtime pack; static analysis and root-procfs do not depend on it."),
+        E("ptrace.bridge", "Native debugger/ptrace bridge", "1.0", K.RUNTIME, (A.PROCESS,), S.ENTRY_POINT,
+          "adapter:ptrace", ("attach-contract", "register-snapshot-import", "breakpoint-evidence-import"), priority=70),
     ]
     return EngineRegistry(engines)
