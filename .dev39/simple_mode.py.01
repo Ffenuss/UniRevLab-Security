@@ -1,0 +1,164 @@
+    if ownership in {"FRAMEWORK", "BUNDLED_SDK"}:
+        return None, None
+    rva = row.get("rva")
+    if rva is not None:
+        return "READY_NATIVE", {"rva": rva, "abi": row.get("abi"), "library": row.get("library") or row.get("module")}
+    artifact = _first(row, "artifact", "dex", "sourceArtifact")
+    clazz = _first(row, "class", "className", "class_name", "owner")
+    method = _first(row, "method", "methodName", "method_name")
+    signature = _first(row, "signature", "descriptor", "methodSignature")
+    code_offset = row.get("codeOffset")
+    dex_evidence = ".dex" in artifact.casefold() or "dex" in source.casefold()
+    if dex_evidence and code_offset is not None and (clazz or "::" in title):
+        if not clazz and "::" in title:
+            clazz = title.split("::", 1)[0]
+        if not method and "::" in title:
+            method = title.split("::", 1)[1].split("(", 1)[0]
+        return "READY_DEX", {"artifact": artifact, "class": clazz, "method": method, "signature": signature or title, "codeOffset": code_offset}
+    entry = _first(row, "entry", "path", "file", "apkEntry", "asset")
+    fn = _first(row, "function", "functionName", "symbol")
+    elow = entry.casefold()
+    if entry and elow.endswith((".lua", ".luac", ".luae", ".js", ".jsc")) and fn:
+        return "READY_SCRIPT", {"entry": entry, "symbol": fn, "line": row.get("line") or row.get("lineNumber")}
+    if entry and (elow.startswith("res/") or elow.startswith("assets/")) and row.get("offset") is not None:
+        return "READY_RESOURCE", {"entry": entry, "offset": row.get("offset")}
+    return None, None
+
+
+def _quality(card: dict) -> dict:
+    ownership = str(card.get("ownership") or "UNKNOWN")
+    status = str(card.get("status") or "")
+    source = str(card.get("source") or "")
+    title = str(card.get("title") or "")
+    category = str(card.get("category") or "")
+    priority = 30
+    if card.get("buildable"):
+        priority = 100
+    elif status.startswith("READY"):
+        priority = 92
+    elif source == "SecuritySummary":
+        priority = 88
+    elif card.get("serverAudit") and ownership not in {"FRAMEWORK"}:
+        priority = 80
+    elif status in {"CONFIRMED", "VERIFIED", "FIELD_OBSERVED"} and ownership in {"APP", "APP_OR_GAME"}:
+        priority = 75
+    elif status == "PACKAGE_OBSERVED":
+        low = (title + " " + category).casefold()
+        priority = 66 if any(x in low for x in ("diamond", "gold", "coin", "gem", "currency", "health", "damage")) else 48
+    if ownership == "BUNDLED_SDK":
+        priority = min(priority, 42)
+    if ownership == "FRAMEWORK":
+        priority = min(priority, 12)
+    card["priority"] = priority
+    card["lowSignal"] = priority < 50
+    card["important"] = priority >= 60
+    return card
+
+
+def _menu_card(row: dict, source: str = "MenuSpec") -> dict:
+    title = _first(row, "title", "label", "name", "id") or "Unnamed control"
+    category = _first(row, "category", "domain") or "General"
+    binding = row.get("binding")
+    rva = row.get("rva")
+    probe = row.get("probe_kind") or row.get("probeKind")
+    executable = bool(binding) and rva is not None and not probe and str(row.get("type", "")).casefold() != "label"
+    server = _contains_server(row)
+    if server:
+        status = "SERVER_AUDIT"; executable = False
+    elif probe:
+        status = "READ_ONLY_PROBE"; executable = False
+    elif executable:
+        status = "READY"
+    else:
+        status = "REVIEW"
+    ownership = _ownership(row, title, source)
+    return _quality({
+        "id": _card_id(source, title, row), "title": title, "category": category, "source": source,
+        "status": status, "buildable": executable, "selectable": executable,
+        "actionable": executable, "locator": ({"rva": rva, "binding": binding} if executable else None),
+        "menuControlId": _first(row, "id") or None,
+        "description": _describe(title, row, category, ownership), "serverAudit": server,
+        "ownership": ownership, "evidence": row,
+    })
+
+
+def _generic_card(row: dict, source: str, category: str = "") -> dict | None:
+    title = _first(row, "title", "label", "name", "method", "methodName", "domain", "kind", "id")
+    if not title:
+        return None
+    category = category or _first(row, "category", "domain", "type") or "General"
+    server = _contains_server(row)
+    menu = row.get("menuCandidate") if isinstance(row.get("menuCandidate"), dict) else None
+    elig = row.get("menuEligibility") if isinstance(row.get("menuEligibility"), dict) else None
+    verification = row.get("methodVerification") if isinstance(row.get("methodVerification"), dict) else {}
+    auto_prepare = bool(menu and elig and elig.get("eligible") and verification.get("executableReady"))
+    status_raw = _first(row, "status", "decision", "evidence_status", "evidenceStatus")
+    locator_status, locator = _actionable_locator(row, source, status_raw, title)
+    actionable = bool(locator_status)
+    if server:
+        status = "SERVER_AUDIT"; auto_prepare = False; actionable = False; locator = None
+    elif auto_prepare:
+        status = "READY_FOR_PREPARE"; actionable = True
+    elif locator_status:
+        status = locator_status
+    elif status_raw:
+        status = status_raw.upper().replace(" ", "_")
+    else:
+        status = "REVIEW"
+    ownership = _ownership(row, title, source)
+    return _quality({
+        "id": _card_id(source, title, row), "title": title, "category": category, "source": source,
+        "status": status, "buildable": False, "selectable": False, "actionable": actionable,
+        "locator": locator, "menuControlId": None,
+        "description": _describe(title, row, category, ownership), "serverAudit": server,
+        "ownership": ownership, "evidence": row,
+    })
+
+
+def _iter_rows(obj: Any, wanted: set[str]) -> Iterable[tuple[str, dict]]:
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if key in wanted and isinstance(value, list):
+                for row in value:
+                    if isinstance(row, dict):
+                        yield key, row
+            if isinstance(value, dict):
+                yield from _iter_rows(value, wanted)
+    elif isinstance(obj, list):
+        for value in obj:
+            if isinstance(value, dict):
+                yield from _iter_rows(value, wanted)
+
+
+def _apk_paths(workdir: Path) -> list[Path]:
+    paths: list[Path] = []
+    target = _json(workdir / "installed-target.json")
+    if isinstance(target, dict):
+        for row in target.get("splits", []) or []:
+            if isinstance(row, dict):
+                p = Path(str(row.get("path") or ""))
+                if p.is_file() and p not in paths:
+                    paths.append(p)
+    installed_dir = workdir / "installed-apks"
+    if installed_dir.is_dir():
+        for p in sorted(installed_dir.glob("*.apk")):
+            if p not in paths:
+                paths.append(p)
+    game = workdir / "game.apk"
+    if game.is_file() and game not in paths:
+        paths.append(game)
+    return paths
+
+
+def detect_engines(apk_paths: Iterable[str | Path]) -> dict:
+    evidence: dict[str, list[str]] = {
+        "unity_il2cpp": [], "unity_mono": [], "cocos2dx_cpp": [], "cocos2dx_lua": [],
+        "cocos2dx_js": [], "cocos_creator": [], "lua_runtime": [], "android_dex": [], "native": [],
+    }
+    seen: set[str] = set()
+    for raw in apk_paths:
+        path = Path(raw)
+        if not path.is_file():
+            continue
+        try:
+            with zipfile.ZipFile(path) as z:
