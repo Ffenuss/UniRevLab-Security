@@ -12,7 +12,7 @@ import re
 from typing import Any, Iterable
 import zipfile
 
-SCHEMA = "modkit-artifact-families-1.0"
+SCHEMA = "modkit-artifact-families-1.1"
 MAX_ENTRY_BYTES = 64 * 1024 * 1024
 MAX_TEXT_BYTES = 8 * 1024 * 1024
 MAX_ITEMS = 5000
@@ -45,8 +45,8 @@ def _workspace_apks(root: Path) -> list[Path]:
     return paths
 
 
-def _sha(apk: str, entry: str, family: str) -> str:
-    return hashlib.sha256(f"{apk}!{entry}!{family}".encode("utf-8", "replace")).hexdigest()[:20]
+def _sha(apk: str, entry: str, family: str, extra: str = "") -> str:
+    return hashlib.sha256(f"{apk}!{entry}!{family}!{extra}".encode("utf-8", "replace")).hexdigest()[:20]
 
 
 def _strings(data: bytes, limit: int = 120) -> list[str]:
@@ -78,10 +78,10 @@ def _classify(name: str, data: bytes) -> tuple[str | None, str, str, list[str]]:
         ver = _lua_version(data)
         if ver: markers.append("lua-bytecode-" + ver)
         return "lua", "bytecode", "DISASSEMBLED_METADATA", markers
-    if low.endswith((".js", ".mjs", ".cjs")) or low.endswith("index.android.bundle") or "/src/" in low and low.endswith(".bundle"):
+    if low.endswith((".js", ".mjs", ".cjs")) or low.endswith("index.android.bundle") or ("/src/" in low and low.endswith(".bundle")):
         if b"__d(function" in data or b"react-native" in data.lower(): markers.append("react-native")
         return "javascript", "source-or-bundle", "DECOMPILED_SOURCE", markers
-    if low.endswith((".hbc", ".hermes")) or "hermes" in low and not low.endswith(".so"):
+    if low.endswith((".hbc", ".hermes")) or ("hermes" in low and not low.endswith(".so")):
         return "hermes", "bytecode", "DISASSEMBLED_METADATA", markers
     if low.endswith("main.jsc") or low.endswith(".jsc"):
         return "javascript", "jsc-bytecode", "DISASSEMBLED_METADATA", ["javascriptcore-bytecode"]
@@ -91,32 +91,37 @@ def _classify(name: str, data: bytes) -> tuple[str | None, str, str, list[str]]:
         return "flutter", "dart-aot-elf", "NATIVE_AOT", ["dart-aot-candidate"]
     if low.endswith("libflutter.so"):
         return "flutter", "flutter-engine", "NATIVE_ENGINE", markers
-    if "cocos" in low or low.endswith(("project.js", "settings.js")) and "assets/" in low:
-        return "cocos", "engine-or-script", "RECONSTRUCTED_METADATA", markers
-    if low.endswith(("libcocos2dcpp.so", "libcocos.so")):
+    if low.endswith(("libcocos2dcpp.so", "libcocos.so", "libcocos2d.so")):
         return "cocos", "native-engine", "NATIVE_ENGINE", markers
+    if "cocos" in low or (low.endswith(("project.js", "settings.js")) and "assets/" in low):
+        return "cocos", "engine-or-script", "RECONSTRUCTED_METADATA", markers
     return None, "", "", markers
 
 
-def _source_symbols(family: str, data: bytes) -> list[str]:
+def _source_symbols(family: str, data: bytes) -> list[dict[str, Any]]:
     if not data or len(data) > MAX_TEXT_BYTES:
         return []
     try:
         text = data.decode("utf-8", "replace")
     except Exception:
         return []
-    names: list[str] = []
+    matches: list[tuple[str, int]] = []
     if family == "lua":
-        names = [m.group(1) for m in LUA_FN.finditer(text)]
+        matches = [(m.group(1), m.start(1)) for m in LUA_FN.finditer(text)]
     elif family == "javascript":
         for m in JS_FN.finditer(text):
             value = m.group(1) or m.group(2)
-            if value: names.append(value)
-    out: list[str] = []
+            if value:
+                start = m.start(1) if m.group(1) else m.start(2)
+                matches.append((value, start))
+    out: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for name in names:
-        if name not in seen:
-            seen.add(name); out.append(name)
+    for name, offset in matches:
+        if name in seen:
+            continue
+        seen.add(name)
+        line = text.count("\n", 0, offset) + 1
+        out.append({"name": name, "line": line, "charOffset": offset})
         if len(out) >= 250:
             break
     return out
@@ -126,6 +131,7 @@ def scan_apk_paths(paths: Iterable[str | Path], output_path: str | Path | None =
     items: list[dict[str, Any]] = []
     family_counts: dict[str, int] = {}
     recovery_counts: dict[str, int] = {}
+    symbol_count = 0
     apk_count = 0
     for raw in paths:
         apk = Path(raw)
@@ -150,7 +156,8 @@ def scan_apk_paths(paths: Iterable[str | Path], output_path: str | Path | None =
                     family, representation, recovery, markers = _classify(info.filename, data)
                     if not family:
                         continue
-                    symbols = _source_symbols(family, data) if representation in ("source", "source-or-bundle") else []
+                    symbol_locs = _source_symbols(family, data) if representation in ("source", "source-or-bundle") else []
+                    symbols = [item["name"] for item in symbol_locs]
                     strings = _strings(data, 80) if recovery != "DECOMPILED_SOURCE" else []
                     row = {
                         "id": "artifact:" + family + ":" + _sha(apk.name, info.filename, family),
@@ -166,6 +173,7 @@ def scan_apk_paths(paths: Iterable[str | Path], output_path: str | Path | None =
                         "size": info.file_size,
                         "markers": markers,
                         "symbols": symbols,
+                        "symbolLocators": symbol_locs,
                         "strings": strings,
                         "serverAudit": False,
                         "trustBoundary": "local",
@@ -175,14 +183,42 @@ def scan_apk_paths(paths: Iterable[str | Path], output_path: str | Path | None =
                     items.append(row)
                     family_counts[family] = family_counts.get(family, 0) + 1
                     recovery_counts[recovery] = recovery_counts.get(recovery, 0) + 1
+                    for symbol in symbol_locs:
+                        if len(items) >= MAX_ITEMS:
+                            break
+                        name = str(symbol["name"])
+                        line = int(symbol["line"])
+                        items.append({
+                            "id": "script:" + family + ":" + _sha(apk.name, info.filename, family, f"{name}:{line}"),
+                            "kind": "SCRIPT_SYMBOL",
+                            "title": name,
+                            "category": "Gameplay/Script",
+                            "status": "SCRIPT_CONTENT_SEARCH",
+                            "family": family,
+                            "representation": representation,
+                            "recoveryLevel": recovery,
+                            "apk": apk.name,
+                            "entry": info.filename,
+                            "function": name,
+                            "line": line,
+                            "charOffset": int(symbol["charOffset"]),
+                            "serverAudit": False,
+                            "trustBoundary": "local",
+                            "patchReady": False,
+                            "evidenceRole": "script-symbol",
+                        })
+                        symbol_count += 1
         except Exception:
             continue
+    artifact_count = sum(family_counts.values())
     out = {
         "schema": SCHEMA,
         "passive": True,
         "executesTargetCode": False,
         "apkCount": apk_count,
         "total": len(items),
+        "artifactCount": artifact_count,
+        "symbolCount": symbol_count,
         "familyCounts": family_counts,
         "recoveryCounts": recovery_counts,
         "artifacts": items,
