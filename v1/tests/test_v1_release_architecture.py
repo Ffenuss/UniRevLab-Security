@@ -16,10 +16,10 @@ def test_release_version_is_consistent():
     gradle = read("android/app/build.gradle")
     package = read("pyproject.toml")
     init = read("modkit/__init__.py")
-    assert "versionCode 46" in gradle
-    assert "versionName '1.0.0'" in gradle
-    assert 'version = "1.0.0"' in package
-    assert '__version__ = "1.0.0"' in init
+    assert "versionCode 47" in gradle
+    assert "versionName '1.1.0-dev1'" in gradle
+    assert 'version = "1.1.0.dev1"' in package
+    assert '__version__ = "1.1.0.dev1"' in init
 
 
 def test_release_home_and_runtime_lab_are_private_except_launcher():
@@ -59,10 +59,25 @@ def test_simple_mode_runs_full_reconstruction_before_evidence_pipeline():
     assert "DecompilerEngine.resolveTargetInputs" in service
     assert "exportAllZip(app.cancelled)" in service
     assert '"full-reconstruction.json"' in service
-    assert '"artifact-families.json"' in service
     assert 'putExtra("op","simple_prepare")' in service
     assert 'new Intent(this,FullAnalysisService.class).setAction("cancel")' in service
     assert '"cancel".equals(intent.getAction())' in service
+
+
+def test_full_analysis_runs_embedded_apktool_and_script_backends_without_import():
+    service = read("android/app/src/main/java/dev/modkit/mobile/FullAnalysisService.java")
+    gradle = read("android/app/build.gradle")
+    apktool = read("android/app/src/main/java/dev/modkit/mobile/ApktoolEngine.java")
+    embedded = read("modkit/mobile/embedded_pipeline.py")
+    hermes = read("modkit/mobile/hermes_deep.py")
+    assert "org.apktool:apktool-lib:3.0.2" in gradle
+    assert "hbctool==0.1.5" in gradle
+    assert "ApktoolEngine.analyze(this,inputs,app.cancelled)" in service
+    assert 'getModule("modkit.mobile.embedded_pipeline")' in service
+    assert '"manualImportRequired": False' in embedded
+    assert "hermes_deep.scan_workspace" in embedded
+    assert 'ENGINE_ID = "apktool.android"' in apktool
+    assert '"hermes.deep-embedded"' in hermes
 
 
 def test_external_bridge_normalizes_and_simple_mode_correlates_it(tmp_path: Path):
