@@ -11,6 +11,7 @@
 <activity android:name=".MainActivity" android:exported="false"/>
 <activity android:name=".ProcessLabActivity" android:exported="false"/>
 <activity android:name=".EngineCatalogActivity" android:exported="false"/>
+<activity android:name=".EngineBridgeActivity" android:exported="false"/>
 <activity android:name=".ReportCenterActivity" android:exported="false"/>
 <activity android:name=".ReWorkspaceActivity" android:exported="false"/>
 <activity android:name=".DecompilerActivity" android:exported="false"/>
