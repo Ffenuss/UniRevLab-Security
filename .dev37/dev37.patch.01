@@ -1,0 +1,94 @@
+(520)));ArrayAdapter<String> adapter=new ArrayAdapter<>(this,android.R.layout.simple_list_item_1,new ArrayList<>(names));list.setAdapter(adapter);filter.addTextChangedListener(new android.text.TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int b,int c){}public void onTextChanged(CharSequence s,int a,int b,int c){String q=s.toString().toLowerCase(Locale.ROOT);ArrayList<String> v=new ArrayList<>();for(String n:names)if(q.isEmpty()||n.toLowerCase(Locale.ROOT).contains(q))v.add(n);adapter.clear();adapter.addAll(v);adapter.notifyDataSetChanged();}public void afterTextChanged(android.text.Editable e){}});
++        AlertDialog dialog=new AlertDialog.Builder(this).setTitle(apkLabel+" · файлов "+names.size()).setView(box).setNegativeButton(android.R.string.cancel,null).create();list.setOnItemClickListener((p,v,pos,id)->{String name=adapter.getItem(pos);dialog.dismiss();openEntry(apk,name);});dialog.show();
++    }catch(Exception e){toast("Не удалось открыть APK: "+e.getMessage());}}
++
++    private void openEntry(File apk,String name){try(ZipFile z=new ZipFile(apk)){ZipEntry e=z.getEntry(name);if(e==null)throw new FileNotFoundException(name);if(e.getSize()>MAX_EDIT_BYTES)throw new IOException("Entry больше 16 МБ. Для больших DEX/.so используйте Decompiler или Native Workspace.");byte[] data;try(InputStream in=z.getInputStream(e)){data=readLimited(in,MAX_EDIT_BYTES+1);}sourceApk=apk;targetEntry=name;displayName=apk.getName()+"!"+name;original=data;hexMode=!looksText(data);render();status.setText("APK entry открыт. После редактирования можно подготовить Patch Pack и собрать подписанный APK/APK-set.");}catch(Exception ex){toast(ex.getMessage());}}
++
++    private void render(){if(original.length==0)return;if(hexMode){editor.setText(toHex(original));modeButton.setText("Режим: HEX");}else{editor.setText(new String(original,StandardCharsets.UTF_8));modeButton.setText("Режим: UTF-8");}meta.setText(displayName+" · "+original.length+" bytes"+(targetEntry==null?"":"\nAPK: "+sourceApk.getName()+"\nEntry: "+targetEntry));updateButtons();}
++    private byte[] editedBytes() throws Exception{String s=editor.getText()==null?"":editor.getText().toString();return hexMode?fromHex(s):s.getBytes(StandardCharsets.UTF_8);}
++    private void saveWorking(){try{byte[] b=editedBytes();Files.write(app.file("workspace-edit.bin").toPath(),b);original=b;meta.setText(displayName+" · "+b.length+" bytes · рабочая копия сохранена");status.setText("Рабочая копия сохранена. Исходный APK не изменён.");}catch(Exception e){toast("Ошибка: "+e.getMessage());}}
++    private void exportEdited(){if(original.length==0)return;startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/octet-stream").addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE,targetEntry==null?displayName:new File(targetEntry).getName()),EXPORT_FILE);}
++    private void writeEdited(Uri uri){try(OutputStream out=getContentResolver().openOutputStream(uri,"w")){if(out==null)throw new IOException("openOutputStream returned null");out.write(editedBytes());out.flush();status.setText("Изменённый файл экспортирован.");}catch(Exception e){toast(e.getMessage());}}
++
++    private void preparePatch(){try{if(sourceApk==null||targetEntry==null)throw new IOException("Откройте entry из APK");byte[] b=editedBytes();File zip=app.file("workspace-patch.zip"),tmp=app.file("workspace-patch.zip.tmp");JSONObject manifest=new JSONObject().put("schema","modkit-workspace-patch-1.0").put("sourceApk",sourceApk.getCanonicalPath()).put("entries",new JSONArray().put(new JSONObject().put("packPath","files/edit.bin").put("targetPath",targetEntry).put("display",displayName)));
++        try(ZipOutputStream z=new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(tmp)))){z.putNextEntry(new ZipEntry("files/edit.bin"));z.write(b);z.closeEntry();z.putNextEntry(new ZipEntry("modkit-workspace.json"));z.write(manifest.toString(2).getBytes(StandardCharsets.UTF_8));z.closeEntry();}
++        Files.move(tmp.toPath(),zip.toPath(),StandardCopyOption.REPLACE_EXISTING);Files.write(app.file("workspace-source.json").toPath(),new JSONObject().put("sourceApk",sourceApk.getCanonicalPath()).put("targetEntry",targetEntry).toString(2).getBytes(StandardCharsets.UTF_8));
++        startWork(new Intent().putExtra("op","workspace_inspect").putExtra("source",sourceApk.getCanonicalPath()));status.setText("Patch Pack подготовлен; запускаю проверку совместимости…");updateButtons();
++    }catch(Exception e){toast(e.getMessage());}}
++
++    private void buildPatched(){if(!app.file("workspace-patch.zip").isFile()){toast("Сначала подготовьте Patch Pack");return;}boolean set=isInstalledSet();String title=set?"modkit-workspace-test.apks":"modkit-workspace-test.apk";startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType(set?"application/zip":"application/vnd.android.package-archive").addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE,title),BUILD_APK);}
++    private boolean isInstalledSet(){try{JSONObject t=new JSONObject(Io.readUtf8(app.file("installed-target.json")));JSONArray s=t.optJSONArray("splits");return "apk-set".equals(t.optString("buildMode"))&&s!=null&&s.length()>1;}catch(Exception e){return false;}}
++    private void startBuild(Uri uri){try{JSONObject s=new JSONObject(Io.readUtf8(app.file("workspace-source.json")));String source=s.getString("sourceApk");startWork(new Intent().putExtra("op","workspace_build").putExtra("source",source).putExtra("uri",uri.toString()));}catch(Exception e){toast(e.getMessage());}}
++    private void startWork(Intent i){if(app.busy.get()){toast("Сейчас выполняется другая операция");return;}app.cancelled.set(false);app.busy.set(true);app.progress("Подготовка…");i.setClass(this,WorkerService.class);startForegroundService(i);}
++
++    private void refreshStatus(){if(revision==app.revision)return;revision=app.revision;if(app.status!=null&&!app.status.isEmpty())status.setText(app.status);build.setEnabled(sourceApk!=null&&targetEntry!=null&&app.file("workspace-patch.zip").isFile()&&!app.busy.get());}
++    private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
++    @Override protected void onActivityResult(int req,int result,Intent data){super.onActivityResult(req,result,data);if(result!=RESULT_OK||data==null||data.getData()==null)return;if(req==OPEN_FILE)openUri(data.getData());else if(req==EXPORT_FILE)writeEdited(data.getData());else if(req==BUILD_APK)startBuild(data.getData());}
++    @Override protected void onResume(){super.onResume();handler.post(poll);}
++    @Override protected void onPause(){handler.removeCallbacks(poll);super.onPause();}
++
++    private static byte[] readLimited(InputStream in,int limit)throws IOException{ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] buf=new byte[65536];int n,total=0;while((n=in.read(buf))!=-1){total+=n;if(total>limit){out.write(buf,0,n-(total-limit));break;}out.write(buf,0,n);}return out.toByteArray();}
++    private static boolean looksText(byte[] b){int n=Math.min(b.length,8192),bad=0;if(n==0)return true;for(int i=0;i<n;i++){int v=b[i]&255;if(v==0)return false;if(v<9||(v>13&&v<32))bad++;}return bad<n/30+1;}
++    private static String toHex(byte[] b){StringBuilder s=new StringBuilder(b.length*3);for(int i=0;i<b.length;i++){if(i>0){if(i%16==0)s.append('\n');else s.append(' ');}s.append(String.format(Locale.ROOT,"%02X",b[i]&255));}return s.toString();}
++    private static byte[] fromHex(String s)throws IOException{String clean=s.replaceAll("[^0-9A-Fa-f]","");if((clean.length()&1)!=0)throw new IOException("HEX содержит нечётное число цифр");byte[] out=new byte[clean.length()/2];for(int i=0;i<out.length;i++)out[i]=(byte)Integer.parseInt(clean.substring(i*2,i*2+2),16);return out;}
++}
+diff --git a/android/app/src/main/java/dev/modkit/mobile/MainActivity.java b/android/app/src/main/java/dev/modkit/mobile/MainActivity.java
+index 97dfc9a..21242ef 100644
+--- a/android/app/src/main/java/dev/modkit/mobile/MainActivity.java
++++ b/android/app/src/main/java/dev/modkit/mobile/MainActivity.java
+@@ -75,6 +75,9 @@ public class MainActivity extends androidx.appcompat.app.AppCompatActivity {
+         button(getString(R.string.how_it_works),root,v->new AlertDialog.Builder(this).setTitle(getString(R.string.pipeline_title))
+             .setMessage(getString(R.string.pipeline_message))
+             .setPositiveButton(getString(R.string.got_it),null).show());
++        LinearLayout simple=section(getString(R.string.simple_section));
++        button(getString(R.string.simple_button),simple,v->startActivity(new Intent(this,SimpleModeActivity.class)));
++        simple.addView(text(getString(R.string.simple_note),13));
+ 
+         LinearLayout nav=section(getString(R.string.navigation));
+         button(getString(R.string.nav_discovery),nav,v->startActivity(new Intent(this,ReWorkspaceActivity.class)));
+@@ -84,6 +87,7 @@ public class MainActivity extends androidx.appcompat.app.AppCompatActivity {
+ 
+         LinearLayout work=section(getString(R.string.workspaces));
+         button(getString(R.string.workspace_decompiler),work,v->startActivity(new Intent(this,DecompilerActivity.class)));
++        button(getString(R.string.workspace_files),work,v->startActivity(new Intent(this,FileWorkspaceActivity.class)));
+         button(getString(R.string.workspace_re),work,v->startActivity(new Intent(this,ReWorkspaceActivity.class)));
+         button(getString(R.string.workspace_native),work,v->startActivity(new Intent(this,NativeWorkspaceActivity.class)));
+         button(getString(R.string.workspace_patch),work,v->startActivity(new Intent(this,PatchPackActivity.class)));
+@@ -124,6 +128,7 @@ public class MainActivity extends androidx.appcompat.app.AppCompatActivity {
+         result.addView(text(getString(R.string.result_note),13));
+         if (Build.VERSION.SDK_INT>=33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS")!=android.content.pm.PackageManager.PERMISSION_GRANTED)
+             requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"},50);
++        if(getIntent().getBooleanExtra("autoInstalledPicker",false))handler.postDelayed(this::showInstalledApps,250);
+     }
+     private void showInstalledApps() {
+         PackageManager pm=getPackageManager();
+diff --git a/android/app/src/main/java/dev/modkit/mobile/SimpleModeActivity.java b/android/app/src/main/java/dev/modkit/mobile/SimpleModeActivity.java
+new file mode 100644
+index 0000000..6ed57f9
+--- /dev/null
++++ b/android/app/src/main/java/dev/modkit/mobile/SimpleModeActivity.java
+@@ -0,0 +1,52 @@
++package dev.modkit.mobile;
++
++import android.app.*;
++import android.content.*;
++import android.graphics.*;
++import android.net.Uri;
++import android.os.*;
++import android.view.*;
++import android.widget.*;
++import androidx.recyclerview.widget.*;
++import org.json.*;
++import java.io.*;
++import java.nio.charset.StandardCharsets;
++import java.nio.file.Files;
++import java.util.*;
++
++/** One-screen "Для глупых" workflow: analyse -> explain everything -> build validated local controls. */
++public class SimpleModeActivity extends Activity {
++    private static final int BUILD=401;
++    private App app;private TextView status,summary;private RecyclerView list;private CardAdapter adapter;
++    private Button prepare,build;private final LinkedHashSet<String> selected=new LinkedHashSet<>();
++    private final Handler handler=new Handler(Looper.getMainLooper());private long revision=-1;
++    private final Runnable poll=new Runnable(){public void run(){refresh();handler.postDelayed(this,450);}};
++    private int dp(int n){return(int)(n*get
