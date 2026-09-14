@@ -9,7 +9,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Locale;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -97,7 +96,7 @@ final class RootAccess {
     }
 
     static ExecResult runSu(String fixedCommand, long timeoutMs, int maxCaptureBytes) {
-        if (fixedCommand == null || fixedCommand.isBlank()) return new ExecResult(-1, "empty command", false, false);
+        if (fixedCommand == null || fixedCommand.trim().isEmpty()) return new ExecResult(-1, "empty command", false, false);
         Process process = null;
         ExecutorService io = Executors.newSingleThreadExecutor();
         try {
