@@ -17,17 +17,31 @@ cd /tmp/modkit-dev25
 git apply --check /tmp/dev37.patch
 git apply /tmp/dev37.patch
 
-# The historical dev34 regression follows the current release version to ensure the
-# reconstructed source tree is the expected release. dev37 bumps 41/dev36 -> 42/dev37.
+# One historical dev34 regression intentionally follows the current release version
+# as a reconstruction guard. Keep only that function's current-release assertions in
+# sync with dev37; do not rewrite historical validation assertions elsewhere.
 python - <<'PY'
 from pathlib import Path
 p = Path('tests/test_project_docs.py')
 s = p.read_text(encoding='utf-8')
-old = "assert 'versionCode 41' in gradle and \"versionName '0.9.0-dev36'\" in gradle"
-new = "assert 'versionCode 42' in gradle and \"versionName '0.9.0-dev37'\" in gradle"
-if old not in s:
-    raise SystemExit('expected stale dev36 version assertion was not found')
-p.write_text(s.replace(old, new, 1), encoding='utf-8')
+name = 'def test_dev34_parallel_index_checkpoint_is_versioned_and_fail_closed():'
+start = s.find(name)
+if start < 0:
+    raise SystemExit('dev34 current-release regression guard was not found')
+next_def = s.find('\ndef ', start + len(name))
+end = len(s) if next_def < 0 else next_def
+block = s[start:end]
+updated = (block
+    .replace('versionCode 41', 'versionCode 42')
+    .replace('0.9.0.dev36', '0.9.0.dev37')
+    .replace('0.9.0-dev36', '0.9.0-dev37'))
+if updated == block:
+    # The transport may already carry part of the dev37 expectation. Require the
+    # final function to contain the complete dev37 version guard either way.
+    if ('versionCode 42' not in block or '0.9.0.dev37' not in block):
+        raise SystemExit('dev34 current-release guard did not contain expected dev36/dev37 markers')
+s = s[:start] + updated + s[end:]
+p.write_text(s, encoding='utf-8')
 PY
 
 grep -q "versionCode 42" android/app/build.gradle
