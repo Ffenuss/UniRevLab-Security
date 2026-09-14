@@ -1,4 +1,5 @@
 // Active development: ModKit 1.1.0-dev1, versionCode 47.
+// Prior canonical release marker retained for regression guards only: versionCode 46, versionName '1.0.0'.
 // Historical canonical baseline retained only for regression provenance: versionCode 45, versionName '0.9.0-dev40'.
 plugins { id 'com.android.application'; id 'com.chaquo.python' }
 android {
