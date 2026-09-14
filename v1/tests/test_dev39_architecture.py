@@ -1,12 +1,14 @@
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 
-def test_dev39_human_simple_mode_filters_and_json_on_demand():
-    ui=(ROOT/'android/app/src/main/java/dev/modkit/mobile/SimpleModeActivity.java').read_text(encoding='utf-8')
-    for token in ('Важное','READY','Gameplay','Crypto/Keys','Технические доказательства JSON'):
-        assert token in ui
-    assert 'serverAudit' in ui
-    assert 'frameworkNoise' in ui and 'bundledSdk' in ui
+def test_dev39_human_catalogue_filters_and_json_evidence_survive_new_shell():
+    model=(ROOT/'modkit/mobile/simple_mode.py').read_text(encoding='utf-8')
+    ui=(ROOT/'android/app/src/main/java/dev/modkit/mobile/AutoAnalysisActivity.java').read_text(encoding='utf-8')
+    for token in ('PATCH_READY','gameplayDomain','serverAudit','FRAMEWORK_NOISE','SDK_NOISE'):
+        assert token in model
+    assert 'important=cat.optInt("important")' in ui
+    assert 'cat.optJSONArray("cards")' in ui
+    assert 'c.toString()' in ui
 
 def test_dev39_dex_boundary_fix_is_present():
     dex=(ROOT/'modkit/reworkspace/dex.py').read_text(encoding='utf-8')
