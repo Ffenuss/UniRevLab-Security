@@ -77,10 +77,14 @@ def test_target_selection_prepares_only_and_full_analysis_runs_once():
 def test_full_analysis_runs_embedded_apktool_and_script_backends_without_import():
     service = read("android/app/src/main/java/dev/modkit/mobile/FullAnalysisService.java")
     gradle = read("android/app/build.gradle")
+    settings = read("android/settings.gradle")
     apktool = read("android/app/src/main/java/dev/modkit/mobile/ApktoolEngine.java")
     embedded = read("modkit/mobile/embedded_pipeline.py")
     hermes = read("modkit/mobile/hermes_deep.py")
-    assert "org.apktool:apktool-lib:3.0.2" in gradle
+    assert "org.apktool:apktool-lib:2.12.1" in gradle
+    assert "jitpack.io" not in settings.casefold()
+    assert 'APKTOOL_VERSION = "2.12.1"' in apktool
+    assert "new Config()" in apktool and "new ExtFile(input)" in apktool
     assert "docopt-ng==0.8.1" in gradle
     assert "Kirlif/HBC-Tool/releases/download/96/hbctool-0.1.5-96-py3-none-any.whl" in gradle
     assert "options '--no-deps'" in gradle
