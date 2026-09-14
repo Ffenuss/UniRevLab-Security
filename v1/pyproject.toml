@@ -1,4 +1,4 @@
-# Active development: 1.1.0.dev1. Historical regression baseline marker only: version = "0.9.0.dev40"
+# Active development: 1.1.0.dev1. Prior release regression marker only: version = "1.0.0". Historical marker: version = "0.9.0.dev40"
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
