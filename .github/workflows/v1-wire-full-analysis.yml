@@ -1,0 +1,42 @@
+name: Wire ModKit v1 Full Analysis
+
+on:
+  push:
+    branches: [ Modkit1 ]
+    paths:
+      - '.github/workflows/v1-wire-full-analysis.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  wire:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: Modkit1
+      - name: Wire full reconstruction before Simple Mode
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('v1/android/app/src/main/java/dev/modkit/mobile/SimpleModeActivity.java')
+          s=p.read_text(encoding='utf-8')
+          old='prepare=button("2 · Обновить полный анализ",root,v->startWork(new Intent().putExtra("op","simple_prepare")));'
+          new='prepare=button("2 · Обновить полный анализ",root,v->startFullAnalysis());'
+          if old not in s and new not in s:
+              raise SystemExit('prepare hook not found')
+          s=s.replace(old,new)
+          marker='    private void startWork(Intent i){if(app.busy.get()){toast("Сейчас выполняется другая операция");return;}app.cancelled.set(false);app.busy.set(true);app.progress("Подготовка…");i.setClass(this,WorkerService.class);startForegroundService(i);}\n'
+          method='    private void startFullAnalysis(){if(app.busy.get()){toast("Сейчас выполняется другая операция");return;}app.cancelled.set(false);app.busy.set(true);app.progress("Полная реконструкция: подготовка…");startForegroundService(new Intent(this,FullAnalysisService.class));}\n'
+          if method not in s:
+              if marker not in s: raise SystemExit('startWork marker not found')
+              s=s.replace(marker,method+marker)
+          p.write_text(s,encoding='utf-8')
+          PY
+          git config user.name 'ModKit CI'
+          git config user.email 'actions@users.noreply.github.com'
+          git add v1/android/app/src/main/java/dev/modkit/mobile/SimpleModeActivity.java
+          git diff --cached --quiet && exit 0
+          git commit -m 'v1: run full reconstruction before Simple Mode evidence pipeline'
+          git push origin HEAD:Modkit1
