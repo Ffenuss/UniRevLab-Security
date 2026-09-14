@@ -1,0 +1,69 @@
+package dev.modkit.mobile;
+
+import android.app.*;
+import android.content.*;
+import android.graphics.*;
+import android.net.Uri;
+import android.os.*;
+import android.text.*;
+import android.view.*;
+import android.widget.*;
+import androidx.recyclerview.widget.*;
+import org.json.*;
+import java.util.*;
+
+/** Human-oriented Simple Mode: prioritize useful evidence, keep all findings available. */
+public class SimpleModeActivity extends Activity {
+    private static final int BUILD=401;
+    private App app;
+    private TextView status,summary,shown;
+    private RecyclerView list;
+    private CardAdapter adapter;
+    private Button prepare,build;
+    private Spinner filter;
+    private EditText search;
+    private final LinkedHashSet<String> selected=new LinkedHashSet<>();
+    private final Handler handler=new Handler(Looper.getMainLooper());
+    private long revision=-1;
+    private JSONObject currentCatalog=null;
+    private final Runnable poll=new Runnable(){public void run(){refresh();handler.postDelayed(this,450);}};
+
+    private int dp(int n){return(int)(n*getResources().getDisplayMetrics().density);}
+    private TextView text(String s,int size){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(Color.rgb(225,230,235));t.setPadding(0,dp(5),0,dp(5));t.setTextIsSelectable(true);return t;}
+    private Button button(String s,LinearLayout p,View.OnClickListener l){Button b=new Button(this);b.setText(s);b.setAllCaps(false);b.setOnClickListener(l);p.addView(b);return b;}
+
+    @Override public void onCreate(Bundle state){super.onCreate(state);app=(App)getApplication();
+        LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(dp(14),dp(14),dp(14),dp(14));root.setBackgroundColor(Color.rgb(16,20,24));
+        TextView title=text("Для глупых · авто-режим",28);title.setTypeface(null,Typeface.BOLD);root.addView(title);
+        root.addView(text("Показывает сначала важные находки, а framework/SDK-шум оставляет во вкладке «Все». READY означает точный локальный locator; автоматическая сборка всё равно требует проверенный executable binding.",13));
+        button("1 · Выбрать установленное приложение / игру",root,v->startActivity(new Intent(this,MainActivity.class).putExtra("autoInstalledPicker",true)));
+        prepare=button("2 · Обновить анализ и список находок",root,v->startWork(new Intent().putExtra("op","simple_prepare")));
+        summary=text("",13);root.addView(summary);status=text("",13);root.addView(status);
+
+        LinearLayout filters=new LinearLayout(this);filters.setOrientation(LinearLayout.HORIZONTAL);filters.setGravity(Gravity.CENTER_VERTICAL);root.addView(filters);
+        filter=new Spinner(this);String[] modes={"Важное","READY","Gameplay","Server/API","Crypto/Keys","Все"};ArrayAdapter<String> fa=new ArrayAdapter<>(this,android.R.layout.simple_spinner_item,modes);fa.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);filter.setAdapter(fa);filters.addView(filter,new LinearLayout.LayoutParams(0,-2,1f));
+        search=new EditText(this);search.setHint("Поиск…");search.setTextColor(Color.WHITE);search.setHintTextColor(Color.GRAY);search.setSingleLine(true);filters.addView(search,new LinearLayout.LayoutParams(0,-2,1.4f));
+        shown=text("",12);root.addView(shown);
+
+        list=new RecyclerView(this);list.setLayoutManager(new LinearLayoutManager(this));adapter=new CardAdapter();list.setAdapter(adapter);root.addView(list,new LinearLayout.LayoutParams(-1,0,1f));
+        build=button("3 · Сделать мод из выбранного",root,v->requestBuild());setContentView(root);
+        filter.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){adapter.applyFilter();}public void onNothingSelected(android.widget.AdapterView<?> p){}});
+        search.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int b,int c){}public void onTextChanged(CharSequence s,int a,int b,int c){adapter.applyFilter();}public void afterTextChanged(Editable e){}});
+        refresh();
+    }
+
+    private void requestBuild(){if(selected.isEmpty()){toast("Отметьте хотя бы один пункт с авто-сборка READY");return;}startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType(isInstalledSet()?"application/zip":"application/vnd.android.package-archive").addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE,isInstalledSet()?"modkit-simple-test.apks":"modkit-simple-test.apk"),BUILD);}
+    private boolean isInstalledSet(){try{JSONObject t=new JSONObject(Io.readUtf8(app.file("installed-target.json")));JSONArray a=t.optJSONArray("splits");return "apk-set".equals(t.optString("buildMode"))&&a!=null&&a.length()>1;}catch(Exception e){return false;}}
+    private void startWork(Intent i){if(app.busy.get()){toast("Сейчас выполняется другая операция");return;}app.cancelled.set(false);app.busy.set(true);app.progress("Подготовка…");i.setClass(this,WorkerService.class);startForegroundService(i);}
+    private void build(Uri uri){JSONArray ids=new JSONArray();for(String s:selected)ids.put(s);startWork(new Intent().putExtra("op","simple_build").putExtra("uri",uri.toString()).putExtra("controls",ids.toString()));}
+    private JSONObject read(){try{return new JSONObject(Io.readUtf8(app.file("simple-catalog.json")));}catch(Exception e){return null;}}
+
+    private void refresh(){if(revision==app.revision&&currentCatalog!=null)return;revision=app.revision;status.setText(app.status==null?"":app.status);JSONObject o=read();currentCatalog=o;
+        if(o==null){summary.setText("Список ещё не создан. Выберите приложение и нажмите шаг 2.");adapter.set(new JSONArray());build.setEnabled(false);prepare.setEnabled(!app.busy.get());return;}
+        JSONArray cards=o.optJSONArray("cards");JSONObject counts=o.optJSONObject("counts");
+        summary.setText("Найдено: "+o.optInt("total")+" · важных: "+o.optInt("important")+" · авто-сборка READY: "+o.optInt("buildable")+" · locator/actionable: "+o.optInt("actionable")+"\nserver/trust: "+o.optInt("serverAudit")+" · framework: "+o.optInt("frameworkNoise")+" · SDK: "+o.optInt("bundledSdk")+(counts==null?"":"\n"+counts.toString()));
+        adapter.set(cards==null?new JSONArray():cards);build.setEnabled(!app.busy.get()&&!selected.isEmpty());prepare.setEnabled(!app.busy.get());
+    }
+
+    private String value(JSONObject o,String... keys){for(String k:keys){Object v=o.opt(k);if(v!=null&&v!=JSONObject.NULL){String s=String.valueOf(v);if(!s.isEmpty())return s;}}return "";}
+    private String location(JSONObject c){JSONObject e=c.optJSONObject("evidence");JSONObject l=c.optJSONObject("locator");StringBuilder b=new StringBuilder();if(l!=null){String r=value(l,"rva");if(!r.isEmpty())b.append("RVA: ").append(r).append('\n');String a=value(l,"artifact");if(!a.isEmpty())b.append("Artifact: ").append(a).append('\n');String cl=value(l,"class");if(!cl.isEmpty())b.append("Class: ").append(cl).append('\n');String m=value(l,"method");if(!m.isEmpty())b.append("Metho
