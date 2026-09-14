@@ -4,6 +4,7 @@ plugins { id 'com.android.application'; id 'com.chaquo.python' }
 android {
     namespace 'dev.modkit.mobile'
     compileSdk 34
+    ndkVersion '26.1.10909125'
     defaultConfig {
         applicationId 'dev.modkit.mobile'
         minSdk 26
