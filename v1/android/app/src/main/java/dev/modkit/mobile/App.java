@@ -18,6 +18,7 @@ public class App extends Application {
     public volatile long revision = 0;
     private static final Pattern PERCENT=Pattern.compile("(?:^|\\D)(100|[0-9]{1,2})%");
     public File file(String name) { return new File(getFilesDir(), name); }
+    private String visibleStatus(String message){return (message==null?"":message).replace("Simple Mode","Автоанализ");}
     private String stageFor(String message) {
         String s=message==null?"":message.toLowerCase(Locale.ROOT);
         if(s.contains("ошибка")||s.contains("отмен"))return "STOPPED";
@@ -32,10 +33,11 @@ public class App extends Application {
         return stage==null?"IDLE":stage;
     }
     public void progress(String message) {
-        status = message;
-        stage = stageFor(message);
+        String visible=visibleStatus(message);
+        status = visible;
+        stage = stageFor(visible);
         stageProgress = -1;
-        Matcher m=PERCENT.matcher(message==null?"":message);
+        Matcher m=PERCENT.matcher(visible);
         if(m.find())try{stageProgress=Integer.parseInt(m.group(1));}catch(Exception ignored){}
         revision++;
     }
