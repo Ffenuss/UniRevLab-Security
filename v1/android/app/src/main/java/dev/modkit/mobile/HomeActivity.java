@@ -11,7 +11,7 @@ import android.widget.TextView;
 
 import androidx.appcompat.app.AppCompatActivity;
 
-/** Single release entry point. No legacy/dev40 navigation is exposed from here. */
+/** Single release entry point. Only the unified v1.1 routes are exposed here. */
 public class HomeActivity extends AppCompatActivity {
     private LinearLayout root;
     private int dp(int n){return(int)(n*getResources().getDisplayMetrics().density);}
