@@ -1,8 +1,8 @@
 """Embedded Hermes HBC deep analysis for ModKit 1.1.
 
-The Android package bundles hbctool through Chaquopy. This module extracts Hermes
-bytecode from the selected APK/split set and disassembles supported HBC versions
-inside ModKit. Target code is never executed.
+The Android package bundles the MIT HBC-Tool build 96 through Chaquopy. This module extracts
+Hermes bytecode from the selected APK/split set and disassembles supported HBC versions entirely
+inside ModKit. Target code is never executed and no network access is required on the device.
 """
 from __future__ import annotations
 
@@ -15,9 +15,11 @@ import struct
 from typing import Any, Iterable
 import zipfile
 
-SCHEMA = "modkit-hermes-deep-1.0"
+SCHEMA = "modkit-hermes-deep-1.1"
+ENGINE_ID = "hermes.deep-embedded"
+BACKEND = "HBC-Tool/Kirlif build 96"
 HERMES_MAGIC = 2240826417119764422
-SUPPORTED_VERSIONS = {59, 62, 74, 76, 84, 85}
+SUPPORTED_VERSIONS = {59, 62, 74, 76, *range(83, 97)}
 MAX_ENTRY_BYTES = 96 * 1024 * 1024
 MAX_FUNCTIONS = 20000
 MAX_STRINGS = 5000
@@ -71,11 +73,7 @@ def _is_candidate(name: str) -> bool:
     return low.endswith((".hbc", ".hermes", ".bundle")) or low.endswith("index.android.bundle") or "hermes" in low
 
 
-def scan_apk_paths(
-    paths: Iterable[str | Path],
-    workdir: str | Path,
-    output_path: str | Path | None = None,
-) -> dict[str, Any]:
+def scan_apk_paths(paths: Iterable[str | Path], workdir: str | Path, output_path: str | Path | None = None) -> dict[str, Any]:
     root = Path(workdir)
     engine_root = root / "hermes-deep"
     input_root = engine_root / "inputs"
@@ -92,15 +90,16 @@ def scan_apk_paths(
     except Exception as exc:
         out = {
             "schema": SCHEMA,
-            "engineId": "hermes.deep-embedded",
-            "bundled": False,
+            "engineId": ENGINE_ID,
+            "backend": BACKEND,
+            "bundled": True,
             "available": False,
             "executesTargetCode": False,
             "bundleCount": 0,
             "findingCount": 0,
             "bundles": [],
             "findings": [],
-            "errors": [{"error": f"hbctool unavailable: {exc}"}],
+            "errors": [{"error": f"bundled HBC parser failed to load: {exc}"}],
         }
         if output_path:
             Path(output_path).write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -133,6 +132,7 @@ def scan_apk_paths(
                         "sha256": digest,
                         "hbcVersion": version,
                         "supported": version in SUPPORTED_VERSIONS,
+                        "backend": BACKEND,
                         "status": "HBC_FOUND",
                         "executesTargetCode": False,
                     }
@@ -181,7 +181,7 @@ def scan_apk_paths(
                                 "title": name,
                                 "category": "Runtime/Hermes",
                                 "status": "DEEP_DISASSEMBLED",
-                                "engineId": "hermes.deep-embedded",
+                                "engineId": ENGINE_ID,
                                 "family": "hermes",
                                 "representation": "hbc-disassembly",
                                 "recoveryLevel": "DEEP_DISASSEMBLY",
@@ -223,7 +223,8 @@ def scan_apk_paths(
 
     out = {
         "schema": SCHEMA,
-        "engineId": "hermes.deep-embedded",
+        "engineId": ENGINE_ID,
+        "backend": BACKEND,
         "bundled": True,
         "available": True,
         "executesTargetCode": False,
