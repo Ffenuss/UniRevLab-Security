@@ -11,6 +11,7 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.os.Build;
 import android.os.IBinder;
 
 import org.json.JSONArray;
@@ -98,13 +99,18 @@ public class TargetPreparationService extends Service {
                 .put("packageName",packageName)
                 .put("label",label==null?String.valueOf(pm.getApplicationLabel(ai)):label)
                 .put("versionName",pi.versionName)
-                .put("versionCode",pi.getLongVersionCode())
+                .put("versionCode",versionCode(pi))
                 .put("expectedApkCount",sources.size())
                 .put("splits",splits);
         Files.write(app.file("installed-target.json").toPath(),target.toString(2).getBytes(StandardCharsets.UTF_8));
         SharedPreferences.Editor prefs=getSharedPreferences("state",0).edit();
         prefs.putString("installed.package",packageName).putString("game.apk","base.apk").apply();
         progress("Target готов: "+packageName+" · APK-set "+sources.size()+" · анализ ещё не запускался.");
+    }
+
+    @SuppressWarnings("deprecation")
+    private static long versionCode(PackageInfo info){
+        return Build.VERSION.SDK_INT>=Build.VERSION_CODES.P?info.getLongVersionCode():(long)info.versionCode;
     }
 
     private void prepareApk(String uriText,String display)throws Exception{
