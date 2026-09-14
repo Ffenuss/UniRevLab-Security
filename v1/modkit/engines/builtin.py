@@ -25,9 +25,9 @@ def build_default_registry() -> EngineRegistry:
           notes="Java-like output is a decompiler view; DEX/Smali remains authoritative when recovery fails."),
         E("elf.static", "ELF / ARM64 analyzer", "1.0", K.DISASSEMBLER, (A.ELF,), S.BUILTIN,
           "modkit.reworkspace.native", ("elf", "symbols", "strings", "arm64", "rva", "xrefs"), priority=20),
-        E("native.deep-embedded", "Embedded ARM64 call/xref analyzer", "1.0", K.ANALYZER, (A.ELF,), S.BUILTIN,
-          "modkit.mobile.native_deep", ("function-rva", "direct-bl", "adrp-add-xrefs", "semantic-strings", "call-graph", "split-aware"),
-          priority=21, notes="Runs locally over app-owned ARM64 ELF files; Ghidra/Rizin are optional corroboration only."),
+        E("native.deep-embedded", "Embedded ARM64 call/xref analyzer", "1.1", K.ANALYZER, (A.ELF,), S.BUILTIN,
+          "modkit.mobile.native_deep", ("function-rva", "direct-bl", "tail-b", "absolute-thunks", "indirect-slot-blr", "adrp-add-xrefs", "semantic-strings", "call-graph", "split-aware"),
+          priority=21, notes="Runs locally over app-owned ARM64 ELF files; exact static targets and structural-only indirect slots are kept distinct; Ghidra/Rizin are optional corroboration only."),
         E("il2cpp.rodroid", "Rodroid IL2CPP reconstructor", "7", K.RECONSTRUCTOR, (A.IL2CPP, A.ELF), S.BUILTIN,
           "android:dev.modkit.mobile.RodroidRunner", ("metadata", "types", "fields", "methods", "rva", "offsets"), priority=20),
         E("unity.discovery", "Unity / IL2CPP discovery", "1.0", K.ANALYZER, (A.APK, A.APK_SET, A.IL2CPP, A.UNITY_ASSET), S.BUILTIN,
@@ -95,8 +95,8 @@ def build_default_registry() -> EngineRegistry:
         E("frida.external", "Frida external compatibility alias", "1.0", K.RUNTIME, (A.PROCESS,), S.OPTIONAL,
           "compat-alias:frida.local-bridge", ("compatibility-alias",), priority=95, notes="Use frida.local-bridge for new integrations."),
         E("flutter.external", "Flutter external compatibility alias", "1.0", K.RECONSTRUCTOR, (A.FLUTTER, A.ELF), S.ENTRY_POINT,
-          "compat-alias:flutter.deep-bridge", ("compatibility-alias",), priority=95, notes="Use flutter.deep-bridge for optional external corroboration."),
+          "compat-alias:flutter.deep-bridge", ("compatibility-alias",), priority=95, notes="Use flutter.deep-bridge for new integrations."),
         E("hermes.external", "Hermes external compatibility alias", "1.0", K.DECOMPILER, (A.HERMES, A.JAVASCRIPT), S.ENTRY_POINT,
-          "compat-alias:hermes.deep-bridge", ("compatibility-alias",), priority=95, notes="Use hermes.deep-bridge for optional external corroboration."),
+          "compat-alias:hermes.deep-bridge", ("compatibility-alias",), priority=95, notes="Use hermes.deep-bridge for new integrations."),
     ]
     return EngineRegistry(engines)
