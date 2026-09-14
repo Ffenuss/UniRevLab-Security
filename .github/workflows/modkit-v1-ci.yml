@@ -31,6 +31,8 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
@@ -62,5 +64,5 @@ jobs:
           unzip -t "$APK" >/dev/null
           "${ANDROID_HOME}/build-tools/34.0.0/zipalign" -c -p -v 4 "$APK" >/dev/null
           "${ANDROID_HOME}/build-tools/34.0.0/apksigner" verify --verbose --print-certs "$APK" | tee apk-signature.txt
-          sha256sum "$APK" | tee ModKit-Android-1.0.0-debug.apk.sha256
+          sha256sum "$APK" | tee ModKit-Android-1.1.0-dev1-debug.apk.sha256
           test "$(unzip -p "$APK" AndroidManifest.xml | wc -c)" -gt 0
