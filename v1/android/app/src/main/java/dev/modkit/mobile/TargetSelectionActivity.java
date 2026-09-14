@@ -37,7 +37,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.Locale;
 
-/** One target selector shared by automatic and full modes. */
+/** One target selector shared by automatic and full modes. Selection never runs analysis. */
 public class TargetSelectionActivity extends AppCompatActivity {
     private static final int PICK_APK=910;
     private App app;
@@ -60,10 +60,10 @@ public class TargetSelectionActivity extends AppCompatActivity {
         super.onCreate(state);app=(App)getApplication();
         ScrollView scroll=new ScrollView(this);LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(dp(18),dp(18),dp(18),dp(28));root.setBackgroundColor(bg());scroll.addView(root);setContentView(scroll);
         TextView title=text("Выбор приложения / APK",28);title.setTypeface(null,Typeface.BOLD);root.addView(title);
-        TextView note=text("Это единственная точка выбора target. После выбора тот же target используют анализ, декомпилятор, редактор, сборка и отчёт.",13);note.setTextColor(muted());root.addView(note);
+        TextView note=text("Target выбирается один раз. Здесь ModKit только копирует APK/APK-set; сам анализ начнётся после возврата и выполнится ровно один раз.",13);note.setTextColor(muted());root.addView(note);
         installed=button("Установленное приложение / игра",root,v->showInstalledApps());
         apk=button("Выбрать APK файл",root,v->startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("application/vnd.android.package-archive").addCategory(Intent.CATEGORY_OPENABLE),PICK_APK));
-        cancel=button("Отмена",root,v->{if(app.busy.get()){app.cancelled.set(true);app.progress("Отмена выбора/подготовки target…");}else{setResult(RESULT_CANCELED);finish();}});
+        cancel=button("Отмена",root,v->{if(app.busy.get()){app.cancelled.set(true);app.progress("Отмена подготовки target…");}else{setResult(RESULT_CANCELED);finish();}});
         status=text("Выберите источник.",14);status.setTextIsSelectable(true);root.addView(status);
         handler.post(poll);
     }
@@ -82,9 +82,9 @@ public class TargetSelectionActivity extends AppCompatActivity {
     }};
 
     private void setButtons(boolean enabled){installed.setEnabled(enabled);apk.setEnabled(enabled);cancel.setEnabled(true);}
-    private void startWorker(Intent i,String kind){
+    private void startPreparation(Intent i,String kind){
         if(!app.busy.compareAndSet(false,true)){toast("Сейчас выполняется другая операция");return;}
-        waiting=true;waitingKind=kind;waitStarted=System.currentTimeMillis();app.cancelled.set(false);app.progress("Подготовка target…");i.setClass(this,WorkerService.class);
+        waiting=true;waitingKind=kind;waitStarted=System.currentTimeMillis();app.cancelled.set(false);app.progress("Подготовка target без анализа…");i.setClass(this,TargetPreparationService.class);
         try{startForegroundService(i);}catch(Exception e){app.busy.set(false);waiting=false;setButtons(true);status.setText("Не удалось запустить подготовку target: "+e.getMessage());}
     }
 
@@ -101,12 +101,12 @@ public class TargetSelectionActivity extends AppCompatActivity {
         Runnable rebuild=()->{String needle=search.getText().toString().trim().toLowerCase(Locale.ROOT);visible.clear();for(ResolveInfo r:all){ApplicationInfo ai=r.activityInfo.applicationInfo;boolean game=Build.VERSION.SDK_INT>=26&&ai.category==ApplicationInfo.CATEGORY_GAME;if(mode[0]==1&&!game)continue;if(mode[0]==2&&game)continue;String label=String.valueOf(r.loadLabel(pm));String pkg=r.activityInfo.packageName;if(!needle.isEmpty()&&!label.toLowerCase(Locale.ROOT).contains(needle)&&!pkg.toLowerCase(Locale.ROOT).contains(needle))continue;visible.add(r);}adapter.notifyDataSetChanged();};
         MaterialButton allBtn=button("Все",filters,v->{mode[0]=0;rebuild.run();});MaterialButton gamesBtn=button("Игры",filters,v->{mode[0]=1;rebuild.run();});MaterialButton appsBtn=button("Приложения",filters,v->{mode[0]=2;rebuild.run();});allBtn.setLayoutParams(new LinearLayout.LayoutParams(0,-2,1));gamesBtn.setLayoutParams(new LinearLayout.LayoutParams(0,-2,1));appsBtn.setLayoutParams(new LinearLayout.LayoutParams(0,-2,1));
         search.addTextChangedListener(new android.text.TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int b,int c){}public void onTextChanged(CharSequence s,int a,int b,int c){rebuild.run();}public void afterTextChanged(android.text.Editable e){}});
-        list.setOnItemClickListener((p,v,pos,id)->{ResolveInfo r=visible.get(pos);String pkg=r.activityInfo.packageName,label=String.valueOf(r.loadLabel(pm));if(ref[0]!=null)ref[0].dismiss();startWorker(new Intent().putExtra("op","scan_installed").putExtra("package",pkg).putExtra("label",label),"installed");});
+        list.setOnItemClickListener((p,v,pos,id)->{ResolveInfo r=visible.get(pos);String pkg=r.activityInfo.packageName,label=String.valueOf(r.loadLabel(pm));if(ref[0]!=null)ref[0].dismiss();startPreparation(new Intent().putExtra("kind","installed").putExtra("package",pkg).putExtra("label",label),"installed");});
         ref[0]=new AlertDialog.Builder(this).setTitle("Установленные приложения / игры").setView(box).setNegativeButton("Отмена",null).create();ref[0].show();
     }
 
     private String display(Uri uri){String d=uri.getLastPathSegment();try(Cursor c=getContentResolver().query(uri,new String[]{OpenableColumns.DISPLAY_NAME},null,null,null)){if(c!=null&&c.moveToFirst())d=c.getString(0);}catch(Exception ignored){}return d==null?"target.apk":d;}
-    @Override protected void onActivityResult(int req,int result,Intent data){super.onActivityResult(req,result,data);if(req==PICK_APK&&result==RESULT_OK&&data!=null&&data.getData()!=null){Uri uri=data.getData();startWorker(new Intent().putExtra("op","import").putExtra("uri",uri.toString()).putExtra("name","game.apk").putExtra("display",display(uri)),"apk");}}
+    @Override protected void onActivityResult(int req,int result,Intent data){super.onActivityResult(req,result,data);if(req==PICK_APK&&result==RESULT_OK&&data!=null&&data.getData()!=null){Uri uri=data.getData();startPreparation(new Intent().putExtra("kind","apk").putExtra("uri",uri.toString()).putExtra("display",display(uri)),"apk");}}
     private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
     @Override protected void onDestroy(){handler.removeCallbacks(poll);super.onDestroy();}
 }
