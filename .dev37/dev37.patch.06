@@ -1,0 +1,113 @@
+losed():
++    simple=(ROOT/'modkit/mobile/simple_mode.py').read_text(encoding='utf-8')
++    assert 'serverBypassGenerated' in simple
++    assert 'audit+local-simulation-only' in simple
++    assert 'not _contains_server(c)' in simple
++
++
++def test_dev37_generic_workspace_patch_is_explicit_manifest_only():
++    core=(ROOT/'modkit/patchpack/core.py').read_text(encoding='utf-8')
++    assert 'modkit-workspace-patch-1.0' in core
++    assert 'WORKSPACE_TARGET_INVALID' in core
++    assert 'workspaceManifest' in core
++
++
++def test_dev37_cocos_runtime_detection_is_part_of_installed_scan():
++    apkset=(ROOT/'modkit/mobile/apkset.py').read_text(encoding='utf-8')
++    simple=(ROOT/'modkit/mobile/simple_mode.py').read_text(encoding='utf-8')
++    for marker in ('libcocos2dcpp.so','jsb-adapter','.luac','.jsc'):
++        assert marker in apkset or marker in simple
+diff --git a/tests/test_patchpack.py b/tests/test_patchpack.py
+index aa5142d..9cf158d 100644
+--- a/tests/test_patchpack.py
++++ b/tests/test_patchpack.py
+@@ -231,3 +231,37 @@ def test_apply_pack_embeds_auditable_receipt(tmp_path):
+         assert runtime['beforeSha256'] is None
+         assert runtime['afterSha256'] == hashlib.sha256(runtime_blob).hexdigest()
+         assert result['receiptSha256'] == hashlib.sha256(receipt_blob).hexdigest()
++
++
++def test_workspace_patch_replaces_generic_apk_entry(tmp_path):
++    import zipfile, json
++    from modkit.patchpack.core import inspect_pack, apply_pack
++    apk=tmp_path/'source.apk'
++    with zipfile.ZipFile(apk,'w') as z:
++        z.writestr('assets/config.json','{"value":1}')
++        z.writestr('classes.dex',b'dex\n035\x00')
++    pack=tmp_path/'workspace.zip'
++    with zipfile.ZipFile(pack,'w') as z:
++        z.writestr('files/edit.bin','{"value":2}')
++        z.writestr('modkit-workspace.json',json.dumps({'schema':'modkit-workspace-patch-1.0','entries':[{'packPath':'files/edit.bin','targetPath':'assets/config.json'}]}))
++    report=inspect_pack(apk,pack)
++    assert not report['blocked']
++    assert any(m['targetPath']=='assets/config.json' and m['kind']=='workspace' for m in report['mappings'])
++    out=tmp_path/'out.apk'
++    apply_pack(apk,pack,out)
++    with zipfile.ZipFile(out) as z:
++        assert z.read('assets/config.json')==b'{"value":2}'
++
++
++def test_workspace_patch_blocks_path_traversal(tmp_path):
++    import zipfile, json
++    from modkit.patchpack.core import inspect_pack
++    apk=tmp_path/'source.apk'
++    with zipfile.ZipFile(apk,'w') as z:z.writestr('assets/a.txt','a')
++    pack=tmp_path/'bad.zip'
++    with zipfile.ZipFile(pack,'w') as z:
++        z.writestr('files/e','x')
++        z.writestr('modkit-workspace.json',json.dumps({'schema':'modkit-workspace-patch-1.0','entries':[{'packPath':'files/e','targetPath':'../x'}]}))
++    r=inspect_pack(apk,pack)
++    assert r['blocked']
++    assert any(i['code']=='WORKSPACE_TARGET_INVALID' for i in r['issues'])
+diff --git a/tests/test_simple_mode.py b/tests/test_simple_mode.py
+new file mode 100644
+index 0000000..f1e2e5e
+--- /dev/null
++++ b/tests/test_simple_mode.py
+@@ -0,0 +1,46 @@
++import json, zipfile
++from pathlib import Path
++from modkit.mobile.simple_mode import detect_engines, build_catalog, filter_menu_spec
++
++
++def test_detects_cocos_creator_lua_and_dex(tmp_path):
++    apk=tmp_path/'game.apk'
++    with zipfile.ZipFile(apk,'w') as z:
++        z.writestr('classes.dex',b'dex\n035\x00')
++        z.writestr('lib/arm64-v8a/libcocos2dcpp.so',b'\x7fELF')
++        z.writestr('assets/src/main.js','x')
++        z.writestr('assets/jsb-adapter/web-adapter.js','x')
++        z.writestr('assets/res/skill.lua','return 1')
++        z.writestr('assets/main.scene','{}')
++    r=detect_engines([apk])
++    assert 'cocos2dx_cpp' in r['detected']
++    assert 'cocos2dx_js' in r['detected']
++    assert 'cocos_creator' in r['detected']
++    assert 'lua_runtime' in r['detected']
++    assert 'android_dex' in r['detected']
++
++
++def test_catalog_shows_ready_review_and_server_audit(tmp_path):
++    (tmp_path/'menu-spec.json').write_text(json.dumps({'controls':[
++        {'id':'speed','title':'Speed','category':'Gameplay','type':'slider','rva':4096,'binding':'float_setter'},
++        {'id':'probe','title':'HP watch','category':'Gameplay','type':'label','probe_kind':'field-watch','rva':8192},
++        {'id':'purchase','title':'Premium entitlement server','category':'Purchase','type':'toggle','rva':12288,'binding':'bool_setter'},
++    ]}),encoding='utf-8')
++    out=build_catalog(tmp_path)
++    by={c['menuControlId']:c for c in out['cards'] if c.get('menuControlId')}
++    assert by['speed']['status']=='READY' and by['speed']['buildable']
++    assert by['probe']['status']=='READ_ONLY_PROBE' and not by['probe']['buildable']
++    assert by['purchase']['status']=='SERVER_AUDIT' and not by['purchase']['buildable']
++
++
++def test_filter_menu_spec_keeps_only_validated_local_controls(tmp_path):
++    p=tmp_path/'menu.json'
++    p.write_text(json.dumps({'title':'x','controls':[
++        {'id':'speed','title':'Speed','type':'slider','rva':1,'binding':'float_setter'},
++        {'id':'premium','title':'Server premium','category':'Billing','type':'toggle','rva':2,'binding':'bool_setter'},
++        {'id':'review','title':'Review','type':'toggle','evidence_rva':3},
++    ]}),encoding='utf-8')
++    r=filter_menu_spec(p,json.dumps(['speed','premium','review']))
++    assert r['requested']==3 and r['buildable']==1
++    raw=json.loads(p.read_text())
++    assert [c['id'] for c in raw['controls']]==['speed']
