@@ -1,24 +1,26 @@
 """Embedded deep native analysis for Android ARM64 libraries.
 
 The backend is intentionally static: it parses ELF files, recovers function symbols,
-scans direct ARM64 BL edges and conservative ADRP+ADD data references, and records
-exact local RVAs where they are known. It never executes target code and doesn't need
+scans direct ARM64 BL edges, tail/thunk control flow, conservative indirect slot calls,
+and ADRP+ADD data references. It never executes target code and doesn't need
 Ghidra/Rizin or a manual import.
 """
 from __future__ import annotations
 
+from bisect import bisect_right
 import hashlib
 import json
 from pathlib import Path
 import re
 import shutil
+import struct
 from typing import Any, Iterable
 import zipfile
 
 from modkit.elf.reader import ElfFile
 from modkit.reworkspace.native import arm64_address_xrefs, direct_bl_calls
 
-SCHEMA = "modkit-native-deep-1.0"
+SCHEMA = "modkit-native-deep-1.1"
 ENGINE_ID = "native.deep-embedded"
 MAX_LIBRARIES = 64
 MAX_LIBRARY_BYTES = 512 * 1024 * 1024
@@ -26,6 +28,7 @@ MAX_FUNCTION_ROWS = 1600
 MAX_FINDINGS = 1200
 MAX_STRING_SCAN_BYTES = 32 * 1024 * 1024
 MAX_STRING_TARGETS = 160
+MAX_CONTROL_FLOW = 5000
 PRINTABLE = re.compile(rb"[\x20-\x7e]{5,}")
 
 _DOMAINS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -138,6 +141,171 @@ def _semantic_strings(elf: ElfFile) -> list[dict[str, Any]]:
     return rows
 
 
+def _sign_extend(value: int, bits: int) -> int:
+    sign = 1 << (bits - 1)
+    return (value ^ sign) - sign
+
+
+def _decode_adrp(word: int, pc: int) -> tuple[int, int] | None:
+    if word & 0x9F000000 != 0x90000000:
+        return None
+    rd = word & 0x1F
+    immlo = (word >> 29) & 0x3
+    immhi = (word >> 5) & 0x7FFFF
+    imm21 = _sign_extend((immhi << 2) | immlo, 21)
+    return rd, (pc & ~0xFFF) + (imm21 << 12)
+
+
+def _decode_add_imm(word: int) -> tuple[int, int, int] | None:
+    if word & 0x7F000000 != 0x11000000:
+        return None
+    rd = word & 0x1F
+    rn = (word >> 5) & 0x1F
+    imm12 = (word >> 10) & 0xFFF
+    shift = 12 if ((word >> 22) & 1) else 0
+    return rd, rn, imm12 << shift
+
+
+def _decode_ldr_x_unsigned(word: int) -> tuple[int, int, int] | None:
+    if word & 0xFFC00000 != 0xF9400000:
+        return None
+    rt = word & 0x1F
+    rn = (word >> 5) & 0x1F
+    return rt, rn, ((word >> 10) & 0xFFF) * 8
+
+
+def _scan_control_flow(elf: ElfFile, functions: list[Any], *, limit: int = MAX_CONTROL_FLOW,
+                       max_scan_bytes: int = 128 * 1024 * 1024) -> list[dict[str, Any]]:
+    """Recover conservative ARM64 tail/thunk and indirect-slot control flow.
+
+    Exact target RVAs are emitted only for direct ``B`` or ADRP+ADD+BR sequences.
+    ``LDR ...; LDR ...; BLR`` callsites expose registers/slot offsets but intentionally
+    keep ``targetRva`` null: static slot recovery is not runtime target resolution.
+    """
+    if not elf.is_arm64():
+        return []
+    funcs = [s for s in functions if s.name and s.value > 0 and s.shndx != 0]
+    funcs.sort(key=lambda s: (s.value, s.name))
+    starts = [s.value for s in funcs]
+    names = {s.value: s.name for s in funcs}
+
+    def caller_for(rva: int):
+        if not starts:
+            return None
+        i = bisect_right(starts, rva) - 1
+        if i < 0:
+            return None
+        sym = funcs[i]
+        if sym.size and rva >= sym.value + sym.size:
+            return None
+        if not sym.size and i + 1 < len(funcs) and rva >= funcs[i + 1].value:
+            return None
+        return sym
+
+    def executable(rva: int) -> bool:
+        return any(seg.is_exec and seg.vaddr <= rva < seg.vaddr + seg.filesz for seg in elf.segments)
+
+    exec_sections = [sec for sec in elf.sections if sec.is_exec and sec.size and sec.type == 1]
+    regions = ([(sec.addr, sec.offset, sec.size) for sec in exec_sections] if exec_sections else
+               [(seg.vaddr, seg.offset, seg.filesz) for seg in elf.segments if seg.is_exec and seg.filesz])
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+    scanned = 0
+    for region_addr, region_offset, region_size in regions:
+        if scanned >= max_scan_bytes:
+            break
+        take = min(region_size, max_scan_bytes - scanned) & ~3
+        raw = memoryview(elf.blob)[region_offset:region_offset + take]
+        scanned += len(raw)
+        try:
+            for rel in range(0, len(raw), 4):
+                word = struct.unpack_from("<I", raw, rel)[0]
+                pc = region_addr + rel
+                caller = caller_for(pc)
+
+                # B <known function>: exact inter-function tail edge. Local basic-block
+                # branches are deliberately omitted so this isn't mistaken for a CFG.
+                if word & 0xFC000000 == 0x14000000:
+                    target = pc + (_sign_extend(word & 0x03FFFFFF, 26) << 2)
+                    target_name = names.get(target)
+                    if target_name and (caller is None or caller.value != target):
+                        key = ("b", pc, target)
+                        if key not in seen:
+                            seen.add(key)
+                            out.append({
+                                "kind": "arm64-direct-b-tail",
+                                "callRva": pc,
+                                "fileOffset": region_offset + rel,
+                                "sourceRva": caller.value if caller else None,
+                                "sourceFunction": caller.name if caller else None,
+                                "targetRva": target,
+                                "targetFunction": target_name,
+                                "targetResolution": "EXACT_STATIC",
+                            })
+
+                # ADRP Xn; ADD Xn,Xn,#imm; BR Xn: common absolute veneer/thunk.
+                if word & 0xFFFFFC1F == 0xD61F0000 and rel >= 8:
+                    rn = (word >> 5) & 0x1F
+                    add_word = struct.unpack_from("<I", raw, rel - 4)[0]
+                    adrp_word = struct.unpack_from("<I", raw, rel - 8)[0]
+                    add = _decode_add_imm(add_word)
+                    adrp = _decode_adrp(adrp_word, pc - 8)
+                    if add and adrp and add[0] == rn and add[1] == rn and adrp[0] == rn:
+                        target = adrp[1] + add[2]
+                        if executable(target):
+                            key = ("absbr", pc, target)
+                            if key not in seen:
+                                seen.add(key)
+                                out.append({
+                                    "kind": "arm64-adrp-add-br-thunk",
+                                    "callRva": pc,
+                                    "sequenceRva": pc - 8,
+                                    "fileOffset": region_offset + rel - 8,
+                                    "sourceRva": caller.value if caller else None,
+                                    "sourceFunction": caller.name if caller else None,
+                                    "targetRva": target,
+                                    "targetFunction": names.get(target),
+                                    "register": rn,
+                                    "targetResolution": "EXACT_STATIC",
+                                })
+
+                # BLR Xn with an immediately preceding pointer load. We can recover
+                # the exact table slot but not the runtime object/vtable contents.
+                if word & 0xFFFFFC1F == 0xD63F0000 and rel >= 4:
+                    rn = (word >> 5) & 0x1F
+                    load = _decode_ldr_x_unsigned(struct.unpack_from("<I", raw, rel - 4)[0])
+                    if load and load[0] == rn:
+                        base_reg, slot = load[1], load[2]
+                        row: dict[str, Any] = {
+                            "kind": "arm64-indirect-slot-blr",
+                            "callRva": pc,
+                            "fileOffset": region_offset + rel,
+                            "sourceRva": caller.value if caller else None,
+                            "sourceFunction": caller.name if caller else None,
+                            "targetRva": None,
+                            "targetFunction": None,
+                            "callRegister": rn,
+                            "tableRegister": base_reg,
+                            "slotOffset": slot,
+                            "targetResolution": "STRUCTURAL_SLOT_ONLY",
+                            "virtualDispatchCandidate": True,
+                        }
+                        if rel >= 8:
+                            parent = _decode_ldr_x_unsigned(struct.unpack_from("<I", raw, rel - 8)[0])
+                            if parent and parent[0] == base_reg:
+                                row["receiverRegister"] = parent[1]
+                                row["tableLoadOffset"] = parent[2]
+                        key = ("blr", pc, rn, base_reg, slot)
+                        if key not in seen:
+                            seen.add(key);out.append(row)
+
+                if len(out) >= max(1, int(limit)):
+                    return out
+        finally:
+            raw.release()
+    return out
+
+
 def _scan_library(apk: Path, entry: str, extracted: Path) -> dict[str, Any]:
     elf = ElfFile.open_mmap(extracted)
     try:
@@ -149,19 +317,27 @@ def _scan_library(apk: Path, entry: str, extracted: Path) -> dict[str, Any]:
             for s in functions[:MAX_FUNCTION_ROWS]
         ]
         calls = direct_bl_calls(elf, limit=4000, max_scan_bytes=96 * 1024 * 1024)
+        control_flow = _scan_control_flow(elf, functions)
+        exact_extra = [row for row in control_flow if isinstance(row.get("targetRva"), int)]
+        indirect = [row for row in control_flow if row.get("kind") == "arm64-indirect-slot-blr"]
         strings = _semantic_strings(elf)
         targets = {int(row["rva"]) for row in strings}
         xrefs = arm64_address_xrefs(elf, targets, limit=2500, max_scan_bytes=96 * 1024 * 1024) if targets else []
 
         callers: dict[int, list[dict[str, Any]]] = {}
         callees: dict[int, list[dict[str, Any]]] = {}
-        for edge in calls:
+        for edge in [*calls, *exact_extra]:
             src = edge.get("sourceRva")
             dst = edge.get("targetRva")
             if isinstance(src, int):
                 callees.setdefault(src, []).append(edge)
             if isinstance(dst, int):
                 callers.setdefault(dst, []).append(edge)
+        indirect_by_source: dict[int, list[dict[str, Any]]] = {}
+        for edge in indirect:
+            src = edge.get("sourceRva")
+            if isinstance(src, int):
+                indirect_by_source.setdefault(src, []).append(edge)
         string_xrefs: dict[int, list[dict[str, Any]]] = {}
         for edge in xrefs:
             target = edge.get("targetRva")
@@ -175,6 +351,7 @@ def _scan_library(apk: Path, entry: str, extracted: Path) -> dict[str, Any]:
                 continue
             inbound = callers.get(sym.value, [])[:40]
             outbound = callees.get(sym.value, [])[:40]
+            indirect_calls = indirect_by_source.get(sym.value, [])[:40]
             finding_id = hashlib.sha256(f"{apk.name}!{entry}!fn!{sym.value:x}!{sym.name}".encode()).hexdigest()[:20]
             findings.append({
                 "id": "native-fn:" + finding_id,
@@ -196,6 +373,7 @@ def _scan_library(apk: Path, entry: str, extracted: Path) -> dict[str, Any]:
                 "trustBoundary": "local",
                 "callers": inbound,
                 "callees": outbound,
+                "indirectCalls": indirect_calls,
                 "patchReady": False,
                 "evidenceRole": "embedded-native-function",
             })
@@ -243,6 +421,10 @@ def _scan_library(apk: Path, entry: str, extracted: Path) -> dict[str, Any]:
             "functions": function_rows,
             "directCallCount": len(calls),
             "directCalls": calls,
+            "controlFlowCount": len(control_flow),
+            "controlFlow": control_flow,
+            "exactTailThunkCount": len(exact_extra),
+            "indirectSlotCallCount": len(indirect),
             "semanticStringCount": len(strings),
             "semanticStrings": strings,
             "addressXrefCount": len(xrefs),
