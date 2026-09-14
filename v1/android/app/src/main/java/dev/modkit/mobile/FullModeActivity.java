@@ -18,7 +18,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.card.MaterialCardView;
 
-/** Unified professional hub. It replaces the dev40 MainActivity dashboard. */
+/** Unified professional hub for the v1.1 workflow. */
 public class FullModeActivity extends AppCompatActivity {
     private static final int TARGET=930;private App app;private LinearLayout root;private TextView target,status;private ProgressBar progress;private MaterialButton select,analyze,cancel;private final Handler handler=new Handler(Looper.getMainLooper());
     private int dp(int n){return(int)(n*getResources().getDisplayMetrics().density);}private boolean dark(){return(getResources().getConfiguration().uiMode&android.content.res.Configuration.UI_MODE_NIGHT_MASK)==android.content.res.Configuration.UI_MODE_NIGHT_YES;}private int bg(){return dark()?Color.rgb(15,19,23):Color.rgb(245,247,250);}private int surface(){return dark()?Color.rgb(24,29,34):Color.WHITE;}private int fg(){return dark()?Color.rgb(228,232,237):Color.rgb(29,39,52);}private int muted(){return dark()?Color.rgb(157,168,180):Color.rgb(92,105,121);}private int outline(){return dark()?Color.rgb(57,66,76):Color.rgb(220,226,233);}private int action(){return dark()?Color.rgb(36,54,58):Color.rgb(232,244,242);}
@@ -35,7 +35,7 @@ public class FullModeActivity extends AppCompatActivity {
     }
     private String targetText(){String i=getSharedPreferences("state",0).getString("installed.package","");String a=getSharedPreferences("state",0).getString("game.apk","");return !i.isEmpty()?i:!a.isEmpty()?a:app.file("game.apk").isFile()?"Локальный APK":"не выбран";}
     private void startFull(){if(app.busy.get()){Toast.makeText(this,"Уже выполняется операция",Toast.LENGTH_LONG).show();return;}if(!app.file("game.apk").isFile()&&!app.file("installed-target.json").isFile()){startActivityForResult(new Intent(this,TargetSelectionActivity.class),TARGET);return;}app.cancelled.set(false);app.busy.set(true);app.progress("Полный анализ: подготовка…");startForegroundService(new Intent(this,FullAnalysisService.class));}
-    private void refresh(){boolean b=app.busy.get();target.setText("Target: "+targetText());status.setText((app.status==null?"":app.status).replace("Simple Mode","Автоанализ"));progress.setVisibility(b?View.VISIBLE:View.GONE);select.setEnabled(!b);analyze.setEnabled(!b);cancel.setEnabled(b&&!app.cancelled.get());}
+    private void refresh(){boolean b=app.busy.get();target.setText("Target: "+targetText());status.setText(app.status==null?"":app.status);progress.setVisibility(b?View.VISIBLE:View.GONE);select.setEnabled(!b);analyze.setEnabled(!b);cancel.setEnabled(b&&!app.cancelled.get());}
     private final Runnable poll=new Runnable(){public void run(){refresh();handler.postDelayed(this,500);}};
     @Override protected void onActivityResult(int req,int result,Intent data){super.onActivityResult(req,result,data);if(req==TARGET&&result==RESULT_OK)refresh();}
     @Override protected void onDestroy(){handler.removeCallbacks(poll);super.onDestroy();}
