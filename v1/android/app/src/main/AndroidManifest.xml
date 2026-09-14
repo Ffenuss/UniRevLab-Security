@@ -22,6 +22,7 @@
 <activity android:name=".MenuBuilderActivity" android:exported="false"/>
 <service android:name=".TargetPreparationService" android:exported="false" android:foregroundServiceType="dataSync"/>
 <service android:name=".FullAnalysisService" android:exported="false" android:foregroundServiceType="dataSync"/>
+<service android:name=".AutomaticEvidenceService" android:exported="false" android:foregroundServiceType="dataSync"/>
 <service android:name=".WorkerService" android:exported="false" android:foregroundServiceType="dataSync"/>
 </application>
 </manifest>
