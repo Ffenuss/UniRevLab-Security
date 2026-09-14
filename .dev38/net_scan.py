@@ -2,6 +2,7 @@ import re
 
 URL_RE = re.compile(r"\b(?:https?|wss?)://[^\s\"'<>\\]{4,512}", re.I)
 CRYPTO_MARKERS = ("aes/gcm", "aes/cbc", "chacha20", "blowfish", "xtea", "pbkdf2", "hkdf")
+KEY_MARKERS = ("encryption_key", "aes_key", "keystore", "keyalias", "secretkeyspec", "keygenerator")
 
 def find_network_and_crypto_markers(text: str):
     rows=[]
@@ -12,4 +13,8 @@ def find_network_and_crypto_markers(text: str):
         pos=low.find(marker)
         if pos>=0:
             rows.append({"kind":"crypto-marker","marker":marker,"offset":pos})
+    for marker in KEY_MARKERS:
+        pos=low.find(marker)
+        if pos>=0:
+            rows.append({"kind":"key-marker","marker":marker,"offset":pos})
     return rows
