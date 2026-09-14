@@ -23,7 +23,7 @@ import java.security.MessageDigest;
 import java.util.List;
 import java.util.Locale;
 
-/** Runs one complete in-app analysis after target preparation. */
+/** Runs reconstruction backends, then hands off to the isolated automatic evidence service. */
 public class FullAnalysisService extends Service {
     private App app;
     @Override public void onCreate(){super.onCreate();app=(App)getApplication();((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).createNotificationChannel(new NotificationChannel("full-analysis","Полный анализ",NotificationManager.IMPORTANCE_LOW));}
@@ -91,8 +91,8 @@ public class FullAnalysisService extends Service {
                 if(app.cancelled.get())chain=false;
             }finally{
                 if(chain&&!app.cancelled.get()){
-                    progress("Реконструкция готова · DEX/native/IL2CPP/security/semantics → Evidence Graph…");
-                    Intent next=new Intent(this,WorkerService.class).putExtra("op","simple_prepare");startForegroundService(next);
+                    progress("Реконструкция готова · передаю в изолированный Evidence Graph pipeline…");
+                    startForegroundService(new Intent(this,AutomaticEvidenceService.class));
                 }else{app.busy.set(false);app.revision++;}
                 stopForeground(true);stopSelf();
             }
