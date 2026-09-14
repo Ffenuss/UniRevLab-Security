@@ -1,0 +1,65 @@
+Resources().getDisplayMetrics().density);}
++    private TextView text(String s,int size){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(Color.rgb(225,230,235));t.setPadding(0,dp(5),0,dp(5));return t;}
++    private Button button(String s,LinearLayout p,View.OnClickListener l){Button b=new Button(this);b.setText(s);b.setAllCaps(false);b.setOnClickListener(l);p.addView(b);return b;}
++    @Override public void onCreate(Bundle state){super.onCreate(state);app=(App)getApplication();LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(dp(14),dp(14),dp(14),dp(14));root.setBackgroundColor(Color.rgb(16,20,24));
++        TextView title=text("Для глупых · авто-режим",28);title.setTypeface(null,Typeface.BOLD);root.addView(title);root.addView(text("Выберите установленное приложение/игру. ModKit сам определит Android/Unity/IL2CPP/Cocos/Lua/native, выполнит полный доступный анализ и покажет все смысловые находки. Только подтверждённые локальные bindings можно собрать автоматически.",13));
++        button("1 · Выбрать установленное приложение / игру",root,v->startActivity(new Intent(this,MainActivity.class).putExtra("autoInstalledPicker",true)));
++        prepare=button("2 · Обновить полный анализ и список находок",root,v->startWork(new Intent().putExtra("op","simple_prepare")));
++        summary=text("",13);root.addView(summary);status=text("",13);root.addView(status);
++        list=new RecyclerView(this);list.setLayoutManager(new LinearLayoutManager(this));adapter=new CardAdapter();list.setAdapter(adapter);root.addView(list,new LinearLayout.LayoutParams(-1,0,1f));
++        build=button("3 · Сделать мод из выбранного",root,v->requestBuild());setContentView(root);refresh();
++    }
++    private void requestBuild(){if(selected.isEmpty()){toast("Отметьте хотя бы один пункт со статусом READY");return;}startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType(isInstalledSet()?"application/zip":"application/vnd.android.package-archive").addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE,isInstalledSet()?"modkit-simple-test.apks":"modkit-simple-test.apk"),BUILD);}
++    private boolean isInstalledSet(){try{JSONObject t=new JSONObject(Io.readUtf8(app.file("installed-target.json")));JSONArray a=t.optJSONArray("splits");return "apk-set".equals(t.optString("buildMode"))&&a!=null&&a.length()>1;}catch(Exception e){return false;}}
++    private void startWork(Intent i){if(app.busy.get()){toast("Сейчас выполняется другая операция");return;}app.cancelled.set(false);app.busy.set(true);app.progress("Подготовка…");i.setClass(this,WorkerService.class);startForegroundService(i);}
++    private void build(Uri uri){JSONArray ids=new JSONArray();for(String s:selected)ids.put(s);startWork(new Intent().putExtra("op","simple_build").putExtra("uri",uri.toString()).putExtra("controls",ids.toString()));}
++    private JSONObject read(){try{return new JSONObject(Io.readUtf8(app.file("simple-catalog.json")));}catch(Exception e){return null;}}
++    private void refresh(){if(revision==app.revision)return;revision=app.revision;status.setText(app.status==null?"":app.status);JSONObject o=read();if(o==null){summary.setText("Список ещё не создан. Выберите установленное приложение и нажмите шаг 2.");adapter.set(new JSONArray());build.setEnabled(false);return;}JSONArray cards=o.optJSONArray("cards");JSONObject counts=o.optJSONObject("counts");summary.setText("Найдено: "+o.optInt("total")+" · READY: "+o.optInt("buildable")+" · server/trust audit: "+o.optInt("serverAudit")+"\n"+(counts==null?"":counts.toString()));adapter.set(cards==null?new JSONArray():cards);build.setEnabled(!app.busy.get()&&!selected.isEmpty());prepare.setEnabled(!app.busy.get());}
++    private void showDetails(JSONObject c){String title=c.optString("title");StringBuilder m=new StringBuilder();m.append(c.optString("description")).append("\n\nСтатус: ").append(c.optString("status")).append("\nИсточник: ").append(c.optString("source")).append("\nКатегория: ").append(c.optString("category"));if(c.optBoolean("serverAudit"))m.append("\n\nСерверная/аккаунтная граница: ModKit показывает доказательства и теоретическую модель риска, но не генерирует обход серверной проверки, платежей или экономики. Использовать такие сценарии можно только в явно разрешённой тестовой среде.");JSONObject e=c.optJSONObject("evidence");if(e!=null)m.append("\n\nEvidence:\n").append(e.toString());new AlertDialog.Builder(this).setTitle(title).setMessage(m.toString()).setPositiveButton(android.R.string.ok,null).show();}
++    private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
++    @Override protected void onActivityResult(int req,int result,Intent data){super.onActivityResult(req,result,data);if(req==BUILD&&result==RESULT_OK&&data!=null&&data.getData()!=null)build(data.getData());}
++    @Override protected void onResume(){super.onResume();handler.post(poll);}
++    @Override protected void onPause(){handler.removeCallbacks(poll);super.onPause();}
++
++    private final class CardAdapter extends RecyclerView.Adapter<CardHolder>{private final ArrayList<JSONObject> rows=new ArrayList<>();void set(JSONArray a){rows.clear();for(int i=0;i<a.length();i++){JSONObject o=a.optJSONObject(i);if(o!=null)rows.add(o);}notifyDataSetChanged();}
++        @Override public CardHolder onCreateViewHolder(ViewGroup p,int type){LinearLayout box=new LinearLayout(SimpleModeActivity.this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(dp(10),dp(8),dp(10),dp(8));CheckBox cb=new CheckBox(SimpleModeActivity.this);cb.setTextColor(Color.WHITE);box.addView(cb);TextView d=text("",12);d.setTextColor(Color.LTGRAY);box.addView(d);return new CardHolder(box,cb,d);}
++        @Override public void onBindViewHolder(CardHolder h,int pos){JSONObject c=rows.get(pos);String control=c.optString("menuControlId","");boolean ready=c.optBoolean("buildable")&&!control.isEmpty();h.cb.setText("["+c.optString("status")+"] "+c.optString("title")+" · "+c.optString("source"));h.desc.setText(c.optString("description"));h.cb.setOnCheckedChangeListener(null);h.cb.setEnabled(ready);h.cb.setChecked(ready&&selected.contains(control));h.cb.setOnCheckedChangeListener((b,on)->{if(!ready)return;if(on)selected.add(control);else selected.remove(control);build.setEnabled(!app.busy.get()&&!selected.isEmpty());});h.itemView.setOnClickListener(v->showDetails(c));}
++        @Override public int getItemCount(){return rows.size();}}
++    private static final class CardHolder extends RecyclerView.ViewHolder{final CheckBox cb;final TextView desc;CardHolder(View v,CheckBox c,TextView d){super(v);cb=c;desc=d;}}
++}
+diff --git a/android/app/src/main/java/dev/modkit/mobile/WorkerService.java b/android/app/src/main/java/dev/modkit/mobile/WorkerService.java
+index ffa7684..1c4fc34 100644
+--- a/android/app/src/main/java/dev/modkit/mobile/WorkerService.java
++++ b/android/app/src/main/java/dev/modkit/mobile/WorkerService.java
+@@ -76,6 +76,10 @@ public class WorkerService extends Service {
+                 else if ("patchpack_import".equals(op)) patchPackImport(Uri.parse(intent.getStringExtra("uri")),intent.getStringExtra("display"));
+                 else if ("patchpack_inspect".equals(op)) patchPackInspect();
+                 else if ("patchpack_build".equals(op)) patchPackBuild(Uri.parse(intent.getStringExtra("uri")));
++                else if ("workspace_inspect".equals(op)) workspaceInspect(intent.getStringExtra("source"));
++                else if ("workspace_build".equals(op)) workspaceBuild(intent.getStringExtra("source"),Uri.parse(intent.getStringExtra("uri")));
++                else if ("simple_prepare".equals(op)) simplePrepare();
++                else if ("simple_build".equals(op)) simpleBuild(Uri.parse(intent.getStringExtra("uri")),intent.getStringExtra("controls"));
+                 else if ("menu_seed".equals(op)) menuSeed();
+                 else if ("menu_seed_deep".equals(op)) menuSeedDeep();
+                 else if ("menu_probe_prepare".equals(op)) menuProbePrepare();
+@@ -201,6 +205,27 @@ public class WorkerService extends Service {
+         }finally{singleSigned.delete();bundle.delete();deleteTree(signedDir);if(!saved)try{DocumentsContract.deleteDocument(getContentResolver(),uri);}catch(Exception ignored){}}
+     }
+ 
++    private void exportSignedTargetForSource(Uri uri,File patchedUnsigned,File sourceApk,String singleDone,String setDone) throws Exception {
++        JSONObject target=installedTarget();
++        if(target==null||!targetIsApkSet()){
++            boolean saved=false;File signed=app.file("workspace-target-signed.apk");SigningKeyManager.Identity identity=SigningKeyManager.getOrCreate();
++            try{ApkSignerUtil.sign(patchedUnsigned,signed,identity);copyFileToUri(signed,uri,"Сохранение APK");saved=true;app.progress(singleDone);}
++            finally{signed.delete();if(!saved)try{DocumentsContract.deleteDocument(getContentResolver(),uri);}catch(Exception ignored){}}
++            return;
++        }
++        if(!"COMPLETE".equals(target.optString("scanCompleteness")))throw new IOException("APK-set неполный: повторите Installed Scanner перед сборкой.");
++        verifyInstalledTarget();JSONArray rows=target.optJSONArray("splits");if(rows==null)throw new IOException("Некорректный APK-set target manifest");
++        int ownerIndex=-1;String sourceCanonical=sourceApk.getCanonicalPath();
++        for(int i=0;i<rows.length();i++){JSONObject row=rows.optJSONObject(i);if(row==null)continue;File f=new File(row.optString("path",""));if(f.isFile()&&f.getCanonicalPath().equals(sourceCanonical)){ownerIndex=row.optInt("index",i);break;}}
++        if(ownerIndex<0)throw new IOException("Редактируемый APK не принадлежит текущему установленному APK-set. Повторите выбор target.");
++        boolean saved=false;File bundle=app.file("workspace-target-signed.apks"),signedDir=app.file("workspace-target-signed-set");SigningKeyManager.Identity identity=SigningKeyManager.getOrCreate();
++        try{deleteTree(signedDir);if(!signedDir.mkdirs()&&!signedDir.isDirectory())throw new IOException("Не удалось создать каталог подписанного APK-set");ArrayList<File> signedFiles=new ArrayList<>();ArrayList<String> names=new ArrayList<>();
++            for(int i=0;i<rows.length();i++){check();JSONObject row=rows.optJSONObject(i);if(row==null)continue;int index=row.optInt("index",i);File input=index==ownerIndex?patchedUnsigned:new File(row.optString("path",""));if(!input.isFile())throw new IOException("Split отсутствует: "+row.optString("name"));String entry=row.optString("name",String.format(Locale.ROOT,"%03d.apk",index));File signed=new File(signedDir,entry);app.progress("APK-set: подпись "+(i+1)+"/"+rows.length()+" · "+entry);ApkSignerUtil.sign(input,signed,identity);signedFiles.add(signed);names.add(entry);}
++            File tmp=new File(bundle.getParentFile(),bundle.getName()+".tmp");try(ZipOutputStream z=new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(tmp)))){byte[] buf=new byte[1024*1024];for(int i=0;i<signedFiles.size();i++){ZipEntry e=new ZipEntry(names.get(i));z.putNextEntry(e);try(InputStream in=new FileInputStream(signedFiles.get(i))){in
