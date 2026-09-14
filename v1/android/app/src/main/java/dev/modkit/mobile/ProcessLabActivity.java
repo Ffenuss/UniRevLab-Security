@@ -1,0 +1,214 @@
+package dev.modkit.mobile;
+
+import android.app.AlertDialog;
+import android.content.Intent;
+import android.graphics.Color;
+import android.net.Uri;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.text.Editable;
+import android.text.TextWatcher;
+import android.view.View;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.LinearLayout;
+import android.widget.ProgressBar;
+import android.widget.ScrollView;
+import android.widget.TextView;
+
+import androidx.appcompat.app.AppCompatActivity;
+
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+/** Root-aware process observation workspace. Root is requested only by explicit button press. */
+public class ProcessLabActivity extends AppCompatActivity {
+    private static final int SAVE_SESSION = 701;
+    private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    private final Handler main = new Handler(Looper.getMainLooper());
+    private LinearLayout root, processList, sessionBox;
+    private TextView rootState, selectedState, sessionState, engineState;
+    private EditText filter;
+    private ProgressBar progress;
+    private Button refreshButton, attachButton, detachButton, saveButton;
+    private RootAccess.ProbeResult rootProbe;
+    private RootProcessEngine.ProcessInfo selected;
+    private RootProcessEngine.RuntimeSession session;
+    private List<RootProcessEngine.ProcessInfo> processes = new ArrayList<>();
+
+    private int dp(int n) { return (int) (n * getResources().getDisplayMetrics().density); }
+    private TextView text(String value, int sp) {
+        TextView view = new TextView(this);
+        view.setText(value); view.setTextSize(sp); view.setTextColor(Color.rgb(31, 41, 55));
+        view.setPadding(0, dp(5), 0, dp(5)); return view;
+    }
+    private Button button(String label, LinearLayout parent, View.OnClickListener listener) {
+        com.google.android.material.button.MaterialButton b = new com.google.android.material.button.MaterialButton(this);
+        b.setText(label); b.setAllCaps(false); b.setOnClickListener(listener); parent.addView(b); return b;
+    }
+    private LinearLayout section(String title) {
+        com.google.android.material.card.MaterialCardView card = new com.google.android.material.card.MaterialCardView(this);
+        card.setRadius(dp(18)); card.setCardElevation(dp(1)); card.setStrokeWidth(dp(1)); card.setStrokeColor(Color.rgb(222, 228, 235));
+        LinearLayout body = new LinearLayout(this); body.setOrientation(LinearLayout.VERTICAL); body.setPadding(dp(16), dp(12), dp(16), dp(16));
+        card.addView(body); TextView h = text(title, 18); h.setTypeface(null, android.graphics.Typeface.BOLD); body.addView(h);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2); lp.setMargins(0, dp(7), 0, dp(7)); root.addView(card, lp); return body;
+    }
+
+    @Override public void onCreate(Bundle state) {
+        super.onCreate(state);
+        ScrollView scroll = new ScrollView(this); root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setPadding(dp(16), dp(16), dp(16), dp(28));
+        scroll.addView(root); setContentView(scroll);
+        TextView title = text("Process Lab", 30); title.setTypeface(null, android.graphics.Typeface.BOLD); root.addView(title);
+        root.addView(text("Root · процессы · модули · потоки · runtime-подтверждение", 14));
+        root.addView(text("Root не запрашивается автоматически. Подключение по умолчанию только читает procfs: память процесса не изменяется и код не внедряется.", 13));
+
+        LinearLayout access = section("1 · Root-доступ");
+        rootState = text("Root ещё не проверялся.", 14); access.addView(rootState);
+        button("Проверить root", access, v -> checkRoot());
+        engineState = text("Runtime backend: root-procfs · read-only. Frida/ptrace подготовлены как отдельные optional adapters.", 13); access.addView(engineState);
+
+        LinearLayout inventory = section("2 · Процессы");
+        filter = new EditText(this); filter.setSingleLine(true); filter.setHint("Фильтр: package, имя, PID…"); inventory.addView(filter);
+        refreshButton = button("Обновить список процессов", inventory, v -> refreshProcesses()); refreshButton.setEnabled(false);
+        selectedState = text("Процесс не выбран.", 14); inventory.addView(selectedState);
+        processList = new LinearLayout(this); processList.setOrientation(LinearLayout.VERTICAL); inventory.addView(processList);
+        filter.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) { renderProcesses(); }
+            @Override public void afterTextChanged(Editable s) {}
+        });
+
+        LinearLayout attach = section("3 · Runtime session");
+        progress = new ProgressBar(this); progress.setVisibility(View.GONE); attach.addView(progress);
+        attachButton = button("Подключить read-only session", attach, v -> attach()); attachButton.setEnabled(false);
+        detachButton = button("Отключить session", attach, v -> detach()); detachButton.setEnabled(false);
+        saveButton = button("Сохранить snapshot JSON", attach, v -> saveSession()); saveButton.setEnabled(false);
+        sessionState = text("После подключения здесь появятся process status, memory-map модули и потоки.", 13); sessionState.setTextIsSelectable(true); attach.addView(sessionState);
+        sessionBox = new LinearLayout(this); sessionBox.setOrientation(LinearLayout.VERTICAL); attach.addView(sessionBox);
+    }
+
+    private void checkRoot() {
+        setBusy(true, "Запрашиваем root и проверяем фактические capabilities…");
+        worker.execute(() -> {
+            RootAccess.ProbeResult result = RootAccess.probe();
+            main.post(() -> {
+                rootProbe = result; setBusy(false, null);
+                if (result.granted) {
+                    rootState.setText("ROOT: подтверждён · uid=0\nCapabilities: " + String.join(", ", result.capabilities) + "\n" + result.detail);
+                    refreshButton.setEnabled(true); refreshProcesses();
+                } else {
+                    rootState.setText("ROOT: не подтверждён\n" + result.detail + (result.hints.isEmpty() ? "" : "\nHints: " + String.join(", ", result.hints)));
+                    refreshButton.setEnabled(false); processList.removeAllViews();
+                }
+            });
+        });
+    }
+
+    private void refreshProcesses() {
+        if (rootProbe == null || !rootProbe.granted) return;
+        setBusy(true, "Читаем /proc через подтверждённый root…");
+        worker.execute(() -> {
+            try {
+                List<RootProcessEngine.ProcessInfo> loaded = RootProcessEngine.listProcesses();
+                main.post(() -> { processes = loaded; setBusy(false, null); renderProcesses(); });
+            } catch (Exception e) {
+                main.post(() -> { setBusy(false, null); showError("Не удалось получить процессы: " + e.getMessage()); });
+            }
+        });
+    }
+
+    private void renderProcesses() {
+        if (processList == null) return;
+        processList.removeAllViews();
+        String q = filter == null ? "" : filter.getText().toString().trim().toLowerCase(Locale.ROOT);
+        int shown = 0;
+        for (RootProcessEngine.ProcessInfo p : processes) {
+            String hay = (p.pid + " " + p.uid + " " + p.name + " " + p.cmdline).toLowerCase(Locale.ROOT);
+            if (!q.isEmpty() && !hay.contains(q)) continue;
+            if (q.isEmpty() && p.uid < 10_000) continue; // keep default view focused on app processes; search still reaches system processes.
+            Button row = button(p.label(), processList, v -> selectProcess(p));
+            row.setGravity(android.view.Gravity.START | android.view.Gravity.CENTER_VERTICAL);
+            if (++shown >= 100) break;
+        }
+        if (shown == 0) processList.addView(text(q.isEmpty() ? "Нет видимых app-процессов. Запустите приложение/игру или используйте поиск для системных процессов." : "Совпадений нет.", 13));
+    }
+
+    private void selectProcess(RootProcessEngine.ProcessInfo p) {
+        selected = p; session = null; attachButton.setEnabled(true); detachButton.setEnabled(false); saveButton.setEnabled(false);
+        selectedState.setText("Выбран: " + p.label()); sessionState.setText("Готово к read-only подключению."); sessionBox.removeAllViews();
+    }
+
+    private void attach() {
+        if (selected == null || rootProbe == null || !rootProbe.granted) return;
+        setBusy(true, "Открываем runtime session для PID " + selected.pid + "…");
+        final RootProcessEngine.ProcessInfo target = selected;
+        worker.execute(() -> {
+            try {
+                RootProcessEngine.RuntimeSession created = RootProcessEngine.attachReadOnly(target);
+                main.post(() -> { session = created; setBusy(false, null); renderSession(); });
+            } catch (Exception e) {
+                main.post(() -> { setBusy(false, null); showError("Подключение не удалось: " + e.getMessage()); });
+            }
+        });
+    }
+
+    private void renderSession() {
+        if (session == null) return;
+        detachButton.setEnabled(true); saveButton.setEnabled(true); attachButton.setEnabled(true);
+        sessionState.setText("CONNECTED · read-only · PID " + session.process.pid + " · uid " + session.process.uid +
+                "\nПотоков: " + session.threads.size() + " · mapped paths: " + session.modules.size() +
+                (session.mapsTruncated ? " · maps output truncated" : ""));
+        sessionBox.removeAllViews();
+        int limit = Math.min(30, session.modules.size());
+        if (limit > 0) {
+            sessionBox.addView(text("Модули / mapped files:", 14));
+            for (int i = 0; i < limit; i++) sessionBox.addView(text("• " + session.modules.get(i), 12));
+            if (session.modules.size() > limit) sessionBox.addView(text("… ещё " + (session.modules.size() - limit) + " — в JSON snapshot", 12));
+        }
+    }
+
+    private void detach() {
+        session = null; detachButton.setEnabled(false); saveButton.setEnabled(false); sessionBox.removeAllViews();
+        sessionState.setText("Session отключена. Процесс не изменялся.");
+    }
+
+    private void saveSession() {
+        if (session == null) return;
+        startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/json")
+                .addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE, "modkit-runtime-session-" + session.process.pid + ".json"), SAVE_SESSION);
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != SAVE_SESSION || resultCode != RESULT_OK || data == null || data.getData() == null || session == null) return;
+        Uri uri = data.getData();
+        try (OutputStream out = getContentResolver().openOutputStream(uri, "wt")) {
+            if (out == null) throw new java.io.IOException("output stream unavailable");
+            out.write(session.toJson(rootProbe).toString(2).getBytes(StandardCharsets.UTF_8)); out.flush();
+            ((App)getApplication()).file("runtime-session.json").toPath();
+            java.nio.file.Files.write(((App)getApplication()).file("runtime-session.json").toPath(), session.toJson(rootProbe).toString(2).getBytes(StandardCharsets.UTF_8));
+            sessionState.append("\nSnapshot сохранён и добавлен в Evidence Bundle.");
+        } catch (Exception e) { showError("Не удалось сохранить snapshot: " + e.getMessage()); }
+    }
+
+    private void setBusy(boolean busy, String message) {
+        progress.setVisibility(busy ? View.VISIBLE : View.GONE);
+        if (message != null) sessionState.setText(message);
+        refreshButton.setEnabled(!busy && rootProbe != null && rootProbe.granted);
+        attachButton.setEnabled(!busy && selected != null);
+    }
+
+    private void showError(String message) {
+        new AlertDialog.Builder(this).setTitle("Process Lab").setMessage(message).setPositiveButton("OK", null).show();
+    }
+
+    @Override protected void onDestroy() {
+        worker.shutdownNow(); super.onDestroy();
+    }
+}
