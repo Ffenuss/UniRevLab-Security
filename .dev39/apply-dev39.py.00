@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+from pathlib import Path
+import shutil
+import sys
+
+if len(sys.argv) != 2:
+    raise SystemExit('usage: apply-dev39.py <reconstructed-source-root>')
+root = Path(sys.argv[1]).resolve()
+here = Path(__file__).resolve().parent
+if not (root/'modkit/mobile').is_dir():
+    raise SystemExit(f'not a ModKit source root: {root}')
+
+
+def read(rel: str) -> str:
+    return (root/rel).read_text(encoding='utf-8')
+
+
+def write(rel: str, text: str) -> None:
+    p=root/rel; p.parent.mkdir(parents=True, exist_ok=True); p.write_text(text, encoding='utf-8')
+
+
+def replace_once(rel: str, old: str, new: str, label: str) -> None:
+    s=read(rel); n=s.count(old)
+    if n != 1:
+        raise SystemExit(f'{rel}: {label}: expected exactly one marker, found {n}')
+    write(rel, s.replace(old,new,1))
+
+
+def replace_function(rel: str, start_marker: str, next_marker: str, replacement: str) -> None:
+    s=read(rel); start=s.find(start_marker)
+    if start < 0: raise SystemExit(f'{rel}: function marker missing: {start_marker}')
+    end=s.find(next_marker,start+len(start_marker))
+    if end < 0: raise SystemExit(f'{rel}: next function marker missing: {next_marker}')
+    write(rel,s[:start]+replacement.rstrip()+"\n"+s[end:])
+
+# Whole-file replacements: these interfaces are intentionally small and regression-tested.
+shutil.copyfile(here/'simple_mode.py', root/'modkit/mobile/simple_mode.py')
+shutil.copyfile(here/'security_scan.py', root/'modkit/mobile/security_scan.py')
+shutil.copyfile(here/'SimpleModeActivity.java', root/'android/app/src/main/java/dev/modkit/mobile/SimpleModeActivity.java')
+
+# Version bump.
+replace_once('android/app/build.gradle','versionCode 43','versionCode 44','versionCode')
+replace_once('android/app/build.gradle',"versionName '0.9.0-dev38'","versionName '0.9.0-dev39'",'versionName')
+replace_once('pyproject.toml','version = "0.9.0.dev38"','version = "0.9.0.dev39"','pyproject version')
+replace_once('modkit/__init__.py','__version__ = "0.9.0-dev38"','__version__ = "0.9.0-dev39"','package version')
+
+# DEX correctness: direct_methods and virtual_methods each restart method_idx_diff at zero.
+replace_once('modkit/reworkspace/dex.py',
+'''            method_idx = 0\n            for _ in range(direct + virtual):\n                diff, p = _uleb(self.blob, p)\n                access, p = _uleb(self.blob, p)\n                code, p = _uleb(self.blob, p)\n                method_idx += diff\n                if method_idx >= self.method_ids_size:\n                    raise DexError("encoded method index out of range")\n                mr = self.method_ref(method_idx)\n                strings, invokes = self._refs(code)\n                yield DexDefinedMethod(method_idx, mr.cls, mr.name, mr.return_type,\n                                       list(mr.parameters), access, code, strings, invokes)\n''',
+'''            # DEX class_data encodes direct_methods and virtual_methods as two\n            # independent method_idx_diff lists. The running method index MUST restart\n            # at zero for the virtual list. Treating both lists as one sequence assigns\n            # virtual code_items to unrelated method_ids and contaminates directInvokes.\n            for method_count in (direct, virtual):\n                method_idx = 0\n                for _ in range(method_count):\n                    diff, p = _uleb(self.blob, p)\n                    access, p = _uleb(self.blob, p)\n                    code, p = _uleb(self.blob, p)\n                    method_idx += diff\n                    if method_idx >= self.method_ids_size:\n                        raise DexError("encoded method index out of range")\n                    mr = self.method_ref(method_idx)\n                    strings, invokes = self._refs(code)\n                    yield DexDefinedMethod(method_idx, mr.cls, mr.name, mr.return_type,\n                                           list(mr.parameters), access, code, strings, invokes)\n''','DEX direct/virtual method index reset')
+
+# Trust precision: generic SupportMenuItem.getOrder must not become monetization.
+replace_once('modkit/reworkspace/trust.py',
+'''        "tokens": {"payment", "purchase", "billing", "iap", "cashier", "receipt", "order", "pay"},\n        "compact": ("billingclient", "inapppurchase", "purchaseflow", "paymentmanager"),\n''',
+'''        "tokens": {"payment", "purchase", "billing", "iap", "cashier", "receipt"},\n        "compact": ("billingclient", "inapppurchase", "purchaseflow", "paymentmanager",\n                    "confirmorder", "createorder", "purchaseorder", "paywithcurrency", "paymentrequest"),\n''','monetization token precision')
+replace_once('modkit/reworkspace/trust.py',
+'''def evidence_role(cls: str) -> str:\n    c = cls.casefold()\n    return "framework/third-party" if c.startswith(_FRAMEWORK_PREFIXES) else "application/bundled-sdk"\n\n\n''',
+'''def evidence_role(cls: str) -> str:\n    c = cls.casefold()\n    return "framework/third-party" if c.startswith(_FRAMEWORK_PREFIXES) else "application/bundled-sdk"\n\n\ndef ownership_kind(cls: str) -> str:\n    """Human-oriented ownership bucket without changing the legacy evidenceRole API."""\n    c = cls.casefold()\n    if c.startswith(_FRAMEWORK_PREFIXES):\n        return "FRAMEWORK"\n    if ".sdk." in c or c.startswith((\n        "com.facebook.", "com.tiktok.", "com.linecorp.", "com.adjust.", "com.appsflyer.",\n        "com.google.android.gms.", "com.google.firebase.", "com.revenuecat.", "com.stripe.",\n        "com.paypal.", "com.squareup.", "io.sentry.", "com.braze.", "com.onesignal.",\n    )):\n        return "BUNDLED_SDK"\n    return "APP"\n\n\n''','ownership helper')
+replace_once('modkit/reworkspace/trust.py',
+'''        if (tokens & rule["tokens"]) or any(x in compact for x in rule["compact"]):\n            # Defensive/debug labels from framework support classes are usually\n            # implementation noise. Keep them only when owned/bundled by target.\n            if surface in {"defensive", "debug"} and role != "application/bundled-sdk":\n                continue\n            found.append(surface)\n''',
+'''        token_hit = bool(tokens & rule["tokens"])\n        compact_hit = any(x in compact for x in rule["compact"])\n        if token_hit or compact_hit:\n            # Framework/support names need a strong compound marker for auth/payment.\n            if role != "application/bundled-sdk" and surface in {"monetization", "entitlement", "authentication"} and not compact_hit:\n                continue\n            if surface in {"defensive", "debug"} and role != "application/bundled-sdk":\n                continue\n            found.append(surface)\n''','framework surface precision')
+replace_once('modkit/reworkspace/trust.py',
+'''        "label": m.label, "codeOffset": m.code_offset, "evidenceRole": role,\n        "trustBoundary": trust, "localAuthority": _local_authority(str(surface), trust, m),\n''',
+'''        "label": m.label, "codeOffset": m.code_offset, "evidenceRole": role,\n        "ownershipKind": ownership_kind(m.cls),\n        "trustBoundary": trust, "localAuthority": _local_authority(str(surface), trust, m),\n''','method ownership metadata')
+
+# Package-content gameplay precision: a bare currency word is not game economy.
+replace_once('modkit/mobile/gameplay.py',
+'''    tokens=set(_tokens(text)); compact="".join(tokens)\n    out=[]\n    for domain, words in _PACKAGE_STRONG_WORDS.items():\n        if tokens & words or com
