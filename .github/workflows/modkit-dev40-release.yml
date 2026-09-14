@@ -1,0 +1,64 @@
+name: Publish ModKit 0.9.0-dev40 APK Release
+
+on:
+  push:
+    branches: [ Modkit1 ]
+    paths:
+      - '.github/workflows/modkit-dev40-release.yml'
+      - '.dev40/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      NDK_PIN: 26.3.11579264
+      TAG: modkit-0.9.0-dev40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Install Android toolchain
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-34' 'build-tools;34.0.0' "ndk;${NDK_PIN}" 'cmake;3.22.1'
+      - name: Reconstruct, validate and build dev40
+        run: bash .dev40/ci-dev40.sh
+      - name: Stage and verify APK
+        run: |
+          set -euo pipefail
+          APK="$(find /tmp/modkit-dev25/android/app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          test -n "$APK" && test -s "$APK"
+          unzip -t "$APK" >/dev/null
+          "$ANDROID_HOME/build-tools/34.0.0/zipalign" -c -p -v 4 "$APK" >/dev/null
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose --print-certs "$APK" > apk-signature.txt
+          cp "$APK" ModKit-Android-0.9.0-dev40-debug.apk
+          sha256sum ModKit-Android-0.9.0-dev40-debug.apk > ModKit-Android-0.9.0-dev40-debug.apk.sha256
+          cat ModKit-Android-0.9.0-dev40-debug.apk.sha256
+          cat apk-signature.txt
+      - name: Publish APK to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" ModKit-Android-0.9.0-dev40-debug.apk ModKit-Android-0.9.0-dev40-debug.apk.sha256 apk-signature.txt --clobber
+          else
+            gh release create "$TAG" --target "$GITHUB_SHA" \
+              --title 'ModKit Android 0.9.0-dev40' \
+              --notes 'dev40: Simple Mode confirmation ladder, gameplay-domain filters, structured progress/cancel, conservative per-split SHA-256 target cache and professional-workspace locator handoff. Passive security scan and fail-closed build policy preserved. Full pytest + selftest + runtime-check + assembleDebug + lintDebug + unzip + zipalign + apksigner.' \
+              ModKit-Android-0.9.0-dev40-debug.apk ModKit-Android-0.9.0-dev40-debug.apk.sha256 apk-signature.txt
+          fi
