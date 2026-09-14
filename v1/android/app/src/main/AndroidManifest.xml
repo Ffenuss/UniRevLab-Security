@@ -20,6 +20,7 @@
 <activity android:name=".NativeWorkspaceActivity" android:exported="false"/>
 <activity android:name=".PatchPackActivity" android:exported="false"/>
 <activity android:name=".MenuBuilderActivity" android:exported="false"/>
+<service android:name=".FullAnalysisService" android:exported="false" android:foregroundServiceType="dataSync"/>
 <service android:name=".WorkerService" android:exported="false" android:foregroundServiceType="dataSync"/>
 </application>
 </manifest>
