@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import zipfile
 
+from modkit.arch import arm64
 from modkit.mobile import embedded_pipeline, flutter_deep, native_deep, security_scan
 from modkit.selftest.fixtures import so_blob
 
@@ -20,10 +21,26 @@ def _flutter_apk(root: Path) -> Path:
     return apk
 
 
+def _control_flow_apk(root: Path) -> Path:
+    blob = bytearray(so_blob())
+    # Fixture dynsym exposes functions at RVA 0x208 and 0x210. Make the first a
+    # direct tail branch into the second, then make the second perform a classic
+    # object -> table -> slot -> BLR indirect call. Target of BLR stays unknown.
+    blob[0x208:0x20C] = arm64.b(0x210 - 0x208)
+    blob[0x210:0x214] = arm64.ldr_imm(8, 0, 0, 8)
+    blob[0x214:0x218] = arm64.ldr_imm(8, 8, 0x20, 8)
+    blob[0x218:0x21C] = arm64.blr(8)
+    blob[0x21C:0x220] = arm64.ret()
+    apk = root / "game.apk"
+    with zipfile.ZipFile(apk, "w", compression=zipfile.ZIP_STORED) as z:
+        z.writestr("lib/arm64-v8a/libgame.so", bytes(blob))
+    return apk
+
+
 def test_embedded_native_scans_arm64_without_external_engine(tmp_path: Path):
     _flutter_apk(tmp_path)
     out = native_deep.scan_workspace(tmp_path, tmp_path / "native-deep.json")
-    assert out["schema"] == "modkit-native-deep-1.0"
+    assert out["schema"] == "modkit-native-deep-1.1"
     assert out["engineId"] == "native.deep-embedded"
     assert out["bundled"] is True
     assert out["manualImportRequired"] is False
@@ -33,6 +50,29 @@ def test_embedded_native_scans_arm64_without_external_engine(tmp_path: Path):
     assert lib["entry"] == "lib/arm64-v8a/libapp.so"
     assert lib["architecture"] == "aarch64"
     assert lib["status"] == "ANALYZED"
+
+
+def test_embedded_native_recovers_tail_edge_and_structural_indirect_slot(tmp_path: Path):
+    _control_flow_apk(tmp_path)
+    out = native_deep.scan_workspace(tmp_path, tmp_path / "native-deep.json")
+    lib = out["libraries"][0]
+    rows = lib["controlFlow"]
+    tail = next(row for row in rows if row["kind"] == "arm64-direct-b-tail")
+    assert tail["sourceRva"] == 0x208
+    assert tail["targetRva"] == 0x210
+    assert tail["targetResolution"] == "EXACT_STATIC"
+
+    indirect = next(row for row in rows if row["kind"] == "arm64-indirect-slot-blr")
+    assert indirect["sourceRva"] == 0x210
+    assert indirect["callRva"] == 0x218
+    assert indirect["slotOffset"] == 0x20
+    assert indirect["receiverRegister"] == 0
+    assert indirect["tableLoadOffset"] == 0
+    assert indirect["targetRva"] is None
+    assert indirect["targetResolution"] == "STRUCTURAL_SLOT_ONLY"
+    assert indirect["virtualDispatchCandidate"] is True
+    assert lib["exactTailThunkCount"] >= 1
+    assert lib["indirectSlotCallCount"] >= 1
 
 
 def test_embedded_flutter_correlates_snapshot_and_native_aot(tmp_path: Path):
