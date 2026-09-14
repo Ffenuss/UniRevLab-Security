@@ -2,9 +2,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_dev40_version_and_cache_module():
+def test_dev40_cache_behavior_survives_v1():
     gradle=(ROOT/"android/app/build.gradle").read_text(encoding="utf-8")
-    assert "versionCode 45" in gradle and "0.9.0-dev40" in gradle
+    assert "versionCode 46" in gradle and "1.0.0" in gradle
     cache=(ROOT/"modkit/mobile/simple_cache.py").read_text(encoding="utf-8")
     assert "reuseOnlyWhenTargetDigestMatches" in cache and "cacheDoesNotRelaxValidation" in cache
 
