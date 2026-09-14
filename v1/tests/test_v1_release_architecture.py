@@ -73,7 +73,9 @@ def test_full_analysis_runs_embedded_apktool_and_script_backends_without_import(
     embedded = read("modkit/mobile/embedded_pipeline.py")
     hermes = read("modkit/mobile/hermes_deep.py")
     assert "org.apktool:apktool-lib:3.0.2" in gradle
-    assert "hbctool==0.1.5" in gradle
+    assert "docopt-ng==0.8.1" in gradle
+    assert "Kirlif/HBC-Tool/releases/download/96/hbctool-0.1.5-96-py3-none-any.whl" in gradle
+    assert "options '--no-deps'" in gradle
     assert "ApktoolEngine.analyze(this,inputs,app.cancelled)" in service
     assert 'getModule("modkit.mobile.embedded_pipeline")' in service
     assert '"manualImportRequired": False' in embedded
@@ -129,6 +131,7 @@ def test_full_evidence_export_and_engine_catalog_exist_in_bundle():
 def test_canonical_ci_never_reconstructs_dev_patch_chain():
     workflow = (ROOT.parent / ".github/workflows/modkit-v1-ci.yml").read_text(encoding="utf-8")
     assert "working-directory: v1" in workflow
+    assert "packages: platform-tools" in workflow
     assert ".dev40" not in workflow and "apply-dev" not in workflow
     assert "assembleDebug" in workflow and "lintDebug" in workflow
     assert "zipalign" in workflow and "apksigner" in workflow
