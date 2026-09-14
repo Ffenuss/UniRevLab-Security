@@ -1,0 +1,63 @@
+:
+                    if len(findings) >= MAX_FINDINGS:
+                        break
+                    if info.file_size > MAX_ENTRY_BYTES:
+                        skipped += 1
+                        continue
+                    for row in _scan_entry(apk, z, info, MAX_FINDINGS - len(findings)):
+                        key = (row["kind"], row["apk"], row["entry"], row["offset"])
+                        if key not in seen:
+                            seen.add(key); findings.append(row)
+        except Exception:
+            continue
+    counts: dict[str, int] = {}
+    for row in findings:
+        counts[row["kind"]] = counts.get(row["kind"], 0) + 1
+    groups = {name: _group(findings, name) for name in ("endpoints", "network", "crypto")}
+    out = {
+        "schema": SCHEMA,
+        "passive": True,
+        "activeConnectionAttempted": False,
+        "credentialValidationAttempted": False,
+        "credentialValueExtraction": False,
+        "keyValueExtraction": False,
+        "findings": findings,
+        "counts": counts,
+        "groups": groups,
+        "total": len(findings),
+        "uniqueEndpoints": groups["endpoints"]["uniqueValueCount"],
+        "skippedOversizeEntries": skipped,
+        "truncated": len(findings) >= MAX_FINDINGS,
+    }
+    if output_path:
+        Path(output_path).write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+    return out
+
+
+def _workspace_apks(root: Path) -> list[Path]:
+    paths: list[Path] = []
+    target = root / "installed-target.json"
+    if target.is_file():
+        try:
+            obj = json.loads(target.read_text(encoding="utf-8"))
+            for row in obj.get("splits", []) if isinstance(obj, dict) else []:
+                if isinstance(row, dict):
+                    p = Path(str(row.get("path") or ""))
+                    if p.is_file() and p not in paths:
+                        paths.append(p)
+        except Exception:
+            pass
+    apk_dir = root / "installed-apks"
+    if apk_dir.is_dir():
+        for p in sorted(apk_dir.glob("*.apk")):
+            if p not in paths:
+                paths.append(p)
+    game = root / "game.apk"
+    if game.is_file() and game not in paths:
+        paths.append(game)
+    return paths
+
+
+def scan_workspace(workdir: str | Path, output_path: str | Path | None = None) -> dict[str, Any]:
+    root = Path(workdir)
+    return scan_apk_paths(_workspace_apks(root), output_path)
