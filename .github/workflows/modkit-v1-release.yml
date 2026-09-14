@@ -1,0 +1,110 @@
+name: Publish ModKit 1.0.0 APK Release
+
+on:
+  push:
+    branches: [ Modkit1 ]
+    paths:
+      - '.github/workflows/modkit-v1-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: modkit-v1-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      NDK_PIN: 26.1.10909125
+      TAG: modkit-1.0.0
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Install Android toolchain
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-34' 'build-tools;34.0.0' "ndk;${NDK_PIN}" 'cmake;3.22.1'
+
+      - name: Python tests and runtime guards
+        working-directory: v1
+        run: |
+          set -euo pipefail
+          python -m pip install -U pip pytest
+          python -m pytest tests -q
+          python -m modkit selftest
+          python -m modkit runtime-check
+
+      - name: Android assemble and lint
+        working-directory: v1/android
+        run: |
+          set -euo pipefail
+          gradle --no-daemon :app:assembleDebug
+          gradle --no-daemon :app:lintDebug
+
+      - name: Stage and verify APK
+        run: |
+          set -euo pipefail
+          SRC='v1/android/app/build/outputs/apk/debug/app-debug.apk'
+          OUT='ModKit-Android-1.0.0-debug.apk'
+          test -s "$SRC"
+          unzip -t "$SRC" >/dev/null
+          "${ANDROID_HOME}/build-tools/34.0.0/zipalign" -c -p -v 4 "$SRC" >/dev/null
+          "${ANDROID_HOME}/build-tools/34.0.0/apksigner" verify --verbose --print-certs "$SRC" | tee apk-signature.txt
+          cp "$SRC" "$OUT"
+          sha256sum "$OUT" | tee ModKit-Android-1.0.0-debug.apk.sha256
+          stat -c 'APK size: %s bytes' "$OUT"
+          test "$(unzip -p "$OUT" AndroidManifest.xml | wc -c)" -gt 0
+
+      - name: Publish APK to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          NOTES=$(cat <<'EOF'
+          ModKit Android 1.0.0 canonical v1 release.
+
+          Highlights:
+          - canonical v1 source tree; release build no longer reconstructs the historical .devXX patch chain
+          - split-aware full JADX reconstruction before Simple Mode analysis
+          - DEX/resources/ELF/IL2CPP/Unity plus Lua/xLua/SLua, JavaScript/React Native, Hermes, Flutter/Dart AOT and Cocos artifact analysis
+          - unified Evidence Graph / engine registry and imported-evidence bridges for Ghidra, Rizin, Cpp2IL, Frida and related tooling
+          - exact Lua/JavaScript symbol locators and conservative confirmation/actionability rules
+          - rooted Process Lab with explicit uid=0 capability probing and read-only procfs observation by default
+          - passive security analysis and fail-closed build policy retained; server/payment/auth findings stay audit-only
+          - Evidence Bundle export with toolchain catalog and integrity hashes
+
+          Release gate: full pytest suite, selftest, runtime-check, Android assembleDebug, lintDebug, unzip validation, zipalign and apksigner verification.
+
+          This distributed APK is the debug-signed GitHub test build, not a production/store-signed package.
+          EOF
+          )
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" ModKit-Android-1.0.0-debug.apk ModKit-Android-1.0.0-debug.apk.sha256 apk-signature.txt --clobber
+          else
+            gh release create "$TAG" --target "$GITHUB_SHA" \
+              --title 'ModKit Android 1.0.0' \
+              --notes "$NOTES" \
+              ModKit-Android-1.0.0-debug.apk \
+              ModKit-Android-1.0.0-debug.apk.sha256 \
+              apk-signature.txt
+          fi
