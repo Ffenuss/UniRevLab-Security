@@ -37,7 +37,7 @@ public class SimpleModeActivity extends Activity {
         TextView title=text("Для глупых · авто-режим",28);title.setTypeface(null,Typeface.BOLD);root.addView(title);
         root.addView(text("Показывает сначала важные находки, а framework/SDK-шум оставляет во вкладке «Все». READY означает точный локальный locator; автоматическая сборка всё равно требует проверенный executable binding.",13));
         button("1 · Выбрать установленное приложение / игру",root,v->startActivity(new Intent(this,MainActivity.class).putExtra("autoInstalledPicker",true)));
-        prepare=button("2 · Обновить полный анализ",root,v->startWork(new Intent().putExtra("op","simple_prepare")));
+        prepare=button("2 · Обновить полный анализ",root,v->startFullAnalysis());
         cancel=button("Отменить анализ",root,v->cancelCurrent());cancel.setEnabled(false);
         summary=text("",13);root.addView(summary);status=text("",13);root.addView(status);
 
@@ -55,6 +55,7 @@ public class SimpleModeActivity extends Activity {
 
     private void requestBuild(){if(selected.isEmpty()){toast("Отметьте хотя бы один пункт с авто-сборка READY");return;}startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType(isInstalledSet()?"application/zip":"application/vnd.android.package-archive").addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE,isInstalledSet()?"modkit-simple-test.apks":"modkit-simple-test.apk"),BUILD);}
     private boolean isInstalledSet(){try{JSONObject t=new JSONObject(Io.readUtf8(app.file("installed-target.json")));JSONArray a=t.optJSONArray("splits");return "apk-set".equals(t.optString("buildMode"))&&a!=null&&a.length()>1;}catch(Exception e){return false;}}
+    private void startFullAnalysis(){if(app.busy.get()){toast("Сейчас выполняется другая операция");return;}app.cancelled.set(false);app.busy.set(true);app.progress("Полная реконструкция: подготовка…");startForegroundService(new Intent(this,FullAnalysisService.class));}
     private void startWork(Intent i){if(app.busy.get()){toast("Сейчас выполняется другая операция");return;}app.cancelled.set(false);app.busy.set(true);app.progress("Подготовка…");i.setClass(this,WorkerService.class);startForegroundService(i);}
     private void build(Uri uri){JSONArray ids=new JSONArray();for(String s:selected)ids.put(s);startWork(new Intent().putExtra("op","simple_build").putExtra("uri",uri.toString()).putExtra("controls",ids.toString()));}
     private JSONObject read(){try{return new JSONObject(Io.readUtf8(app.file("simple-catalog.json")));}catch(Exception e){return null;}}
