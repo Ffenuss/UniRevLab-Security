@@ -44,8 +44,9 @@ def test_root_lab_is_explicit_read_only_by_default():
     assert "READ_ONLY_OBSERVATION" in engine
     assert 'runSu("id"' in root
     assert "uid == 0" in root
-    assert 'put("writesTargetMemory", false)' in engine
-    assert 'put("injectsCode", false)' in engine
+    compact = "".join(engine.split())
+    assert 'put("writesTargetMemory",false)' in compact
+    assert 'put("injectsCode",false)' in compact
     for forbidden in ("/proc/" + '" + pid + "/mem', "kill -", "am force-stop"):
         assert forbidden not in engine
 
