@@ -52,6 +52,7 @@ public class TargetPreparationService extends Service {
 
     @Override public int onStartCommand(Intent intent,int flags,int startId){
         startForeground(NOTE_ID,note("Подготовка target…"));
+        getSharedPreferences("state",0).edit().putBoolean("running",true).apply();
         new Thread(()->{
             try{
                 String kind=intent==null?"":intent.getStringExtra("kind");
@@ -61,6 +62,7 @@ public class TargetPreparationService extends Service {
             }catch(Exception e){
                 progress("Target не подготовлен: "+e.getMessage());
             }finally{
+                getSharedPreferences("state",0).edit().putBoolean("running",false).apply();
                 app.busy.set(false);app.revision++;
                 stopForeground(true);stopSelf();
             }
