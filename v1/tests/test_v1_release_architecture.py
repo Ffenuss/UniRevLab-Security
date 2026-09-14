@@ -31,6 +31,7 @@ def test_release_home_and_runtime_lab_are_private_except_launcher():
     assert "EngineBridgeActivity" not in manifest
     assert '.TargetPreparationService" android:exported="false"' in manifest
     assert '.FullAnalysisService" android:exported="false"' in manifest
+    assert '.AutomaticEvidenceService" android:exported="false"' in manifest
 
 
 def test_home_has_only_release_routes_not_legacy_shell():
@@ -56,6 +57,7 @@ def test_target_selection_prepares_only_and_full_analysis_runs_once():
     selector = read("android/app/src/main/java/dev/modkit/mobile/TargetSelectionActivity.java")
     prep = read("android/app/src/main/java/dev/modkit/mobile/TargetPreparationService.java")
     service = read("android/app/src/main/java/dev/modkit/mobile/FullAnalysisService.java")
+    evidence = read("android/app/src/main/java/dev/modkit/mobile/AutomaticEvidenceService.java")
     assert "TargetSelectionActivity.class" in auto
     assert "FullAnalysisService.class" in auto
     assert "TargetPreparationService.class" in selector
@@ -70,8 +72,16 @@ def test_target_selection_prepares_only_and_full_analysis_runs_once():
     assert "exportAllZip(app.cancelled)" in service
     assert "ApktoolEngine.analyze(this,inputs,app.cancelled)" in service
     assert 'getModule("modkit.mobile.embedded_pipeline")' in service
-    assert 'putExtra("op","simple_prepare")' in service
-    assert "AutoAnalysisActivity.class" in service
+    assert "AutomaticEvidenceService.class" in service
+    assert "WorkerService.class" not in service
+    assert "simple_prepare" not in service
+    assert 'put("legacyWorkerUsed",false)' in evidence.replace(" ", "")
+    assert 'callAttr("re_analyze_apk"' in evidence
+    assert 'getModule("modkit.mobile.security_scan")' in evidence
+    assert 'callAttr("build_catalog"' in evidence
+    assert "WorkerService.class" not in evidence
+    assert '"automatic-evidence.json"' in prep
+    assert '"installed-apk-set.zip"' in prep
 
 
 def test_full_analysis_runs_embedded_apktool_and_script_backends_without_import():
