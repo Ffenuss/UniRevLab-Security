@@ -13,11 +13,13 @@ def test_required_builtin_engines_are_registered():
     registry = build_default_registry()
     required = {
         "apkset.inventory",
+        "apktool.android",
         "dex.structural",
         "jadx.android",
         "elf.static",
         "il2cpp.rodroid",
         "unity.discovery",
+        "hermes.deep-embedded",
         "semantic.gameplay",
         "security.passive",
         "runtime.root-procfs",
@@ -34,16 +36,28 @@ def test_optional_entry_points_are_not_reported_as_bundled():
         assert not engine.bundled
 
 
+def test_embedded_engines_replace_manual_import_as_primary_path():
+    registry = build_default_registry()
+    apktool = registry.get("apktool.android")
+    hermes = registry.get("hermes.deep-embedded")
+    assert apktool.bundled and apktool.state == EngineState.BUILTIN
+    assert hermes.bundled and hermes.state == EngineState.BUILTIN
+    assert registry.get("apktool.bridge").state == EngineState.ENTRY_POINT
+    assert registry.get("hermes.deep-bridge").state == EngineState.ENTRY_POINT
+
+
 def test_process_and_dex_capabilities_are_queryable():
     registry = build_default_registry()
     runtime = registry.for_artifact(ArtifactKind.PROCESS)
     assert any(engine.kind == EngineKind.RUNTIME and engine.engine_id == "runtime.root-procfs" for engine in runtime)
     dex = registry.for_artifact(ArtifactKind.DEX)
-    assert {"dex.structural", "jadx.android"}.issubset({engine.engine_id for engine in dex})
+    assert {"dex.structural", "jadx.android", "apktool.android"}.issubset({engine.engine_id for engine in dex})
 
 
 def test_catalog_json_has_stable_schema():
     payload = catalog_json()
     assert '"schema": "modkit-engine-catalog-1.0"' in payload
     assert '"runtime.root-procfs"' in payload
+    assert '"apktool.android"' in payload
+    assert '"hermes.deep-embedded"' in payload
     assert '"frida.external"' in payload
