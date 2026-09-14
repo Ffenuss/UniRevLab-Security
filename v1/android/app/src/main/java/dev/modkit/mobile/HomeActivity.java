@@ -11,7 +11,7 @@ import android.widget.TextView;
 
 import androidx.appcompat.app.AppCompatActivity;
 
-/** Minimal release dashboard. Deep complexity stays behind dedicated workspaces. */
+/** Single release entry point. No legacy/dev40 navigation is exposed from here. */
 public class HomeActivity extends AppCompatActivity {
     private LinearLayout root;
     private int dp(int n){return(int)(n*getResources().getDisplayMetrics().density);}
@@ -26,27 +26,25 @@ public class HomeActivity extends AppCompatActivity {
     private LinearLayout section(String title,String note){
         com.google.android.material.card.MaterialCardView card=new com.google.android.material.card.MaterialCardView(this);card.setCardBackgroundColor(surface());card.setRadius(dp(18));card.setStrokeColor(outline());card.setStrokeWidth(dp(1));card.setCardElevation(dp(1));
         LinearLayout body=new LinearLayout(this);body.setOrientation(LinearLayout.VERTICAL);body.setPadding(dp(16),dp(13),dp(16),dp(15));card.addView(body);
-        TextView h=text(title,18);h.setTypeface(null,Typeface.BOLD);body.addView(h);if(note!=null&&!note.trim().isEmpty()){TextView n=text(note,13);n.setTextColor(muted());body.addView(n);}
+        TextView h=text(title,18);h.setTypeface(null,Typeface.BOLD);body.addView(h);TextView n=text(note,13);n.setTextColor(muted());body.addView(n);
         LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.setMargins(0,dp(7),0,dp(7));root.addView(card,lp);return body;
     }
-    private void button(String label,LinearLayout box,Class<?> target){
-        com.google.android.material.button.MaterialButton b=new com.google.android.material.button.MaterialButton(this);b.setText(label);b.setAllCaps(false);b.setTextColor(fg());b.setBackgroundTintList(ColorStateList.valueOf(action()));b.setOnClickListener(v->startActivity(new Intent(this,target)));box.addView(b);
+    private void button(String label,LinearLayout box,Intent intent){
+        com.google.android.material.button.MaterialButton b=new com.google.android.material.button.MaterialButton(this);b.setText(label);b.setAllCaps(false);b.setTextColor(fg());b.setBackgroundTintList(ColorStateList.valueOf(action()));b.setOnClickListener(v->startActivity(intent));box.addView(b);
     }
     @Override public void onCreate(Bundle state){
         super.onCreate(state);ScrollView scroll=new ScrollView(this);root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(dp(16),dp(18),dp(16),dp(28));root.setBackgroundColor(bg());scroll.addView(root);setContentView(scroll);
-        TextView title=text("ModKit",34);title.setTypeface(null,Typeface.BOLD);root.addView(title);TextView sub=text("Android Analysis & Reverse Engineering · 1.0",14);sub.setTextColor(muted());root.addView(sub);
-        LinearLayout quick=section("Полный автоматический анализ","Один запуск: inventory → reconstruction → semantics → security → confirmation. На экране только важное; технические доказательства сохраняются полностью.");
-        button("Начать полный анализ",quick,SimpleModeActivity.class);
-        LinearLayout target=section("Target и полный режим","Выбор установленного приложения/APK, IL2CPP-пары, каталога методов и ручных операций.");
-        button("Открыть полный режим",target,MainActivity.class);
-        LinearLayout work=section("Инженерные пространства","Открывайте нужный уровень представления только когда он действительно нужен.");
-        button("Decompiler · Java / Smali / Resources",work,DecompilerActivity.class);button("RE Workspace · DEX / Unity / IL2CPP",work,ReWorkspaceActivity.class);button("Native · ELF / ARM64",work,NativeWorkspaceActivity.class);button("Файлы / Patch Pack",work,FileWorkspaceActivity.class);
-        LinearLayout runtime=section("Runtime","Root проверяется только по вашему нажатию. При uid=0 можно открыть read-only session живого процесса; Frida/ptrace — отдельные расширяемые backends.");
-        button("Process Lab · root / процессы",runtime,ProcessLabActivity.class);
-        LinearLayout evidence=section("Отчёты","Экспортируйте один технический пакет со всеми результатами, индексами, графами, runtime snapshot и SHA-256.");
-        button("Отчёты и Evidence Bundle",evidence,ReportCenterActivity.class);
-        LinearLayout engines=section("Движки и расширения","Показывает, что встроено сейчас и какие точки входа подготовлены для следующих анализаторов/декомпиляторов.");
-        button("Каталог движков",engines,EngineCatalogActivity.class);
-        TextView footer=text("Simple Mode не скрывает данные: он скрывает шум. Полный Evidence остаётся доступен для инженера и экспорта.",12);footer.setTextColor(muted());root.addView(footer);
+        TextView title=text("ModKit",34);title.setTypeface(null,Typeface.BOLD);root.addView(title);TextView sub=text("Android Analysis & Reverse Engineering · 1.1",14);sub.setTextColor(muted());root.addView(sub);
+
+        LinearLayout auto=section("Полный автоматический анализ","Выберите приложение или APK один раз. ModKit сам прогонит встроенные декодеры, декомпиляторы, DEX/native/IL2CPP, gameplay/security и соберёт единый Evidence Graph.");
+        button("Начать полный анализ",auto,new Intent(this,AutoAnalysisActivity.class).putExtra("autoStart",true));
+
+        LinearLayout full=section("Полный режим","Все ручные инструменты в одном месте: target, декомпиляция, методы, native, редактор файлов, Patch Pack, Menu Builder, runtime и сборка.");
+        button("Открыть полный режим",full,new Intent(this,FullModeActivity.class));
+
+        LinearLayout reports=section("Отчёт","Экспортирует результаты полного прогона вместе со связанными методами/локаторами, Evidence Graph, дампами текста и SHA-256.");
+        button("Экспортировать отчёт",reports,new Intent(this,ReportCenterActivity.class));
+
+        TextView footer=text("На главном экране нет дублирующих инженерных кнопок и внешних импортов. Они не нужны для обычного полного анализа.",12);footer.setTextColor(muted());root.addView(footer);
     }
 }

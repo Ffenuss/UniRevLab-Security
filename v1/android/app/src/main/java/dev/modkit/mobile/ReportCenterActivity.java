@@ -14,29 +14,21 @@ import android.widget.TextView;
 
 import androidx.appcompat.app.AppCompatActivity;
 
+import com.chaquo.python.Python;
+import com.chaquo.python.android.AndroidPlatform;
+
 import org.json.JSONObject;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** One clean export surface for the full technical evidence package. */
+/** One report surface: build connected report, then export the complete evidence bundle. */
 public class ReportCenterActivity extends AppCompatActivity {
-    private static final int SAVE_BUNDLE = 801;
-    private final ExecutorService worker=Executors.newSingleThreadExecutor();
-    private final Handler main=new Handler(Looper.getMainLooper());
-    private TextView status;
-    private ProgressBar progress;
-    private int dp(int n){return(int)(n*getResources().getDisplayMetrics().density);}
-    private TextView text(String s,int size){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(Color.rgb(31,41,55));t.setPadding(0,dp(6),0,dp(6));return t;}
-    @Override public void onCreate(Bundle state){
-        super.onCreate(state);ScrollView scroll=new ScrollView(this);LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(dp(18),dp(18),dp(18),dp(28));scroll.addView(root);setContentView(scroll);
-        TextView title=text("Отчёты и Evidence",28);title.setTypeface(null,android.graphics.Typeface.BOLD);root.addView(title);
-        root.addView(text("Полный пакет содержит все доступные JSON/JSONL/индексы/карты/логи/дампы текста, runtime snapshot, engine catalog и SHA-256. Исходные APK/.so/metadata не дублируются.",14));
-        com.google.android.material.button.MaterialButton b=new com.google.android.material.button.MaterialButton(this);b.setText("Экспортировать полный Evidence Bundle ZIP");b.setAllCaps(false);b.setOnClickListener(v->pick());root.addView(b);
-        progress=new ProgressBar(this);progress.setVisibility(View.GONE);root.addView(progress);
-        status=text("Готово к экспорту.",14);status.setTextIsSelectable(true);root.addView(status);
-    }
-    private void pick(){startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/zip").addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE,"ModKit-Evidence-Bundle.zip"),SAVE_BUNDLE);}
-    @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(request!=SAVE_BUNDLE||result!=RESULT_OK||data==null||data.getData()==null)return;Uri uri=data.getData();progress.setVisibility(View.VISIBLE);status.setText("Формируем пакет доказательств…");worker.execute(()->{try{JSONObject manifest=EvidenceBundleExporter.export(this,uri);main.post(()->{progress.setVisibility(View.GONE);status.setText("Готово · файлов: "+manifest.optInt("evidenceFileCount")+" · данных: "+manifest.optLong("evidenceBytes")+" байт.\nДобавлены engine-catalog, bundle-manifest и hashes.sha256.");});}catch(Exception e){main.post(()->{progress.setVisibility(View.GONE);status.setText("Ошибка экспорта: "+e.getMessage());});}});}
+    private static final int SAVE_BUNDLE=801;private final ExecutorService worker=Executors.newSingleThreadExecutor();private final Handler main=new Handler(Looper.getMainLooper());private TextView status;private ProgressBar progress;
+    private int dp(int n){return(int)(n*getResources().getDisplayMetrics().density);}private boolean dark(){return(getResources().getConfiguration().uiMode&android.content.res.Configuration.UI_MODE_NIGHT_MASK)==android.content.res.Configuration.UI_MODE_NIGHT_YES;}private int bg(){return dark()?Color.rgb(15,19,23):Color.rgb(245,247,250);}private int fg(){return dark()?Color.rgb(228,232,237):Color.rgb(29,39,52);}private int muted(){return dark()?Color.rgb(157,168,180):Color.rgb(92,105,121);}private TextView text(String s,int size){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(fg());t.setPadding(0,dp(6),0,dp(6));return t;}
+    @Override public void onCreate(Bundle state){super.onCreate(state);ScrollView scroll=new ScrollView(this);LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(dp(18),dp(18),dp(18),dp(28));root.setBackgroundColor(bg());scroll.addView(root);setContentView(scroll);TextView title=text("Отчёт полного анализа",28);title.setTypeface(null,android.graphics.Typeface.BOLD);root.addView(title);TextView note=text("Перед экспортом ModKit строит connected-report: связывает находки с method id / class / method / RVA, затем упаковывает его вместе с Evidence Graph, индексами, дампами текста и SHA-256.",14);note.setTextColor(muted());root.addView(note);com.google.android.material.button.MaterialButton b=new com.google.android.material.button.MaterialButton(this);b.setText("Экспортировать связанный отчёт ZIP");b.setAllCaps(false);b.setOnClickListener(v->pick());root.addView(b);progress=new ProgressBar(this);progress.setVisibility(View.GONE);root.addView(progress);status=text("Готово к экспорту.",14);status.setTextIsSelectable(true);root.addView(status);}
+    private void pick(){startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/zip").addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE,"ModKit-Connected-Report.zip"),SAVE_BUNDLE);}
+    private JSONObject buildConnected() throws Exception{if(!Python.isStarted())Python.start(new AndroidPlatform(this));return new JSONObject(Python.getInstance().getModule("modkit.mobile.connected_report").callAttr("build_connected_report",getFilesDir().getPath(),new java.io.File(getFilesDir(),"connected-report.json").getPath(),new java.io.File(getFilesDir(),"connected-report.md").getPath()).toString());}
+    @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(request!=SAVE_BUNDLE||result!=RESULT_OK||data==null||data.getData()==null)return;Uri uri=data.getData();progress.setVisibility(View.VISIBLE);status.setText("Связываем методы и формируем Evidence Bundle…");worker.execute(()->{try{JSONObject connected=buildConnected();JSONObject manifest=EvidenceBundleExporter.export(this,uri);main.post(()->{progress.setVisibility(View.GONE);status.setText("Готово · связанных находок: "+connected.optInt("findingCount")+" · exact links: "+connected.optInt("exactLinked")+" · файлов в пакете: "+manifest.optInt("evidenceFileCount")+" · данных: "+manifest.optLong("evidenceBytes")+" байт.");});}catch(Exception e){main.post(()->{progress.setVisibility(View.GONE);status.setText("Ошибка экспорта: "+e.getMessage());});}});}
     @Override protected void onDestroy(){worker.shutdownNow();super.onDestroy();}
 }
