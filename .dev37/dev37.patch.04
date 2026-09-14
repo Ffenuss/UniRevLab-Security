@@ -1,0 +1,266 @@
+ildable.
++"""
++from __future__ import annotations
++
++import hashlib
++import json
++from pathlib import Path
++from typing import Any, Iterable
++import zipfile
++
++SCHEMA = "modkit-simple-mode-1.0"
++
++
++def _json(path: Path) -> Any:
++    try:
++        return json.loads(path.read_text(encoding="utf-8"))
++    except Exception:
++        return None
++
++
++def _sha256_text(text: str) -> str:
++    return hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()[:20]
++
++
++def _str(v: Any) -> str:
++    if v is None:
++        return ""
++    if isinstance(v, (dict, list)):
++        try:
++            return json.dumps(v, ensure_ascii=False, separators=(",", ":"))
++        except Exception:
++            return str(v)
++    return str(v)
++
++
++def _first(row: dict, *keys: str) -> str:
++    for key in keys:
++        v = row.get(key)
++        if isinstance(v, str) and v.strip():
++            return v.strip()
++    return ""
++
++
++def _contains_server(row: dict) -> bool:
++    joined = " ".join(_str(row.get(k)) for k in (
++        "trustBoundary", "authority", "localAuthority", "domain", "category", "title",
++        "description", "note", "status", "reason", "label", "kind",
++    )).lower()
++    return any(x in joined for x in (
++        "server", "remote", "backend", "purchase", "billing", "entitlement",
++        "economy", "currency", "summon", "gacha", "reward", "account",
++    ))
++
++
++def _describe(title: str, row: dict, category: str = "") -> str:
++    explicit = _first(row, "description", "explanation", "note", "summary", "reason", "detail")
++    if explicit:
++        return explicit[:1200]
++    low = (title + " " + category).lower()
++    mapping = [
++        (("health", "hp", "god", "immortal"), "Управляет локальным здоровьем/получением урона, если ModKit подтвердил исполнимую привязку."),
++        (("damage", "dmg", "attack"), "Изменяет локальный расчёт/множитель урона для подтверждённой игровой цепочки."),
++        (("speed", "timescale", "time scale"), "Меняет локальную скорость времени/игровой симуляции."),
++        (("cooldown", "cd"), "Изменяет локальный таймер или коэффициент перезарядки."),
++        (("camera", "fov", "zoom"), "Меняет локальные параметры камеры/угла обзора."),
++        (("move", "movement", "velocity"), "Изменяет локальные параметры движения/скорости персонажа."),
++        (("premium", "entitlement", "purchase", "billing"), "Обнаружена граница доверия покупки/доступа. Показывается для аудита; серверный обход не генерируется."),
++        (("summon", "gacha", "reward", "rarity"), "Обнаружена выдача награды/призыва. Серверная часть отображается как trust-аудит без генерации обхода."),
++        (("session", "auth", "token", "login"), "Обнаружена поверхность аутентификации/сессии. Используется для defensive trust-аудита."),
++        (("webview", "deeplink", "deep link"), "Обнаружена поверхность Android/WebView/Deep Link для проверки границ доверия и маршрутизации."),
++    ]
++    for needles, text in mapping:
++        if any(n in low for n in needles):
++            return text
++    return "Статическая/структурная находка ModKit. Откройте доказательства, чтобы увидеть источник и степень подтверждения."
++
++
++def _card_id(source: str, title: str, row: dict) -> str:
++    stable = _first(row, "id", "finding_id", "findingId", "metadataMethodId", "methodId", "rva")
++    return f"{source}:{stable or _sha256_text(title + _str(row))}"
++
++
++def _menu_card(row: dict, source: str = "MenuSpec") -> dict:
++    title = _first(row, "title", "label", "name", "id") or "Unnamed control"
++    category = _first(row, "category", "domain") or "General"
++    binding = row.get("binding")
++    rva = row.get("rva")
++    probe = row.get("probe_kind") or row.get("probeKind")
++    executable = bool(binding) and rva is not None and not probe and str(row.get("type", "")).lower() != "label"
++    server = _contains_server(row)
++    if server:
++        status = "SERVER_AUDIT"
++        executable = False
++    elif probe:
++        status = "READ_ONLY_PROBE"
++        executable = False
++    elif executable:
++        status = "READY"
++    else:
++        status = "REVIEW"
++    return {
++        "id": _card_id(source, title, row),
++        "title": title,
++        "category": category,
++        "source": source,
++        "status": status,
++        "buildable": executable,
++        "selectable": executable,
++        "menuControlId": _first(row, "id") or None,
++        "description": _describe(title, row, category),
++        "serverAudit": server,
++        "evidence": row,
++    }
++
++
++def _generic_card(row: dict, source: str, category: str = "") -> dict | None:
++    title = _first(row, "title", "label", "name", "method", "methodName", "domain", "kind", "id")
++    if not title:
++        return None
++    category = category or _first(row, "category", "domain", "type") or "General"
++    server = _contains_server(row)
++    menu = row.get("menuCandidate") if isinstance(row.get("menuCandidate"), dict) else None
++    elig = row.get("menuEligibility") if isinstance(row.get("menuEligibility"), dict) else None
++    verification = row.get("methodVerification") if isinstance(row.get("methodVerification"), dict) else {}
++    ready = bool(menu and elig and elig.get("eligible") and verification.get("executableReady"))
++    status_raw = _first(row, "status", "decision", "evidence_status", "evidenceStatus")
++    if server:
++        status = "SERVER_AUDIT"
++        ready = False
++    elif ready:
++        status = "READY_FOR_PREPARE"
++    elif status_raw:
++        status = status_raw.upper().replace(" ", "_")
++    else:
++        status = "REVIEW"
++    return {
++        "id": _card_id(source, title, row),
++        "title": title,
++        "category": category,
++        "source": source,
++        "status": status,
++        "buildable": False,  # only a validated MenuSpec binding becomes directly buildable
++        "selectable": False,
++        "menuControlId": None,
++        "description": _describe(title, row, category),
++        "serverAudit": server,
++        "evidence": row,
++    }
++
++
++def _iter_rows(obj: Any, wanted: set[str]) -> Iterable[tuple[str, dict]]:
++    """Yield dictionaries from semantically interesting arrays without flattening arbitrary JSON."""
++    if isinstance(obj, dict):
++        for key, value in obj.items():
++            if key in wanted and isinstance(value, list):
++                for row in value:
++                    if isinstance(row, dict):
++                        yield key, row
++            if isinstance(value, dict):
++                yield from _iter_rows(value, wanted)
++    elif isinstance(obj, list):
++        for value in obj:
++            if isinstance(value, dict):
++                yield from _iter_rows(value, wanted)
++
++
++def _apk_paths(workdir: Path) -> list[Path]:
++    paths: list[Path] = []
++    target = _json(workdir / "installed-target.json")
++    if isinstance(target, dict):
++        splits = target.get("splits")
++        if isinstance(splits, list):
++            for row in splits:
++                if isinstance(row, dict):
++                    p = Path(str(row.get("path") or ""))
++                    if p.is_file() and p not in paths:
++                        paths.append(p)
++    installed_dir = workdir / "installed-apks"
++    if installed_dir.is_dir():
++        for p in sorted(installed_dir.glob("*.apk")):
++            if p not in paths:
++                paths.append(p)
++    game = workdir / "game.apk"
++    if game.is_file() and game not in paths:
++        paths.append(game)
++    return paths
++
++
++def detect_engines(apk_paths: Iterable[str | Path]) -> dict:
++    evidence: dict[str, list[str]] = {
++        "unity_il2cpp": [], "unity_mono": [], "cocos2dx_cpp": [], "cocos2dx_lua": [],
++        "cocos2dx_js": [], "cocos_creator": [], "lua_runtime": [], "android_dex": [], "native": [],
++    }
++    seen: set[str] = set()
++    for raw in apk_paths:
++        p = Path(raw)
++        if not p.is_file():
++            continue
++        try:
++            with zipfile.ZipFile(p) as z:
++                names = z.namelist()
++        except Exception:
++            continue
++        low = [n.lower() for n in names]
++        def mark(key: str, value: str) -> None:
++            token = f"{key}:{value}"
++            if token not in seen:
++                seen.add(token); evidence[key].append(value)
++        for n, l in zip(names, low):
++            base = l.rsplit("/", 1)[-1]
++            if base.startswith("classes") and base.endswith(".dex"): mark("android_dex", n)
++            if l.endswith(".so"): mark("native", n)
++            if base == "libil2cpp.so" or l.endswith("global-metadata.dat"): mark("unity_il2cpp", n)
++            if base == "libunity.so" or base == "libmain.so": mark("unity_mono", n)
++            if base in {"libcocos2dcpp.so", "libcocos.so", "libcocos2d.so"}: mark("cocos2dx_cpp", n)
++            if l.endswith((".lua", ".luac", ".luae")) or "liblua" in base or "xlua" in l or "slua" in l:
++                mark("lua_runtime", n)
++                if "cocos" in " ".join(low[: min(len(low), 5000)]) or any(x.startswith(("assets/src/", "assets/res/")) for x in low):
++                    mark("cocos2dx_lua", n)
++            if l.endswith((".js", ".jsc")):
++                if "jsb-adapter" in l or l.startswith("assets/src/"): mark("cocos2dx_js", n)
++            if "jsb-adapter" in l or l.endswith((".prefab", ".scene")) and ("assets/" in l or "res/" in l):
++                mark("cocos_creator", n)
++            if l.endswith((".csb", ".ccb")): mark("cocos2dx_cpp", n)
++    detected = [k for k, v in evidence.items() if v]
++    return {"schema": "modkit-engine-detection-1.0", "detected": detected, "evidence": evidence}
++
++
++def build_catalog(workdir: str | Path, output_path: str | Path | None = None) -> dict:
++    root = Path(workdir)
++    cards: list[dict] = []
++    seen: set[str] = set()
++
++    def add(card: dict | None) -> None:
++        if not card:
++            return
++        # Deduplicate by explicit menu control id first, otherwise title/category/source family.
++        key = card.get("menuControlId") or card.get("id") or f"{card.get('source')}|{card.get('title')}|{card.get('category')}|{card.get('status')}"
++        if key in seen:
++            return
++        seen.add(key); cards.append(card)
++
++    menu = _json(root / "menu-spec.json")
++    if isinstance(menu, dict):
++        for row in menu.get("controls", []) or []:
++            if isinstance(row, dict): add(_menu_card(row))
++
++    # Deep resolver outputs are exact static evidence but not directly buildable until MenuSpec auto-confirm.
++    deep = root / "analysis-deep"
++    if deep.is_dir():
++        for p in sorted(deep.glob("method-*.json")):
++            obj = _json(p)
++            if isinstance(obj, dict): add(_generic_card(obj, "DeepResolver"))
++
++    sources = [
++        ("analysis.json", "Analysis"),
++        ("analysis.gameplay-coverage.json", "Gameplay"),
++        ("re-analysis.ui.json", "RE"),
++        ("re-analysis.menu.json", "RE"),
++        ("installed-scan.json", "InstalledScan"),
++    ]
++    wanted = {"candidates", "discoveries", "cards", "findings", "controlCandidates", "controls", "methods", "surfaces"}
++    for name, source in sources:
++        obj = _json(root / name)
++        if not isinstance(obj, (dict, list)):
++           
