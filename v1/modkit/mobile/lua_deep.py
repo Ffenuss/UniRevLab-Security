@@ -160,6 +160,8 @@ class Reader:
         return int.from_bytes(self.raw(size), "little" if self.endian == "<" else "big", signed=False)
 
     def sint(self, size: int) -> int:
+        if size not in (1, 2, 4, 8):
+            raise ChunkError(f"unsupported signed integer width {size}")
         return int.from_bytes(self.raw(size), "little" if self.endian == "<" else "big", signed=True)
 
     def count(self) -> int:
@@ -176,10 +178,17 @@ class Reader:
             return struct.unpack(self.endian + "d", raw)[0]
         if self.number_size == 4:
             return struct.unpack(self.endian + "f", raw)[0]
-        return int.from_bytes(raw, "little" if self.endian == "<" else "big", signed=False)
+        raise ChunkError(f"unsupported lua_Number width {self.number_size}")
 
     def integer(self) -> int:
         return self.sint(self.integer_size)
+
+    def _remember_string(self, text: str) -> str:
+        if text and text not in self._string_seen:
+            self._string_seen.add(text)
+            if len(self.strings) < 1000:
+                self.strings.append(text[:500])
+        return text
 
     def string(self) -> str | None:
         if self.version == 0x53:
@@ -187,19 +196,19 @@ class Reader:
             if first == 0:
                 return None
             size = self.uint(self.size_t) if first == 0xFF else first
-        else:
-            size = self.uint(self.size_t)
-            if size == 0:
-                return None
+            if size < 1 or size > MAX_ENTRY_BYTES:
+                raise ChunkError(f"invalid Lua string size {size}")
+            raw = self.raw(size - 1)
+            return self._remember_string(raw.decode("utf-8", "replace"))
+        size = self.uint(self.size_t)
+        if size == 0:
+            return None
         if size < 1 or size > MAX_ENTRY_BYTES:
             raise ChunkError(f"invalid Lua string size {size}")
-        raw = self.raw(size - 1)
-        text = raw.decode("utf-8", "replace")
-        if text and text not in self._string_seen:
-            self._string_seen.add(text)
-            if len(self.strings) < 1000:
-                self.strings.append(text[:500])
-        return text
+        raw = self.raw(size)
+        if raw[-1:] != b"\0":
+            raise ChunkError("Lua 5.1/5.2 string is not NUL terminated")
+        return self._remember_string(raw[:-1].decode("utf-8", "replace"))
 
     def header(self) -> dict[str, Any]:
         if self.raw(4) != b"\x1bLua":
@@ -214,30 +223,31 @@ class Reader:
                 raise ChunkError("invalid Lua 5.1 endian marker")
             self.endian = "<" if endian_flag == 1 else ">"
             self.int_size = self.byte(); self.size_t = self.byte(); self.insn_size = self.byte(); self.number_size = self.byte()
-            self.integral_numbers = bool(self.byte())
-            self.integer_size = self.int_size
+            self.integral_numbers = bool(self.byte()); self.integer_size = self.int_size
             if self.insn_size != 4:
                 raise ChunkError("unsupported Lua instruction width")
             return {"version":"5.1","format":fmt,"endianness":"little" if self.endian == "<" else "big",
                     "intSize":self.int_size,"sizeT":self.size_t,"instructionSize":self.insn_size,"numberSize":self.number_size,
                     "integralNumbers":self.integral_numbers,"mainUpvalues":None}
-        tail = self.raw(6)
-        if tail != b"\x19\x93\r\n\x1a\n":
-            raise ChunkError("Lua header validation tail mismatch")
-        self.int_size = self.byte(); self.size_t = self.byte(); self.insn_size = self.byte()
         if self.version == 0x52:
-            self.number_size = self.byte(); self.integral_numbers = bool(self.byte()); self.integer_size = self.int_size
+            endian_flag = self.byte()
+            if endian_flag not in (0, 1):
+                raise ChunkError("invalid Lua 5.2 endian marker")
+            self.endian = "<" if endian_flag == 1 else ">"
+            self.int_size = self.byte(); self.size_t = self.byte(); self.insn_size = self.byte(); self.number_size = self.byte()
+            self.integral_numbers = bool(self.byte()); self.integer_size = self.int_size
+            if self.raw(6) != b"\x19\x93\r\n\x1a\n":
+                raise ChunkError("Lua 5.2 validation tail mismatch")
             if self.insn_size != 4:
                 raise ChunkError("unsupported Lua instruction width")
-            main_nups = self.byte()
-            return {"version":"5.2","format":fmt,"endianness":"little","intSize":self.int_size,"sizeT":self.size_t,
-                    "instructionSize":self.insn_size,"numberSize":self.number_size,"integralNumbers":self.integral_numbers,
-                    "mainUpvalues":main_nups}
+            return {"version":"5.2","format":fmt,"endianness":"little" if self.endian == "<" else "big",
+                    "intSize":self.int_size,"sizeT":self.size_t,"instructionSize":self.insn_size,"numberSize":self.number_size,
+                    "integralNumbers":self.integral_numbers,"mainUpvalues":None}
+        if self.raw(6) != b"\x19\x93\r\n\x1a\n":
+            raise ChunkError("Lua 5.3 validation data mismatch")
+        self.int_size = self.byte(); self.size_t = self.byte(); self.insn_size = self.byte()
         self.integer_size = self.byte(); self.number_size = self.byte()
-        # LUAC_INT and LUAC_NUM prove byte order and floating-point representation.
-        probe_pos = self.pos
-        raw_int = self.raw(self.integer_size)
-        raw_num = self.raw(self.number_size)
+        raw_int = self.raw(self.integer_size); raw_num = self.raw(self.number_size)
         matched = None
         for endian in ("<", ">"):
             iv = int.from_bytes(raw_int, "little" if endian == "<" else "big", signed=True)
@@ -248,7 +258,6 @@ class Reader:
             if iv == 0x5678 and abs(float(nv) - 370.5) < 0.001:
                 matched = endian; break
         if matched is None:
-            self.pos = probe_pos
             raise ChunkError("Lua 5.3 numeric format/endian probe failed")
         self.endian = matched
         main_nups = self.byte()
@@ -262,12 +271,8 @@ class Reader:
         opcode = word & 0x3F
         names = _OPS.get(self.version, ())
         name = names[opcode] if opcode < len(names) else f"OP_{opcode}"
-        a = (word >> 6) & 0xFF
-        c = (word >> 14) & 0x1FF
-        b = (word >> 23) & 0x1FF
-        bx = (word >> 14) & 0x3FFFF
-        sbx = bx - 131071
-        ax = (word >> 6) & 0x3FFFFFF
+        a = (word >> 6) & 0xFF; c = (word >> 14) & 0x1FF; b = (word >> 23) & 0x1FF
+        bx = (word >> 14) & 0x3FFFF; sbx = bx - 131071; ax = (word >> 6) & 0x3FFFFFF
         return {"pc":pc,"word":f"0x{word:08x}","op":name,"A":a,"B":b,"C":c,"Bx":bx,"sBx":sbx,"Ax":ax}
 
     def constant(self) -> dict[str, Any]:
@@ -284,6 +289,26 @@ class Reader:
             return {"type":"string","value":self.string() or ""}
         raise ChunkError(f"unsupported Lua constant tag {tag}")
 
+    def _debug(self, include_source: bool) -> tuple[str | None, list[int], list[dict[str, Any]], list[str]]:
+        source = self.string() if include_source else None
+        line_count = self.count(); line_info: list[int] = []
+        for _ in range(line_count):
+            value = self.sint(self.int_size); self.debug_total += 1
+            if self.stored_debug < MAX_DEBUG_ROWS and len(line_info) < 512:
+                line_info.append(value); self.stored_debug += 1
+        local_count = self.count(); locals_rows: list[dict[str, Any]] = []
+        for _ in range(local_count):
+            name = self.string() or ""; start_pc = self.sint(self.int_size); end_pc = self.sint(self.int_size)
+            self.debug_total += 1
+            if self.stored_debug < MAX_DEBUG_ROWS and len(locals_rows) < 256:
+                locals_rows.append({"name":name,"startPc":start_pc,"endPc":end_pc}); self.stored_debug += 1
+        upname_count = self.count(); upvalue_names: list[str] = []
+        for _ in range(upname_count):
+            value = self.string() or ""; self.debug_total += 1
+            if self.stored_debug < MAX_DEBUG_ROWS and len(upvalue_names) < 256:
+                upvalue_names.append(value); self.stored_debug += 1
+        return source, line_info, locals_rows, upvalue_names
+
     def prototype(self, parent_source: str | None, path: str, depth: int = 0) -> None:
         if depth > 64:
             raise ChunkError("Lua prototype nesting is too deep")
@@ -291,30 +316,21 @@ class Reader:
         if self.proto_total > MAX_PROTOS:
             raise ChunkError("Lua prototype count exceeds safety limit")
         start = self.pos
-        source = self.string() or parent_source
-        line_defined = self.sint(self.int_size)
-        last_line = self.sint(self.int_size)
-        if self.version == 0x51:
-            declared_nups = self.byte()
-        else:
-            declared_nups = None
+        source = self.string() or parent_source if self.version in (0x51, 0x53) else None
+        line_defined = self.sint(self.int_size); last_line = self.sint(self.int_size)
+        declared_nups = self.byte() if self.version == 0x51 else None
         params = self.byte(); vararg = self.byte(); max_stack = self.byte()
 
-        code_count = self.count()
-        self.instruction_total += code_count
-        instructions: list[dict[str, Any]] = []
-        op_hist: dict[str, int] = {}
+        code_count = self.count(); self.instruction_total += code_count
+        instructions: list[dict[str, Any]] = []; op_hist: dict[str, int] = {}
         for pc in range(code_count):
-            word = self.uint(self.insn_size)
-            decoded = self.decode_instruction(word, pc)
+            decoded = self.decode_instruction(self.uint(self.insn_size), pc)
             op_hist[decoded["op"]] = op_hist.get(decoded["op"], 0) + 1
             if self.stored_instructions < MAX_STORED_INSTRUCTIONS and len(instructions) < 512:
                 instructions.append(decoded); self.stored_instructions += 1
 
-        const_count = self.count()
-        self.constant_total += const_count
-        constants: list[dict[str, Any]] = []
-        semantic_values: list[str] = [source or ""]
+        const_count = self.count(); self.constant_total += const_count
+        constants: list[dict[str, Any]] = []; semantic_values: list[str] = []
         for _ in range(const_count):
             item = self.constant()
             if item.get("type") == "string":
@@ -322,57 +338,35 @@ class Reader:
             if self.stored_constants < MAX_STORED_CONSTANTS and len(constants) < 256:
                 constants.append(item); self.stored_constants += 1
 
-        proto_count = 0
-        upvalues: list[dict[str, int]] = []
+        proto_count = 0; upvalues: list[dict[str, int]] = []
         if self.version == 0x51:
             proto_count = self.count()
-            child_paths = [f"{path}.{i}" for i in range(proto_count)]
-            for child in child_paths:
-                self.prototype(source, child, depth + 1)
+            for i in range(proto_count):
+                self.prototype(source, f"{path}.{i}", depth + 1)
+            debug_source, line_info, locals_rows, upvalue_names = self._debug(False)
         elif self.version == 0x52:
             proto_count = self.count()
             for i in range(proto_count):
-                self.prototype(source, f"{path}.{i}", depth + 1)
-            up_count = self.count()
+                self.prototype(None, f"{path}.{i}", depth + 1)
+            up_count = self.count(); declared_nups = up_count
             for _ in range(up_count):
                 instack, idx = self.byte(), self.byte()
                 if len(upvalues) < 256:
                     upvalues.append({"inStack":instack,"index":idx})
-            declared_nups = up_count
+            debug_source, line_info, locals_rows, upvalue_names = self._debug(True)
+            source = debug_source
         else:
-            up_count = self.count()
+            up_count = self.count(); declared_nups = up_count
             for _ in range(up_count):
                 instack, idx = self.byte(), self.byte()
                 if len(upvalues) < 256:
                     upvalues.append({"inStack":instack,"index":idx})
-            declared_nups = up_count
             proto_count = self.count()
             for i in range(proto_count):
                 self.prototype(source, f"{path}.{i}", depth + 1)
+            debug_source, line_info, locals_rows, upvalue_names = self._debug(False)
 
-        line_count = self.count()
-        line_info: list[int] = []
-        for _ in range(line_count):
-            value = self.sint(self.int_size)
-            self.debug_total += 1
-            if self.stored_debug < MAX_DEBUG_ROWS and len(line_info) < 512:
-                line_info.append(value); self.stored_debug += 1
-        local_count = self.count()
-        locals_rows: list[dict[str, Any]] = []
-        for _ in range(local_count):
-            name = self.string() or ""
-            start_pc = self.sint(self.int_size); end_pc = self.sint(self.int_size)
-            self.debug_total += 1
-            if self.stored_debug < MAX_DEBUG_ROWS and len(locals_rows) < 256:
-                locals_rows.append({"name":name,"startPc":start_pc,"endPc":end_pc}); self.stored_debug += 1
-        upname_count = self.count()
-        upvalue_names: list[str] = []
-        for _ in range(upname_count):
-            value = self.string() or ""
-            self.debug_total += 1
-            if self.stored_debug < MAX_DEBUG_ROWS and len(upvalue_names) < 256:
-                upvalue_names.append(value); self.stored_debug += 1
-
+        semantic_values.append(source or "")
         if len(self.protos) < MAX_STORED_PROTOS:
             self.protos.append({
                 "path":path,"byteOffset":start,"source":source,"lineDefined":line_defined,"lastLineDefined":last_line,
@@ -380,21 +374,18 @@ class Reader:
                 "upvalues":upvalues,"childPrototypeCount":proto_count,"instructionCount":code_count,
                 "instructions":instructions,"instructionTruncated":len(instructions) < code_count,"opcodeHistogram":op_hist,
                 "constantCount":const_count,"constants":constants,"constantsTruncated":len(constants) < const_count,
-                "lineInfoCount":line_count,"lineInfo":line_info,"localsCount":local_count,"locals":locals_rows,
+                "lineInfoCount":len(line_info),"lineInfo":line_info,"localsCount":len(locals_rows),"locals":locals_rows,
                 "upvalueNames":upvalue_names,"gameplayDomain":_domain(semantic_values),
             })
 
 
 def parse_chunk(data: bytes) -> dict[str, Any]:
-    reader = Reader(data)
-    header = reader.header()
-    reader.prototype(None, "0")
-    trailing = len(data) - reader.pos
+    reader = Reader(data); header = reader.header(); reader.prototype(None, "0")
     return {
         "status":"BYTECODE_DISASSEMBLED","recoveryLevel":"DISASSEMBLED_METADATA","header":header,
-        "prototypeCount":reader.proto_total,"storedPrototypeCount":len(reader.protos),
-        "instructionCount":reader.instruction_total,"constantCount":reader.constant_total,"debugRecordCount":reader.debug_total,
-        "strings":reader.strings,"prototypes":reader.protos,"trailingBytes":trailing,
+        "prototypeCount":reader.proto_total,"storedPrototypeCount":len(reader.protos),"instructionCount":reader.instruction_total,
+        "constantCount":reader.constant_total,"debugRecordCount":reader.debug_total,"strings":reader.strings,
+        "prototypes":reader.protos,"trailingBytes":len(data)-reader.pos,
         "truncated":len(reader.protos) < reader.proto_total or reader.stored_instructions < reader.instruction_total or reader.stored_constants < reader.constant_total,
     }
 
@@ -407,23 +398,20 @@ def _candidate(name: str, data: bytes) -> bool:
         return True
     if low.endswith(".lua"):
         return data.startswith(b"\x1b")
-    if low.endswith((".bytes", ".bin", ".dat")) and ("/lua/" in "/" + low or "xlua" in low or "slua" in low):
-        return True
-    return False
+    return low.endswith((".bytes", ".bin", ".dat")) and ("/lua/" in "/" + low or "xlua" in low or "slua" in low)
 
 
 def _opaque_report(data: bytes, entry: str) -> dict[str, Any]:
-    low = entry.casefold()
-    markers: list[str] = []
+    low = entry.casefold(); markers: list[str] = []
     if "xlua" in low or b"xlua" in data[:1024].lower(): markers.append("xLua")
     if "slua" in low or b"slua" in data[:1024].lower(): markers.append("SLua")
     if data.startswith(b"\x1bLJ"):
         version = data[3] if len(data) > 3 else 0
         return {"status":"LUAJIT_HEADER_ONLY","recoveryLevel":"DISASSEMBLED_METADATA","runtime":"LuaJIT",
-                "bytecodeVersion":version,"markers":markers + ["luajit"],"strings":_printable(data),"structuralOnly":True}
+                "bytecodeVersion":version,"markers":markers+["luajit"],"strings":_printable(data),"structuralOnly":True}
     if data.startswith(b"\x1bLua") and len(data) > 4 and data[4] == 0x54:
         return {"status":"STANDARD_5_4_HEADER_ONLY","recoveryLevel":"DISASSEMBLED_METADATA","runtime":"Lua 5.4",
-                "markers":markers + ["lua-bytecode-5.4"],"strings":_printable(data),"structuralOnly":True,
+                "markers":markers+["lua-bytecode-5.4"],"strings":_printable(data),"structuralOnly":True,
                 "blocker":"Lua 5.4 variable-length prototype layout is not promoted to decoded instructions by this parser"}
     return {"status":"OPAQUE_OR_ENCRYPTED","recoveryLevel":"OPAQUE","runtime":"Lua-compatible container",
             "markers":markers,"strings":_printable(data),"structuralOnly":True,
@@ -431,10 +419,7 @@ def _opaque_report(data: bytes, entry: str) -> dict[str, Any]:
 
 
 def scan_apk_paths(paths: Iterable[str | Path], output_path: str | Path | None = None) -> dict[str, Any]:
-    chunks: list[dict[str, Any]] = []
-    findings: list[dict[str, Any]] = []
-    errors: list[dict[str, str]] = []
-    apk_count = 0
+    chunks: list[dict[str, Any]] = []; findings: list[dict[str, Any]] = []; errors: list[dict[str, str]] = []; apk_count = 0
     for raw in paths:
         apk = Path(raw)
         if not apk.is_file():
@@ -454,48 +439,41 @@ def scan_apk_paths(paths: Iterable[str | Path], output_path: str | Path | None =
                     try:
                         data = zf.read(info)
                     except Exception as exc:
-                        errors.append({"apk":apk.name,"entry":info.filename,"error":str(exc)})
-                        continue
+                        errors.append({"apk":apk.name,"entry":info.filename,"error":str(exc)}); continue
                     if not _candidate(info.filename, data):
                         continue
                     base = {"apk":apk.name,"entry":info.filename,"size":info.file_size}
                     try:
                         detail = parse_chunk(data) if data.startswith(b"\x1bLua") and len(data) > 4 and data[4] in (0x51,0x52,0x53) else _opaque_report(data, info.filename)
                     except Exception as exc:
-                        detail = _opaque_report(data, info.filename)
-                        detail["status"] = "BYTECODE_PARSE_FAILED"
-                        detail["parseError"] = str(exc)
-                    row = {**base, **detail}
-                    chunks.append(row)
-                    finding_id = "lua-chunk:" + _id(apk.name, info.filename)
+                        detail = _opaque_report(data, info.filename); detail["status"] = "BYTECODE_PARSE_FAILED"; detail["parseError"] = str(exc)
+                    row = {**base, **detail}; chunks.append(row)
                     findings.append({
-                        "id":finding_id,"kind":"LUA_BYTECODE","title":f"Lua bytecode: {Path(info.filename).name}",
-                        "category":"Runtime/Lua","status":row.get("status"),"family":"lua","engineId":ENGINE_ID,
-                        "apk":apk.name,"entry":info.filename,"recoveryLevel":row.get("recoveryLevel"),
-                        "prototypeCount":int(row.get("prototypeCount") or 0),"instructionCount":int(row.get("instructionCount") or 0),
-                        "markers":row.get("markers") or [],"strings":row.get("strings") or [],"ownershipKind":"APP_OR_GAME",
-                        "trustBoundary":"local","patchReady":False,"structuralOnly":True,"evidenceRole":"embedded-lua-bytecode",
+                        "id":"lua-chunk:"+_id(apk.name,info.filename),"kind":"LUA_BYTECODE","title":f"Lua bytecode: {Path(info.filename).name}",
+                        "category":"Runtime/Lua","status":row.get("status"),"family":"lua","engineId":ENGINE_ID,"apk":apk.name,
+                        "entry":info.filename,"recoveryLevel":row.get("recoveryLevel"),"prototypeCount":int(row.get("prototypeCount") or 0),
+                        "instructionCount":int(row.get("instructionCount") or 0),"markers":row.get("markers") or [],"strings":row.get("strings") or [],
+                        "ownershipKind":"APP_OR_GAME","trustBoundary":"local","patchReady":False,"structuralOnly":True,
+                        "evidenceRole":"embedded-lua-bytecode",
                     })
                     for proto in row.get("prototypes", [])[:500] if isinstance(row.get("prototypes"), list) else []:
                         source = str(proto.get("source") or Path(info.filename).name)
-                        label = f"{source}:{proto.get('lineDefined', 0)} [{proto.get('path')}]"
-                        domain = str(proto.get("gameplayDomain") or "")
+                        label = f"{source}:{proto.get('lineDefined',0)} [{proto.get('path')}]"; domain = str(proto.get("gameplayDomain") or "")
                         findings.append({
-                            "id":"lua-proto:"+_id(apk.name,info.filename,str(proto.get("path"))),"kind":"LUA_PROTOTYPE",
-                            "title":label,"category":"Gameplay/Lua" if domain else "Runtime/Lua","status":"BYTECODE_STRUCTURAL",
-                            "family":"lua","engineId":ENGINE_ID,"apk":apk.name,"entry":info.filename,"prototypePath":proto.get("path"),
-                            "byteOffset":proto.get("byteOffset"),"source":source,"lineDefined":proto.get("lineDefined"),
-                            "lastLineDefined":proto.get("lastLineDefined"),"instructionCount":proto.get("instructionCount"),
-                            "constantCount":proto.get("constantCount"),"opcodeHistogram":proto.get("opcodeHistogram") or {},
-                            "gameplayDomain":domain,"ownershipKind":"APP_OR_GAME","trustBoundary":"local","patchReady":False,
-                            "structuralOnly":True,"evidenceRole":"embedded-lua-prototype",
+                            "id":"lua-proto:"+_id(apk.name,info.filename,str(proto.get("path"))),"kind":"LUA_PROTOTYPE","title":label,
+                            "category":"Gameplay/Lua" if domain else "Runtime/Lua","status":"BYTECODE_STRUCTURAL","family":"lua","engineId":ENGINE_ID,
+                            "apk":apk.name,"entry":info.filename,"prototypePath":proto.get("path"),"byteOffset":proto.get("byteOffset"),"source":source,
+                            "lineDefined":proto.get("lineDefined"),"lastLineDefined":proto.get("lastLineDefined"),"instructionCount":proto.get("instructionCount"),
+                            "constantCount":proto.get("constantCount"),"opcodeHistogram":proto.get("opcodeHistogram") or {},"gameplayDomain":domain,
+                            "ownershipKind":"APP_OR_GAME","trustBoundary":"local","patchReady":False,"structuralOnly":True,
+                            "evidenceRole":"embedded-lua-prototype",
                         })
         except Exception as exc:
             errors.append({"apk":apk.name,"error":str(exc)})
     out = {
-        "schema":SCHEMA,"engineId":ENGINE_ID,"bundled":True,"manualImportRequired":False,"passive":True,
-        "executesTargetCode":False,"apkCount":apk_count,"chunkCount":len(chunks),"findingCount":len(findings),
-        "chunks":chunks,"findings":findings,"errors":errors[:100],"truncated":len(chunks) >= MAX_CHUNKS,
+        "schema":SCHEMA,"engineId":ENGINE_ID,"bundled":True,"manualImportRequired":False,"passive":True,"executesTargetCode":False,
+        "available":bool(chunks),"apkCount":apk_count,"chunkCount":len(chunks),"findingCount":len(findings),"chunks":chunks,"findings":findings,
+        "errors":errors[:100],"truncated":len(chunks)>=MAX_CHUNKS,
     }
     if output_path:
         Path(output_path).write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
