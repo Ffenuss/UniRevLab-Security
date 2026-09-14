@@ -1,0 +1,9 @@
+r x in selected}
+    controls = [c for c in raw.get("controls", []) if isinstance(c, dict)]
+    kept = [c for c in controls if str(c.get("id", "")) in wanted]
+    # Explicitly retain the fail-closed server gate expected by dev37 regression tests.
+    safe = [c for c in kept if c.get("binding") and c.get("rva") is not None and not c.get("probe_kind") and str(c.get("type", "")).casefold() != "label" and not _contains_server(c)]
+    raw["controls"] = safe
+    dest = Path(output_path) if output_path else path
+    dest.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"schema": "modkit-simple-selection-1.1", "requested": len(wanted), "matched": len(kept), "buildable": len(safe), "controlIds": [str(c.get("id")) for c in safe]}
