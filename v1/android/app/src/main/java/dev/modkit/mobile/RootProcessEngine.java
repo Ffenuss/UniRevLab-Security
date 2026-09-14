@@ -1,6 +1,7 @@
 package dev.modkit.mobile;
 
 import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
@@ -22,13 +23,45 @@ final class RootProcessEngine {
         final int pid; final int uid; final String name; final String cmdline;
         ProcessInfo(int pid,int uid,String name,String cmdline){this.pid=pid;this.uid=uid;this.name=name;this.cmdline=cmdline;}
         String label(){String shown=blank(cmdline)?name:cmdline;if(shown.length()>70)shown=shown.substring(0,70)+"…";return shown+"  · PID "+pid+" · uid "+uid;}
-        JSONObject toJson(){return new JSONObject().put("pid",pid).put("uid",uid).put("name",name).put("cmdline",cmdline);}
+        JSONObject toJson(){
+            JSONObject out=new JSONObject();
+            try{
+                out.put("pid",pid);
+                out.put("uid",uid);
+                out.put("name",name);
+                out.put("cmdline",cmdline);
+            }catch(JSONException ignored){
+                // Runtime inventory must remain usable even if JSON serialization is partial.
+            }
+            return out;
+        }
     }
 
     static final class RuntimeSession {
         final ProcessInfo process; final long createdAtMs; final String status; final List<String> modules; final List<Integer> threads; final boolean mapsTruncated;
-        RuntimeSession(ProcessInfo process,long createdAtMs,String status,List<String> modules,List<Integer> threads,boolean mapsTruncated){this.process=process;this.createdAtMs=createdAtMs;this.status=status;this.modules=modules;this.threads=threads;this.mapsTruncated=mapsTruncated;}
-        JSONObject toJson(RootAccess.ProbeResult root){return new JSONObject().put("schema","modkit-runtime-session-1.0").put("backend","runtime.root-procfs").put("mode","READ_ONLY_OBSERVATION").put("createdAtMs",createdAtMs).put("process",process.toJson()).put("root",root==null?JSONObject.NULL:root.toJson()).put("status",status).put("moduleCount",modules.size()).put("modules",new JSONArray(modules)).put("threadCount",threads.size()).put("threads",new JSONArray(threads)).put("mapsTruncated",mapsTruncated).put("writesTargetMemory",false).put("injectsCode",false);}
+        RuntimeSession(ProcessInfo process,long createdAtMs,String status,List<String> modules,List<Integer>threads,boolean mapsTruncated){this.process=process;this.createdAtMs=createdAtMs;this.status=status;this.modules=modules;this.threads=threads;this.mapsTruncated=mapsTruncated;}
+        JSONObject toJson(RootAccess.ProbeResult root){
+            JSONObject out=new JSONObject();
+            try{
+                out.put("schema","modkit-runtime-session-1.0");
+                out.put("backend","runtime.root-procfs");
+                out.put("mode","READ_ONLY_OBSERVATION");
+                out.put("createdAtMs",createdAtMs);
+                out.put("process",process.toJson());
+                out.put("root",root==null?JSONObject.NULL:root.toJson());
+                out.put("status",status);
+                out.put("moduleCount",modules.size());
+                out.put("modules",new JSONArray(modules));
+                out.put("threadCount",threads.size());
+                out.put("threads",new JSONArray(threads));
+                out.put("mapsTruncated",mapsTruncated);
+                out.put("writesTargetMemory",false);
+                out.put("injectsCode",false);
+            }catch(JSONException ignored){
+                // A serialization problem must not invalidate an otherwise valid read-only session.
+            }
+            return out;
+        }
     }
 
     static List<ProcessInfo> listProcesses() throws Exception {
