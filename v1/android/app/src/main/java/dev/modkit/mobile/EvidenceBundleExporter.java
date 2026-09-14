@@ -121,7 +121,8 @@ final class EvidenceBundleExporter {
             PyObject module = Python.getInstance().getModule("modkit.engines");
             return module.callAttr("catalog_json").toString();
         } catch (Exception e) {
-            return new JSONObject().put("schema", "modkit-engine-catalog-error-1.0").put("error", String.valueOf(e.getMessage())).toString(2);
+            String message = String.valueOf(e.getMessage()).replace("\\", "\\\\").replace("\"", "\\\"");
+            return "{\"schema\":\"modkit-engine-catalog-error-1.0\",\"error\":\"" + message + "\"}";
         }
     }
 
