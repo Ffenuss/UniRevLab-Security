@@ -1,8 +1,9 @@
-"""Passive static discovery of Android network and cryptography surfaces.
+"""Passive static discovery of Android network, cryptography and runtime artifact surfaces.
 
 No sockets are opened and no authentication is attempted. The report records API/server
 endpoints and locations of crypto/key-handling configuration. It does not extract or use
-credential values.
+credential values. The automatic workspace pass also invokes the passive artifact-family
+scanner so Lua/JS/Hermes/Flutter/Cocos coverage is part of Simple Mode rather than a hidden tool.
 """
 from __future__ import annotations
 
@@ -13,7 +14,9 @@ import re
 from typing import Any, Iterable
 import zipfile
 
-SCHEMA = "modkit-security-surfaces-1.1"
+from . import artifact_families
+
+SCHEMA = "modkit-security-surfaces-1.2"
 MAX_ENTRY_BYTES = 64 * 1024 * 1024
 MAX_FINDINGS = 6000
 PRINTABLE = re.compile(rb"[\x20-\x7e]{5,}")
@@ -213,4 +216,17 @@ def _workspace_apks(root: Path) -> list[Path]:
 
 def scan_workspace(workdir: str | Path, output_path: str | Path | None = None) -> dict[str, Any]:
     root = Path(workdir)
-    return scan_apk_paths(_workspace_apks(root), output_path)
+    apk_paths = _workspace_apks(root)
+    artifact_output = root / "artifact-families.json"
+    artifact_report = artifact_families.scan_apk_paths(apk_paths, artifact_output)
+    out = scan_apk_paths(apk_paths, None)
+    out["artifactFamilies"] = {
+        "schema": artifact_report.get("schema"),
+        "total": artifact_report.get("total", 0),
+        "familyCounts": artifact_report.get("familyCounts", {}),
+        "recoveryCounts": artifact_report.get("recoveryCounts", {}),
+        "report": artifact_output.name,
+    }
+    if output_path:
+        Path(output_path).write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+    return out
