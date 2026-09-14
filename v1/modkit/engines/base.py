@@ -37,6 +37,7 @@ class ArtifactKind(str, Enum):
     HERMES = "hermes"
     LUA = "lua"
     JAVASCRIPT = "javascript"
+    COCOS = "cocos"
     PROCESS = "process"
     EVIDENCE = "evidence"
 
