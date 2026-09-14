@@ -1,4 +1,21 @@
-pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
-dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+        // Apktool 3.0.2 depends on smali artifacts published from a Git commit.
+        // Keep JitPack build-time only; the shipped APK still has no INTERNET permission.
+        maven { url = uri("https://jitpack.io") }
+    }
+}
+
 rootProject.name = 'ModKitAndroid'
 include ':app'
