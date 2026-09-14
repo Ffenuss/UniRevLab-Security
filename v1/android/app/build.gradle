@@ -37,8 +37,12 @@ chaquopy {
     defaultConfig {
         version = '3.12'
         pip {
-            // Pure-Python Hermes HBC disassembler, bundled into the APK at build time.
-            install 'hbctool==0.1.5'
+            // Both wheels are pure Python and are embedded in the APK at build time.
+            // HBC-Tool build 96 extends the MIT hbctool parser to Hermes HBC 83..96.
+            // docopt-ng provides the maintained `docopt` import used by HBC-Tool's CLI module.
+            options '--no-deps'
+            install 'docopt-ng==0.8.1'
+            install 'https://github.com/Kirlif/HBC-Tool/releases/download/96/hbctool-0.1.5-96-py3-none-any.whl'
         }
     }
     sourceSets { main { srcDir '../../'; include 'modkit/**'; include 'rules/**'; exclude '**/__pycache__/**' } }
