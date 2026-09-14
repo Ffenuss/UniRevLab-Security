@@ -5,7 +5,6 @@ import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.os.Bundle;
-import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -27,7 +26,7 @@ public class HomeActivity extends AppCompatActivity {
     private LinearLayout section(String title,String note){
         com.google.android.material.card.MaterialCardView card=new com.google.android.material.card.MaterialCardView(this);card.setCardBackgroundColor(surface());card.setRadius(dp(18));card.setStrokeColor(outline());card.setStrokeWidth(dp(1));card.setCardElevation(dp(1));
         LinearLayout body=new LinearLayout(this);body.setOrientation(LinearLayout.VERTICAL);body.setPadding(dp(16),dp(13),dp(16),dp(15));card.addView(body);
-        TextView h=text(title,18);h.setTypeface(null,Typeface.BOLD);body.addView(h);if(note!=null&&!note.isBlank()){TextView n=text(note,13);n.setTextColor(muted());body.addView(n);}
+        TextView h=text(title,18);h.setTypeface(null,Typeface.BOLD);body.addView(h);if(note!=null&&!note.trim().isEmpty()){TextView n=text(note,13);n.setTextColor(muted());body.addView(n);}
         LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.setMargins(0,dp(7),0,dp(7));root.addView(card,lp);return body;
     }
     private void button(String label,LinearLayout box,Class<?> target){
