@@ -8,10 +8,13 @@ from .registry import EngineRegistry
 
 
 def build_default_registry() -> EngineRegistry:
-    """Single source of truth for built-in engines and external bridge contracts."""
+    """Single source of truth for bundled engines and optional cross-check bridges."""
     engines = [
         E("apkset.inventory", "APK / split inventory", "1.0", K.INVENTORY, (A.APK, A.APK_SET), S.BUILTIN,
           "modkit.mobile.apkset", ("split-aware", "sha256", "ownership"), priority=10),
+        E("apktool.android", "Apktool embedded decoder", "3.0.2", K.DECODER, (A.APK, A.APK_SET, A.MANIFEST, A.RESOURCE, A.DEX), S.BUILTIN,
+          "android:dev.modkit.mobile.ApktoolEngine", ("resources", "binary-xml", "arsc", "smali", "assets", "split-aware", "private-workspace"),
+          priority=15, license_note="Apache-2.0", notes="Runs inside the Android app; no desktop Apktool or manual import is required."),
         E("resources.decoder", "Android resources decoder", "1.0", K.DECODER, (A.MANIFEST, A.RESOURCE), S.BUILTIN,
           "modkit.mobile.engine:resource analysis", ("binary-xml", "arsc", "manifest", "resources"), priority=20),
         E("dex.structural", "DEX structural analyzer", "1.0", K.ANALYZER, (A.DEX,), S.BUILTIN,
@@ -34,6 +37,9 @@ def build_default_registry() -> EngineRegistry:
         E("hermes.static", "Hermes bytecode static analyzer", "1.0", K.DISASSEMBLER, (A.HERMES,), S.BUILTIN,
           "modkit.mobile.artifact_families", ("hbc-inventory", "strings", "bytecode-metadata", "split-aware"), priority=25,
           notes="Does not falsely claim original JavaScript recovery from HBC."),
+        E("hermes.deep-embedded", "Hermes HBC embedded disassembler", "hbctool-0.1.5", K.DECOMPILER, (A.HERMES, A.JAVASCRIPT), S.BUILTIN,
+          "modkit.mobile.hermes_deep", ("hbc-header", "function-table", "instruction-disassembly", "string-table", "versions-59-62-74-76-84-85"),
+          priority=26, license_note="MIT", notes="Runs inside Chaquopy; unsupported HBC versions fall back to hermes.static."),
         E("flutter.static", "Flutter / Dart AOT artifact analyzer", "1.0", K.RECONSTRUCTOR, (A.FLUTTER, A.ELF), S.BUILTIN,
           "modkit.mobile.artifact_families", ("flutter-assets", "snapshots", "libapp", "libflutter", "dart-aot", "native-correlation"), priority=25,
           notes="AOT/snapshot recovery level is reported honestly; original Dart source is not claimed."),
@@ -50,23 +56,26 @@ def build_default_registry() -> EngineRegistry:
         E("report.evidence-bundle", "Evidence Bundle exporter", "1.0", K.REPORTER, (A.EVIDENCE,), S.BUILTIN,
           "android:dev.modkit.mobile.EvidenceBundleExporter", ("json", "jsonl", "hashes", "toolchain", "runtime-snapshot"), priority=20),
 
-        E("apktool.bridge", "Apktool import/export bridge", "1.0", K.DECODER, (A.APK, A.APK_SET, A.RESOURCE), S.ENTRY_POINT,
-          "adapter:apktool", ("decoded-tree-import", "smali-import", "rebuild-output-import"), priority=60, license_note="Apache-2.0"),
+        # Optional cross-check adapters. They are not required for a normal in-app analysis.
+        E("apktool.bridge", "Apktool external cross-check bridge", "1.0", K.DECODER, (A.APK, A.APK_SET, A.RESOURCE), S.ENTRY_POINT,
+          "adapter:apktool", ("decoded-tree-import", "smali-import", "rebuild-output-import"), priority=80, license_note="Apache-2.0",
+          notes="Compatibility/corroboration only. apktool.android is the primary embedded decoder."),
         E("ghidra.bridge", "Ghidra native analysis bridge", "1.0", K.DECOMPILER, (A.ELF,), S.ENTRY_POINT,
-          "adapter:ghidra", ("symbol-import", "pseudocode-import", "cfg-import", "xref-import", "evidence-export"), priority=60, license_note="Apache-2.0"),
+          "adapter:ghidra", ("symbol-import", "pseudocode-import", "cfg-import", "xref-import", "evidence-export"), priority=80, license_note="Apache-2.0"),
         E("rizin.bridge", "Rizin analysis bridge", "1.0", K.DISASSEMBLER, (A.ELF, A.DEX), S.ENTRY_POINT,
-          "adapter:rizin", ("disassembly-import", "cfg-import", "xref-import", "evidence-export"), priority=60),
+          "adapter:rizin", ("disassembly-import", "cfg-import", "xref-import", "evidence-export"), priority=80),
         E("cpp2il.bridge", "Cpp2IL IL2CPP cross-check bridge", "1.0", K.RECONSTRUCTOR, (A.IL2CPP,), S.ENTRY_POINT,
-          "adapter:cpp2il", ("managed-il-import", "metadata-import", "rodroid-cross-check"), priority=60),
-        E("flutter.deep-bridge", "Deep Flutter/Dart recovery bridge", "1.0", K.RECONSTRUCTOR, (A.FLUTTER, A.ELF), S.ENTRY_POINT,
-          "adapter:flutter-deep", ("symbol-map-import", "function-map-import", "snapshot-cross-check"), priority=60),
-        E("hermes.deep-bridge", "Hermes deep decoder bridge", "1.0", K.DECOMPILER, (A.HERMES, A.JAVASCRIPT), S.ENTRY_POINT,
-          "adapter:hermes-deep", ("hbc-disassembly-import", "function-map-import", "source-map-import"), priority=60),
+          "adapter:cpp2il", ("managed-il-import", "metadata-import", "rodroid-cross-check"), priority=80),
+        E("flutter.deep-bridge", "Deep Flutter/Dart external cross-check", "1.0", K.RECONSTRUCTOR, (A.FLUTTER, A.ELF), S.ENTRY_POINT,
+          "adapter:flutter-deep", ("symbol-map-import", "function-map-import", "snapshot-cross-check"), priority=80),
+        E("hermes.deep-bridge", "Hermes external cross-check bridge", "1.0", K.DECOMPILER, (A.HERMES, A.JAVASCRIPT), S.ENTRY_POINT,
+          "adapter:hermes-deep", ("hbc-disassembly-import", "function-map-import", "source-map-import"), priority=80,
+          notes="Compatibility/corroboration only. hermes.deep-embedded is primary for supported HBC versions."),
         E("frida.local-bridge", "Frida local runtime bridge", "1.0", K.RUNTIME, (A.PROCESS,), S.OPTIONAL,
-          "adapter:frida", ("server-detection", "attach-contract", "module-events", "trace-import"), priority=70,
+          "adapter:frida", ("server-detection", "attach-contract", "module-events", "trace-import"), priority=85,
           notes="Optional rooted local runtime pack; static analysis and root-procfs do not depend on it."),
         E("ptrace.bridge", "Native debugger/ptrace bridge", "1.0", K.RUNTIME, (A.PROCESS,), S.ENTRY_POINT,
-          "adapter:ptrace", ("attach-contract", "register-snapshot-import", "breakpoint-evidence-import"), priority=70),
+          "adapter:ptrace", ("attach-contract", "register-snapshot-import", "breakpoint-evidence-import"), priority=85),
 
         # Compatibility IDs are retained so saved reports/automation from the pre-1.0 registry keep
         # resolving. They are aliases only and remain explicitly non-bundled.
