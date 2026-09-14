@@ -146,7 +146,7 @@ def scan_apk_paths(paths: Iterable[str | Path], output_path: str | Path | None =
                     if info.is_dir() or info.file_size <= 0 or info.file_size > MAX_ENTRY_BYTES:
                         continue
                     low = info.filename.lower()
-                    likely = any(x in low for x in (".lua", ".js", ".jsc", ".hbc", "hermes", "flutter", "cocos", "snapshot", "libapp.so"))
+                    likely = any(x in low for x in (".lua", ".js", ".jsc", ".hbc", ".bundle", "hermes", "flutter", "cocos", "snapshot", "libapp.so"))
                     if not likely:
                         continue
                     try:
