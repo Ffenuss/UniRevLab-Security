@@ -1,6 +1,7 @@
 package dev.modkit.mobile;
 
 import android.content.Context;
+import android.content.pm.PackageInfo;
 import android.net.Uri;
 
 import com.chaquo.python.Python;
@@ -61,7 +62,7 @@ final class EvidenceBundleExporter {
                 JSONObject manifest = new JSONObject()
                         .put("schema", "modkit-evidence-bundle-1.0")
                         .put("createdAtMs", System.currentTimeMillis())
-                        .put("modkitVersion", BuildConfig.VERSION_NAME)
+                        .put("modkitVersion", appVersion(context))
                         .put("evidenceFiles", entries)
                         .put("evidenceFileCount", entries.length())
                         .put("evidenceBytes", total[0])
@@ -77,6 +78,15 @@ final class EvidenceBundleExporter {
                 writeText(zip, "hashes.sha256", hashes.toString());
                 return manifest;
             }
+        }
+    }
+
+    private static String appVersion(Context context) {
+        try {
+            PackageInfo info = context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
+            return info.versionName == null || info.versionName.trim().isEmpty() ? "unknown" : info.versionName;
+        } catch (Exception ignored) {
+            return "unknown";
         }
     }
 
