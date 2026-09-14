@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "modkit-external-engine-evidence-1.0"
+SCHEMA = "modkit-external-engine-evidence-1.1"
 SUPPORTED = {
     "ghidra": "ghidra.bridge",
     "rizin": "rizin.bridge",
@@ -93,8 +93,6 @@ def _read_candidate(path: Path) -> tuple[str, Any]:
     text = data.decode("utf-8", "replace")
     suffix = path.suffix.lower()
     stripped = text.lstrip("\ufeff \t\r\n")
-    # Android's document picker may copy a JSON export into a neutral .dat name. Sniff content
-    # before trusting the local temporary suffix so structured evidence stays structured.
     if suffix == ".json" or stripped.startswith(("{", "[")):
         try:
             return "json", json.loads(stripped)
@@ -111,6 +109,39 @@ def _read_candidate(path: Path) -> tuple[str, Any]:
     return "text", text
 
 
+def _finding(tool: str, record: dict[str, Any], index: int) -> dict[str, Any]:
+    fields = record.get("fields") if isinstance(record.get("fields"), dict) else {}
+    merged: dict[str, Any] = dict(fields)
+    if "line" in record: merged["line"] = record["line"]
+    if "text" in record: merged["text"] = record["text"]
+    if "path" in record: merged["externalPath"] = record["path"]
+    title = ""
+    for key in ("name", "function", "method", "symbol", "class", "module", "event"):
+        value = merged.get(key)
+        if value not in (None, ""):
+            title = str(value); break
+    if not title:
+        title = str(merged.get("text") or merged.get("externalPath") or f"{tool} evidence {index + 1}")[:180]
+    finding = {
+        "id": f"external:{tool}:{index}",
+        "kind": "EXTERNAL_ENGINE_EVIDENCE",
+        "title": title,
+        "category": f"External/{tool}",
+        "status": "IMPORTED_EVIDENCE",
+        "sourceTool": tool,
+        "engineId": SUPPORTED[tool],
+        "trustBoundary": "local",
+        "serverAudit": False,
+        "patchReady": False,
+        "trusted": False,
+        "evidenceRole": "external-engine",
+        "description": "Corroborating external-engine evidence. ModKit requires local locator/runtime proof before READY.",
+        "externalRecord": record,
+    }
+    finding.update(merged)
+    return finding
+
+
 def normalize_file(tool: str, input_path: str | Path, output_path: str | Path | None = None) -> dict[str, Any]:
     tool_key = str(tool or "").strip().lower()
     if tool_key not in SUPPORTED:
@@ -123,6 +154,7 @@ def normalize_file(tool: str, input_path: str | Path, output_path: str | Path | 
 
     source_kind, payload = _read_candidate(source)
     records = _flatten_json(payload) if source_kind in {"json", "jsonl"} else _parse_text(str(payload))
+    findings = [_finding(tool_key, row, index) for index, row in enumerate(records)]
     out = {
         "schema": SCHEMA,
         "tool": tool_key,
@@ -133,6 +165,8 @@ def normalize_file(tool: str, input_path: str | Path, output_path: str | Path | 
         "sourceSha256": _sha256(source),
         "recordCount": len(records),
         "records": records,
+        "findingCount": len(findings),
+        "findings": findings,
         "executesImportedCode": False,
         "trusted": False,
         "status": "IMPORTED_EVIDENCE",
