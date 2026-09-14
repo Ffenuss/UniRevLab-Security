@@ -1,0 +1,62 @@
+name: ModKit v1 Canonical CI
+
+on:
+  push:
+    branches: [ Modkit1 ]
+    paths:
+      - 'v1/**'
+      - '.github/workflows/modkit-v1-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    env:
+      NDK_PIN: 26.3.11579264
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Install Android toolchain
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-34' 'build-tools;34.0.0' "ndk;${NDK_PIN}" 'cmake;3.22.1'
+      - name: Python tests and runtime guards
+        working-directory: v1
+        run: |
+          set -euo pipefail
+          python -m pip install -U pip pytest
+          python -m pytest tests -q
+          python -m modkit selftest
+          python -m modkit runtime-check
+      - name: Android assemble and lint
+        working-directory: v1/android
+        run: |
+          set -euo pipefail
+          gradle --no-daemon :app:assembleDebug
+          gradle --no-daemon :app:lintDebug
+      - name: Verify APK container, alignment and signature
+        working-directory: v1
+        run: |
+          set -euo pipefail
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          unzip -t "$APK" >/dev/null
+          "${ANDROID_HOME}/build-tools/34.0.0/zipalign" -c -p -v 4 "$APK" >/dev/null
+          "${ANDROID_HOME}/build-tools/34.0.0/apksigner" verify --verbose --print-certs "$APK" | tee apk-signature.txt
+          sha256sum "$APK" | tee ModKit-Android-1.0.0-debug.apk.sha256
+          test "$(unzip -p "$APK" AndroidManifest.xml | wc -c)" -gt 0
