@@ -4,6 +4,7 @@ import android.content.Context;
 
 import brut.androlib.ApkDecoder;
 import brut.androlib.Config;
+import brut.directory.ExtFile;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -26,12 +27,19 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public final class ApktoolEngine {
     public static final String ENGINE_ID = "apktool.android";
-    public static final String APKTOOL_VERSION = "3.0.2";
+    public static final String APKTOOL_VERSION = "2.12.1";
     private ApktoolEngine() {}
 
     public static JSONObject analyze(Context context, List<File> inputs, AtomicBoolean cancelled) throws Exception {
         File root = new File(context.getFilesDir(), "apktool-workspace");
         if (!root.isDirectory() && !root.mkdirs()) throw new java.io.IOException("Cannot create Apktool workspace");
+        File framework = new File(context.getFilesDir(), "apktool-framework");
+        if (!framework.isDirectory() && !framework.mkdirs()) throw new java.io.IOException("Cannot create Apktool framework directory");
+        // Apktool's desktop default derives a framework path from user.home. Android
+        // doesn't guarantee that property, so pin all state to this app's private storage.
+        String userHome = System.getProperty("user.home");
+        if (userHome == null || userHome.trim().isEmpty()) System.setProperty("user.home", context.getFilesDir().getAbsolutePath());
+
         JSONArray rows = new JSONArray();
         int decoded = 0;
         int cached = 0;
@@ -55,18 +63,19 @@ public final class ApktoolEngine {
                     continue;
                 }
 
-                Config config = new Config(APKTOOL_VERSION);
+                Config config = new Config();
+                config.setFrameworkDirectory(framework.getAbsolutePath());
                 config.setForced(true);
                 config.setJobs(Math.max(1, Math.min(Runtime.getRuntime().availableProcessors(), 4)));
                 config.setDecodeSources(Config.DecodeSources.FULL);
                 config.setDecodeResources(Config.DecodeResources.FULL);
                 config.setDecodeAssets(Config.DecodeAssets.FULL);
-                config.setDecodeResolve(Config.DecodeResolve.DEFAULT);
+                config.setDecodeResolve(Config.DecodeResolve.KEEP);
                 config.setBaksmaliDebugMode(true);
                 config.setKeepBrokenResources(true);
                 config.setAnalysisMode(true);
 
-                new ApkDecoder(input, config).decode(out);
+                new ApkDecoder(new ExtFile(input), config).decode(out);
                 if (cancelled != null && cancelled.get()) {
                     row.put("status", "CANCELLED_AFTER_DECODE");
                     rows.put(row);
@@ -114,7 +123,8 @@ public final class ApktoolEngine {
         try {
             JSONObject old = new JSONObject(Io.readUtf8(marker));
             return old.optBoolean("complete") && sha.equals(old.optString("sha256"))
-                    && ENGINE_ID.equals(old.optString("engineId"));
+                    && ENGINE_ID.equals(old.optString("engineId"))
+                    && APKTOOL_VERSION.equals(old.optString("apktoolVersion"));
         } catch (Exception ignored) {
             return false;
         }
