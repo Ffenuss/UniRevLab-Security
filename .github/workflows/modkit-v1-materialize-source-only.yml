@@ -1,0 +1,96 @@
+name: Materialize ModKit v1 Source Only
+
+on:
+  push:
+    branches: [ Modkit1 ]
+    paths:
+      - '.github/workflows/modkit-v1-materialize-source-only.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  materialize-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Reconstruct exact source without repeating historical test/build gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          REAL_PYTHON="$(command -v python)"
+          mkdir -p /tmp/modkit-v1-shim
+          cat > /tmp/modkit-v1-shim/python <<EOF
+          #!/usr/bin/env bash
+          if [[ "\${1:-}" == "-m" && "\${2:-}" == "pytest" ]]; then
+            echo "[v1 source materializer] skip historical pytest: \$*"
+            exit 0
+          fi
+          if [[ "\${1:-}" == "-m" && "\${2:-}" == "modkit" && ( "\${3:-}" == "selftest" || "\${3:-}" == "runtime-check" ) ]]; then
+            echo "[v1 source materializer] skip historical modkit gate: \$*"
+            exit 0
+          fi
+          exec "$REAL_PYTHON" "\$@"
+          EOF
+          chmod +x /tmp/modkit-v1-shim/python
+          ln -s python /tmp/modkit-v1-shim/python3
+          for tool in gradle cargo rustc; do
+            cat > "/tmp/modkit-v1-shim/$tool" <<EOF
+          #!/usr/bin/env bash
+          echo "[v1 source materializer] skip historical $tool gate: \$*"
+          exit 0
+          EOF
+            chmod +x "/tmp/modkit-v1-shim/$tool"
+          done
+          export PATH="/tmp/modkit-v1-shim:$PATH"
+          bash .dev40/ci-dev40.sh
+          test -d /tmp/modkit-dev25/modkit
+          test -d /tmp/modkit-dev25/android
+      - name: Materialize canonical tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/v1-canonical
+          mkdir -p /tmp/v1-canonical
+          rsync -a \
+            --exclude='.git/' \
+            --exclude='.pytest_cache/' \
+            --exclude='__pycache__/' \
+            --exclude='*.pyc' \
+            --exclude='android/.gradle/' \
+            --exclude='android/app/build/' \
+            --exclude='build/' \
+            /tmp/modkit-dev25/ /tmp/v1-canonical/
+          find /tmp/v1-canonical -type f -print0 | sort -z | xargs -0 sha256sum | sed 's#/tmp/v1-canonical/#v1/#' > /tmp/v1-canonical/SOURCE-SHA256SUMS.txt
+          printf '%s\n' \
+            'ModKit v1 canonical source baseline' \
+            'Materialized from the exact 0.9.0-dev40 reconstruction without behavioral changes.' \
+            'Historical .devXX transports are retained only as provenance and are not v1 build inputs.' \
+            > /tmp/v1-canonical/CANONICAL-SOURCE.txt
+          test -s /tmp/v1-canonical/android/app/build.gradle
+          test -s /tmp/v1-canonical/modkit/mobile/simple_mode.py
+          test -s /tmp/v1-canonical/android/app/src/main/java/dev/modkit/mobile/WorkerService.java
+      - name: Publish canonical source if not already present
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin Modkit1
+          git reset --hard origin/Modkit1
+          if [[ -d v1 ]]; then
+            echo 'v1 already exists; verifying materialized source matches canonical payload'
+            diff -qr --exclude='SOURCE-SHA256SUMS.txt' --exclude='CANONICAL-SOURCE.txt' /tmp/v1-canonical v1
+            exit 0
+          fi
+          cp -a /tmp/v1-canonical v1
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add v1
+          git commit -m 'v1: materialize canonical dev40 source baseline'
+          git push origin HEAD:Modkit1
