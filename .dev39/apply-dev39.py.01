@@ -1,0 +1,49 @@
+pact in words:\n            out.append(domain)\n    low=" ".join(tokens)\n''',
+'''    tokens=set(_tokens(text)); compact="".join(tokens)\n    out=[]\n    for domain, words in _PACKAGE_STRONG_WORDS.items():\n        if tokens & words or compact in words:\n            out.append(domain)\n\n    # Generic Currency APIs, locale formatting and analytics are not game-wallet evidence.\n    if "currency" in out:\n        concrete={"gold","coin","coins","gem","gems","diamond","diamonds","wallet"}\n        context={"balance","spend","spent","cost","price","reward","premium","shop","store","item","purchase"}\n        sdk_noise={"revenue","analytics","event","events","symbol","exponent","locale","formatter","facebook","fb","appsflyer","adjust","tiktok","java","util","currencytosymbol"}\n        has_concrete=bool(tokens & concrete)\n        if (not has_concrete and not bool(tokens & context)) or (tokens & sdk_noise and not has_concrete):\n            out=[d for d in out if d != "currency"]\n    low=" ".join(tokens)\n''','currency package noise filter')
+
+# Simple Mode recovery + fresh passive scan. Do not rescan expensive IL2CPP if a valid analysis exists.
+replace_function('android/app/src/main/java/dev/modkit/mobile/WorkerService.java',
+'    private void simplePrepare() throws Exception {','    private void simpleBuild(','''    private void simplePrepare() throws Exception {
+        if(!app.file("game.apk").isFile()&&!app.file("installed-target.json").isFile())throw new IOException("Сначала выберите установленное приложение/игру или APK");
+        if(!Python.isStarted())Python.start(new AndroidPlatform(this));
+        if(!app.file("analysis.json").isFile()&&app.file("installed-scan.json").isFile()){
+            JSONObject scan=new JSONObject(Io.readUtf8(app.file("installed-scan.json")));
+            if(scan.optBoolean("fullIl2cppPair")&&app.file("metadata.bin").isFile()&&app.file("library.so").isFile()){
+                app.progress("Simple Mode: восстанавливаю полный IL2CPP-анализ…");analyze();
+            }else if(app.file("installed-apk-set.zip").isFile()){
+                app.progress("Simple Mode: восстанавливаю DEX/native/Unity discovery…");splitDiscovery(scan);
+            }
+        }
+        app.progress("Simple Mode: пассивный поиск API/endpoint, TLS pinning и crypto/key-handling…");
+        PyObject sec=Python.getInstance().getModule("modkit.mobile.security_scan");PyObject secOut=sec.callAttr("scan_workspace",getFilesDir().getPath(),app.file("security-surfaces.json").getPath());JSONObject secObj=new JSONObject(secOut.toString());
+        if(app.file("analysis.json").isFile()||app.file("analysis.methods.jsonl").isFile()||app.file("re-analysis.json").isFile()){try{menuSmartPrepare();}catch(Exception e){new Progress().progress("Simple Mode: Menu prepare остаётся REVIEW — "+e.getMessage());}}
+        PyObject mod=Python.getInstance().getModule("modkit.mobile.simple_mode");PyObject out=mod.callAttr("build_catalog",getFilesDir().getPath(),app.file("simple-catalog.json").getPath());JSONObject obj=new JSONObject(out.toString());
+        app.progress("Simple Mode: важных "+obj.optInt("important")+", авто-сборка READY "+obj.optInt("buildable")+", точных locator "+obj.optInt("actionable")+", API/security "+secObj.optInt("total")+", framework "+obj.optInt("frameworkNoise")+".");
+    }
+''')
+
+# Invalidate new derived files when target changes.
+p=root/'android/app/src/main/java/dev/modkit/mobile/WorkerService.java'; s=p.read_text(encoding='utf-8')
+needle='"re-analysis.json","re-analysis.ui.json","re-analysis.menu.json","menu-spec.json","menu-result.json","menu-preflight.json","menu-validation.json"}'
+if needle in s:
+    s=s.replace(needle,'"re-analysis.json","re-analysis.ui.json","re-analysis.menu.json","menu-spec.json","menu-result.json","menu-preflight.json","menu-validation.json","security-surfaces.json","simple-catalog.json"}',1)
+else:
+    raise SystemExit('WorkerService clearInstalledAnalysisState list marker missing')
+# File imports also invalidate the derived Simple Mode reports.
+marker='''                Files.deleteIfExists(app.file("analysis.summary.json").toPath());\n'''
+if marker not in s: raise SystemExit('WorkerService import invalidation marker missing')
+s=s.replace(marker,marker+'''                Files.deleteIfExists(app.file("security-surfaces.json").toPath());\n                Files.deleteIfExists(app.file("simple-catalog.json").toPath());\n''',1)
+p.write_text(s,encoding='utf-8')
+
+# Current-release historical guard follows the active dev version.
+p=root/'tests/test_project_docs.py'; s=p.read_text(encoding='utf-8')
+name='def test_dev34_parallel_index_checkpoint_is_versioned_and_fail_closed():'; a=s.find(name); b=s.find('\ndef ',a+len(name))
+if a<0: raise SystemExit('dev34 current-release guard missing')
+if b<0:b=len(s)
+block=s[a:b].replace('versionCode 43','versionCode 44').replace('0.9.0.dev38','0.9.0.dev39').replace('0.9.0-dev38','0.9.0-dev39')
+s=s[:a]+block+s[b:];p.write_text(s,encoding='utf-8')
+
+# Regression tests added by this release.
+write('tests/test_dev39_precision.py', '''import struct\n\nfrom modkit.reworkspace.dex import DexFile, DexMethodRef, DexDefinedMethod\nfrom modkit.reworkspace.trust import surfaces_for_method\nfrom modkit.mobile.gameplay import _package_domains\n\n\ndef _uleb(v):\n    out=bytearray()\n    while True:\n        b=v & 0x7f; v >>= 7\n        if v: out.append(b|0x80)\n        else: out.append(b); return bytes(out)\n\n\ndef test_dex_virtual_method_idx_diff_restarts_from_zero():\n    d=DexFile.__new__(DexFile); blob=bytearray(256)\n    d.class_defs_size=1; d.class_defs_off=0; d.method_ids_size=16\n    d._types=['pkg.C']; d._strings=[]; d._protos=[]; d._methods=None; d._method_cache={}; d._defined=None\n    data_off=64; struct.pack_into('<I',blob,24,data_off)\n    payload=_uleb(0)+_uleb(0)+_uleb(1)+_uleb(1)+_uleb(5)+_uleb(1)+_uleb(100)+_uleb(2)+_uleb(1)+_uleb(120)\n    blob[data_off:data_off+len(payload)]=payload; d.blob=bytes(blob)\n    refs={i:DexMethodRef(i,'pkg.C',f'm{i}','void',[]) for i in (2,5)}; d.method_ref=lambda i:refs[i]; d._refs=lambda off:([f's{off}'],[])\n    rows=list(d.iter_defined_methods()); assert [r.index for r in rows]==[5,2]; assert [r.code_offset for r in rows]==[100,120]\n\n\ndef test_framework_get_order_is_not_monetization():\n    m=DexDefinedMethod(1,'androidx.core.internal.view.SupportMenuItem','getOrder','int',[],1,10,[],[])\n    assert 'monetization' not in surfaces_for_method(m)\n\n\ndef test_package_currency_filters_locale_and_analytics_noise():\n    assert 'currency' not in _package_domains('java.util.Currency')\n    assert 'currency' not in _package_domains('reportWithRevenue currency')\n    assert 'currency' not in _package_domains('KEY_CURRENCY currencyToSymbol')\n    assert 'currency' in _package_domains('diamond wallet reward')\n    assert 'currency' in _package_domains('gold coin shop price')\n''')
+
+write('tests/test_dev39_simple_mode.py', '''import json, zipfile\nfrom modkit.mobile.simple_mode import build_catalog\nfrom modkit.mobile.security_scan import scan_apk_paths\n\n\ndef test_local_currency_can_be_ready_dex_without_server_audit(tmp_path):\n    (tmp_path/'analysis.gameplay-coverage.json').write_text(json.dumps({'findings':[{'title':'Currency','status':'CONFIRMED','category':'currency','trustBoundary':'local','class':'game.PlayerWallet','method':'getG
