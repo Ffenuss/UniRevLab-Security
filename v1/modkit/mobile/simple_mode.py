@@ -534,6 +534,24 @@ def build_catalog(workdir: str | Path, output_path: str | Path | None = None) ->
                 card["description"] = f"{family} · {recovery}. Артефакт найден во всех выбранных APK/split; symbols/strings участвуют в gameplay-поиске."
                 add(_quality(card))
 
+    for external_path in sorted(root.glob("external-evidence-*.json")):
+        external = _json(external_path)
+        if not isinstance(external, dict):
+            continue
+        for row in external.get("findings", []) or []:
+            if not isinstance(row, dict):
+                continue
+            card = _generic_card(row, "ExternalEngine", str(row.get("category") or "External Evidence"))
+            if card:
+                card["externalCorroborating"] = True
+                card["buildable"] = False
+                card["selectable"] = False
+                card["actionable"] = False
+                card["locator"] = None
+                card["status"] = "IMPORTED_EVIDENCE"
+                card["description"] = str(row.get("description") or "Imported external-engine evidence; requires local confirmation before READY.")
+                add(_quality(card))
+
     sources = [
         ("analysis.json", "Analysis"),
         ("analysis.gameplay-coverage.json", "Gameplay"),
