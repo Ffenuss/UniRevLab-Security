@@ -39,7 +39,6 @@ def test_dex_candidate_can_only_enter_menu_with_explicit_dex_patch_contract():
     }
     spec = spec_from_analysis(analysis)
     assert len(spec.controls) == 1
-    # No implicit executable binding is invented even with a future DEX patch contract.
     assert spec.controls[0].binding is None
 
 
@@ -58,12 +57,15 @@ def test_inventory_engine_marker_alone_does_not_make_ordinary_app_hybrid():
     assert out["gameScore"] < 4
 
 
-def test_android_discovery_rows_default_fail_closed_and_hide_fake_one_editor():
-    main = (ROOT / "android/app/src/main/java/dev/modkit/mobile/MainActivity.java").read_text(encoding="utf-8")
-    assert 'o.optBoolean("selectable",false)' in main
-    assert 'evidence_only_not_patchable' in main
-    assert 'if(!selectable){card.addView' in main
-    assert 'boolean patchModelReady=app.file("analysis.json").isFile()&&app.file("library.so").isFile()' in main
+def test_discovery_rows_remain_fail_closed_after_legacy_dashboard_removal():
+    simple = (ROOT / "modkit/mobile/simple_mode.py").read_text(encoding="utf-8")
+    auto = (ROOT / "android/app/src/main/java/dev/modkit/mobile/AutoAnalysisActivity.java").read_text(encoding="utf-8")
+    assert 'executable = bool(binding) and rva is not None' in simple
+    assert '"buildable": executable, "selectable": executable' in simple
+    assert '"buildable": False, "selectable": False' in simple
+    assert 'safe = [c for c in kept if c.get("binding") and c.get("rva") is not None' in simple
+    assert 'ready=cat.optInt("buildable")' in auto
+    assert 'mod.setEnabled(!app.busy.get()&&ready>0)' in auto
 
 
 def test_menu_builder_is_context_aware_and_collapses_advanced_tools():
