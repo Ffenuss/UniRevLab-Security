@@ -9,12 +9,18 @@ def test_dev40_cache_behavior_survives_v1():
     assert "reuseOnlyWhenTargetDigestMatches" in cache and "cacheDoesNotRelaxValidation" in cache
 
 
-def test_dev40_simple_mode_filters_progress_cancel_and_handoff():
-    ui=(ROOT/"android/app/src/main/java/dev/modkit/mobile/SimpleModeActivity.java").read_text(encoding="utf-8")
-    for token in ("Patch Ready","HP / Health","Damage","Cooldown","Currency","Level / XP","Inventory","Movement","Authentication","Framework noise"):
-        assert token in ui
-    for token in ("Отменить анализ","simple-progress.json","Открыть в Decompiler","Открыть в Native","Deep Resolve / RE Workspace"):
-        assert token in ui
+def test_dev40_catalogue_progress_cancel_and_workspace_handoff_survive_new_ui():
+    model=(ROOT/"modkit/mobile/simple_mode.py").read_text(encoding="utf-8")
+    auto=(ROOT/"android/app/src/main/java/dev/modkit/mobile/AutoAnalysisActivity.java").read_text(encoding="utf-8")
+    full=(ROOT/"android/app/src/main/java/dev/modkit/mobile/FullModeActivity.java").read_text(encoding="utf-8")
+    for token in ('"health"','"damage"','"cooldown"','"currency"','"level_xp"','"inventory"','"movement"'):
+        assert token in model
+    assert 'app.cancelled.set(true)' in auto
+    assert 'simple-progress.json' in auto
+    assert 'AnalysisStorageActivity.class' in auto
+    assert 'DecompilerActivity.class' in full
+    assert 'NativeWorkspaceActivity.class' in full
+    assert 'ReWorkspaceActivity.class' in full
 
 
 def test_dev40_worker_is_staged_cached_and_cancel_aware():
