@@ -1,0 +1,1 @@
+dev38 transport: passive Android API endpoint and cryptography configuration audit plus Simple Mode readiness fixes. No network requests are performed by the scanner.
