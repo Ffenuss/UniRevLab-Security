@@ -84,6 +84,21 @@ def test_target_selection_prepares_only_and_full_analysis_runs_once():
     assert '"installed-apk-set.zip"' in prep
 
 
+def test_long_running_chain_persists_interruption_marker():
+    app = read("android/app/src/main/java/dev/modkit/mobile/App.java")
+    prep = read("android/app/src/main/java/dev/modkit/mobile/TargetPreparationService.java")
+    full = read("android/app/src/main/java/dev/modkit/mobile/FullAnalysisService.java")
+    evidence = read("android/app/src/main/java/dev/modkit/mobile/AutomaticEvidenceService.java")
+    for source in (prep, full, evidence):
+        compact = "".join(source.split())
+        assert 'putBoolean("running",true)' in compact
+        assert 'putBoolean("running",false)' in compact
+    assert 'getBoolean("running",false)' in app
+    assert "Предыдущая операция прервана системой" in app
+    assert "handedOff" in full
+    assert "AutomaticEvidenceService.class" in full
+
+
 def test_full_analysis_runs_embedded_apktool_and_script_backends_without_import():
     service = read("android/app/src/main/java/dev/modkit/mobile/FullAnalysisService.java")
     gradle = read("android/app/build.gradle")
