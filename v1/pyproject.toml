@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "modkit"
-version = "0.9.0.dev40"
-description = "Offline Android application/game reverse-engineering and evidence analysis toolkit with APK-set, DEX, ELF, IL2CPP, Probe and gated Menu Builder"
+version = "1.0.0"
+description = "Offline Android application/game analysis, reverse-engineering, evidence and rooted runtime inspection toolkit"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []
