@@ -1,0 +1,151 @@
+diff --git a/RELEASE-0.9.0-DEV37-RU.md b/RELEASE-0.9.0-DEV37-RU.md
+new file mode 100644
+index 0000000..b9d1632
+--- /dev/null
++++ b/RELEASE-0.9.0-DEV37-RU.md
+@@ -0,0 +1,15 @@
++# ModKit 0.9.0-dev37 — Simple Mode + File Workspace + Cocos
++
++## Что добавлено
++
++- Новый экран **«Для глупых · авто-режим»**: один каталог объединяет подтверждённые local controls, review/evidence, Runtime Probe, Application Discovery, Gameplay Discovery, Deep Resolver и trust-boundary находки.
++- В Simple Mode все смысловые находки видимы; автоматическая сборка разрешена только для controls с подтверждёнными локальными executable bindings.
++- Серверные/платёжные/экономические поверхности отображаются как `SERVER_AUDIT`: ModKit показывает доказательства и теоретическую модель риска, но не генерирует bypass.
++- Автоматическое распознавание Unity/IL2CPP, Cocos2d-x C++, Cocos2d-x Lua/JS, Cocos Creator, Lua/xLua/SLua, DEX и native ELF.
++- Новый **File Workspace**: открыть внешний файл или entry из base/split APK, редактировать UTF-8 или HEX, сохранить рабочую копию, экспортировать, упаковать явную замену в Patch Pack и собрать подписанный APK/APK-set.
++- Patch Pack расширен явным `modkit-workspace-patch-1.0` для замены произвольных APK entries без догадок по имени файла; path traversal и META-INF блокируются.
++- Installed Scanner сохраняет Cocos/Lua/JS engine markers вместе с Unity/IL2CPP/Dex/ELF inventory.
++
++## Что не изменено
++
++Профессиональные Decompiler / RE Workspace / Native / Patch Pack / Menu Builder остаются доступны напрямую. Simple Mode является оболочкой над теми же fail-closed анализаторами и не понижает требования к RVA/ABI/binding.
+diff --git a/VALIDATION-DEV37.json b/VALIDATION-DEV37.json
+new file mode 100644
+index 0000000..9b325a4
+--- /dev/null
++++ b/VALIDATION-DEV37.json
+@@ -0,0 +1,20 @@
++{
++  "version": "0.9.0-dev37",
++  "versionCode": 42,
++  "tests": 344,
++  "features": [
++    "simple-mode-all-findings-catalog",
++    "validated-local-control-selection",
++    "server-trust-audit-fail-closed",
++    "cocos-runtime-detection",
++    "file-workspace-text-hex-editor",
++    "generic-apk-entry-workspace-patch",
++    "apk-set-resign-for-edited-split"
++  ],
++  "localChecks": {
++    "targetedPytest": "23 passed",
++    "selftest": "ok",
++    "runtimeCheck": "ok"
++  },
++  "ci": "required: full pytest + assembleDebug + lintDebug + zipalign + apksigner"
++}
+diff --git a/android/app/build.gradle b/android/app/build.gradle
+index 7b60bc6..7ee89b7 100644
+--- a/android/app/build.gradle
++++ b/android/app/build.gradle
+@@ -7,8 +7,8 @@ android {
+         minSdk 26
+         targetSdk 34
+         multiDexEnabled true
+-        versionCode 41
+-        versionName '0.9.0-dev36'
++        versionCode 42
++        versionName '0.9.0-dev37'
+         ndk { abiFilters 'arm64-v8a', 'x86_64' }
+         externalNativeBuild { cmake { arguments '-DANDROID_STL=c++_static' } }
+     }
+diff --git a/android/app/src/main/AndroidManifest.xml b/android/app/src/main/AndroidManifest.xml
+index 6e0a62f..79f481d 100644
+--- a/android/app/src/main/AndroidManifest.xml
++++ b/android/app/src/main/AndroidManifest.xml
+@@ -10,6 +10,8 @@
+ <activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
+ <activity android:name=".ReWorkspaceActivity" android:exported="false"/>
+ <activity android:name=".DecompilerActivity" android:exported="false"/>
++<activity android:name=".FileWorkspaceActivity" android:exported="false"/>
++<activity android:name=".SimpleModeActivity" android:exported="false"/>
+ <activity android:name=".NativeWorkspaceActivity" android:exported="false"/>
+ <activity android:name=".PatchPackActivity" android:exported="false"/>
+ <activity android:name=".MenuBuilderActivity" android:exported="false"/>
+diff --git a/android/app/src/main/java/dev/modkit/mobile/FileWorkspaceActivity.java b/android/app/src/main/java/dev/modkit/mobile/FileWorkspaceActivity.java
+new file mode 100644
+index 0000000..b2e84a9
+--- /dev/null
++++ b/android/app/src/main/java/dev/modkit/mobile/FileWorkspaceActivity.java
+@@ -0,0 +1,103 @@
++package dev.modkit.mobile;
++
++import android.app.*;
++import android.content.*;
++import android.database.Cursor;
++import android.graphics.*;
++import android.net.Uri;
++import android.os.*;
++import android.provider.OpenableColumns;
++import android.view.*;
++import android.widget.*;
++import org.json.*;
++import java.io.*;
++import java.nio.charset.*;
++import java.nio.file.*;
++import java.util.*;
++import java.util.zip.*;
++
++/** Raw file/APK-entry editor used by the main professional workspace. */
++public class FileWorkspaceActivity extends Activity {
++    private static final int OPEN_FILE=301, EXPORT_FILE=302, BUILD_APK=303;
++    private static final int MAX_EDIT_BYTES=16*1024*1024;
++    private App app;
++    private TextView status,meta;
++    private EditText editor;
++    private Button save,export,patch,build,modeButton;
++    private byte[] original=new byte[0];
++    private boolean hexMode=false;
++    private String displayName="",targetEntry=null;
++    private File sourceApk=null;
++    private final Handler handler=new Handler(Looper.getMainLooper());
++    private long revision=-1;
++    private final Runnable poll=new Runnable(){public void run(){refreshStatus();handler.postDelayed(this,400);}};
++
++    private int dp(int n){return(int)(n*getResources().getDisplayMetrics().density);}
++    private TextView text(String s,int size){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(Color.rgb(225,230,235));t.setPadding(0,dp(5),0,dp(5));t.setTextIsSelectable(true);return t;}
++    private Button button(String s,LinearLayout parent,View.OnClickListener l){Button b=new Button(this);b.setText(s);b.setAllCaps(false);b.setOnClickListener(l);parent.addView(b);return b;}
++
++    @Override public void onCreate(Bundle state){super.onCreate(state);app=(App)getApplication();
++        LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(dp(14),dp(14),dp(14),dp(18));root.setBackgroundColor(Color.rgb(16,20,24));
++        TextView title=text("Файлы приложения · редактор",26);title.setTypeface(null,Typeface.BOLD);root.addView(title);
++        root.addView(text("Открывает обычный файл или любой entry из base/split APK. Текст редактируется как UTF-8, бинарные файлы — как HEX. Изменение сохраняется в рабочую копию и может быть упаковано в Patch Pack.",13));
++        LinearLayout top=new LinearLayout(this);top.setOrientation(LinearLayout.HORIZONTAL);root.addView(top);
++        button("Открыть любой файл",top,v->startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE),OPEN_FILE));
++        button("Файл из APK / split",top,v->showApkSources());
++        modeButton=button("Режим: авто",root,v->{if(original.length==0)return;hexMode=!hexMode;render();});
++        meta=text("Файл не открыт",13);root.addView(meta);
++        editor=new EditText(this);editor.setTextColor(Color.WHITE);editor.setHintTextColor(Color.GRAY);editor.setTypeface(Typeface.MONOSPACE);editor.setTextSize(12);editor.setGravity(Gravity.TOP|Gravity.START);editor.setHorizontallyScrolling(true);editor.setSingleLine(false);editor.setPadding(dp(10),dp(10),dp(10),dp(10));
++        ScrollView scroll=new ScrollView(this);scroll.addView(editor,new ScrollView.LayoutParams(-1,-2));root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1f));
++        LinearLayout actions=new LinearLayout(this);actions.setOrientation(LinearLayout.HORIZONTAL);root.addView(actions);
++        save=button("Сохранить рабочую копию",actions,v->saveWorking());
++        export=button("Экспортировать файл",actions,v->exportEdited());
++        patch=button("Подготовить Patch Pack",root,v->preparePatch());
++        build=button("Собрать APK / APK-set",root,v->buildPatched());
++        status=text("",13);root.addView(status);setContentView(root);updateButtons();
++    }
++
++    private void updateButtons(){boolean opened=original.length>0;save.setEnabled(opened);export.setEnabled(opened);boolean apk=opened&&sourceApk!=null&&targetEntry!=null;patch.setEnabled(apk);build.setEnabled(apk&&app.file("workspace-patch.zip").isFile());}
++
++    private String display(Uri uri){String d=uri.getLastPathSegment();try(Cursor c=getContentResolver().query(uri,new String[]{OpenableColumns.DISPLAY_NAME},null,null,null)){if(c!=null&&c.moveToFirst())d=c.getString(0);}catch(Exception ignored){}return d==null?"file":d;}
++    private void openUri(Uri uri){try(InputStream in=getContentResolver().openInputStream(uri)){if(in==null)throw new IOException("openInputStream returned null");byte[] data=readLimited(in,MAX_EDIT_BYTES+1);if(data.length>MAX_EDIT_BYTES)throw new IOException("Файл больше 16 МБ. Для больших файлов используйте Native/Decompiler/Patch Pack workspace вместо встроенного текст/HEX редактора.");displayName=display(uri);sourceApk=null;targetEntry=null;original=data;hexMode=!looksText(data);render();status.setText("Открыт внешний файл. Изменения можно экспортировать, но автоматическая сборка APK доступна только для entry из APK.");}catch(Exception e){toast(e.getMessage());}}
++
++    private void showApkSources(){List<File> files=new ArrayList<>();List<String> labels=new ArrayList<>();try{File target=app.file("installed-target.json");if(target.isFile()){JSONObject t=new JSONObject(Io.readUtf8(target));JSONArray rows=t.optJSONArray("splits");if(rows!=null)for(int i=0;i<rows.length();i++){JSONObject r=rows.optJSONObject(i);if(r==null)continue;File f=new File(r.optString("path",""));if(f.isFile()){files.add(f);labels.add(r.optString("name",f.getName()));}}}}catch(Exception ignored){}
++        if(files.isEmpty()&&app.file("game.apk").isFile()){files.add(app.file("game.apk"));labels.add("game.apk");}
++        if(files.isEmpty()){toast("Сначала выберите APK или установленное приложение на главном экране");return;}
++        new AlertDialog.Builder(this).setTitle("Выберите APK / split").setItems(labels.toArray(new String[0]),(d,w)->showEntries(files.get(w),labels.get(w))).setNegativeButton(android.R.string.cancel,null).show();
++    }
++
++    private void showEntries(File apk,String apkLabel){try(ZipFile z=new ZipFile(apk)){ArrayList<String> names=new ArrayList<>();Enumeration<? extends ZipEntry> en=z.entries();while(en.hasMoreElements()){ZipEntry e=en.nextElement();if(!e.isDirectory())names.add(e.getName());}Collections.sort(names,String.CASE_INSENSITIVE_ORDER);
++        LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);int pad=dp(10);box.setPadding(pad,pad,pad,pad);EditText filter=new EditText(this);filter.setHint("Фильтр: lua, json, classes.dex, assets/…");box.addView(filter);ListView list=new ListView(this);box.addView(list,new LinearLayout.LayoutParams(-1,dp
