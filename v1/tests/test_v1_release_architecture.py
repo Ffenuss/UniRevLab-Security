@@ -29,10 +29,11 @@ def test_release_home_and_runtime_lab_are_private_except_launcher():
         assert f'.{activity}" android:exported="false"' in manifest
     assert "EngineCatalogActivity" not in manifest
     assert "EngineBridgeActivity" not in manifest
+    assert '.TargetPreparationService" android:exported="false"' in manifest
     assert '.FullAnalysisService" android:exported="false"' in manifest
 
 
-def test_home_has_only_release_routes_not_dev40_shell():
+def test_home_has_only_release_routes_not_legacy_shell():
     home = read("android/app/src/main/java/dev/modkit/mobile/HomeActivity.java")
     assert "AutoAnalysisActivity.class" in home
     assert "FullModeActivity.class" in home
@@ -50,15 +51,22 @@ def test_legacy_entry_points_are_redirects_only():
         assert forbidden not in main + simple
 
 
-def test_auto_flow_uses_one_target_selector_and_full_service():
+def test_target_selection_prepares_only_and_full_analysis_runs_once():
     auto = read("android/app/src/main/java/dev/modkit/mobile/AutoAnalysisActivity.java")
     selector = read("android/app/src/main/java/dev/modkit/mobile/TargetSelectionActivity.java")
+    prep = read("android/app/src/main/java/dev/modkit/mobile/TargetPreparationService.java")
     service = read("android/app/src/main/java/dev/modkit/mobile/FullAnalysisService.java")
     assert "TargetSelectionActivity.class" in auto
     assert "FullAnalysisService.class" in auto
-    assert 'putExtra("op","scan_installed")' in selector
-    assert 'putExtra("op","import")' in selector
+    assert "TargetPreparationService.class" in selector
+    assert 'putExtra("kind","installed")' in selector
+    assert 'putExtra("kind","apk")' in selector
+    assert 'analysisPerformed",false' in prep
+    assert "WorkerService.class" not in selector
     assert "DecompilerEngine.resolveTargetInputs" in service
+    assert 'getModule("modkit.mobile.apkset")' in service
+    assert 'callAttr("inspect_apk_paths"' in service
+    assert 'getModule("modkit.mobile.package_target")' in service
     assert "exportAllZip(app.cancelled)" in service
     assert "ApktoolEngine.analyze(this,inputs,app.cancelled)" in service
     assert 'getModule("modkit.mobile.embedded_pipeline")' in service
