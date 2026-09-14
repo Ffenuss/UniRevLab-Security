@@ -1,11 +1,9 @@
-"""modkit — offline Il2Cpp mod-menu generator.
+"""ModKit — Android analysis, reverse-engineering and evidence toolkit.
 
-Pipeline
---------
-    global-metadata.dat ─┐
-    libil2cpp.so ────────┴─> [dump.cs | native metadata] ─> IR ─> rules ─> features ─> Android module
+ModKit 1.0 uses a unified engine registry so APK/split, DEX, resources, ELF/native,
+Unity/IL2CPP, semantic/security analysis and runtime backends share one extensible pipeline.
 """
 
-__version__ = "0.9.0-dev40"
+__version__ = "1.0.0"
 
 MODKIT_BANNER = f"modkit {__version__}"
