@@ -17,6 +17,19 @@ cd /tmp/modkit-dev25
 git apply --check /tmp/dev37.patch
 git apply /tmp/dev37.patch
 
+# The historical dev34 regression follows the current release version to ensure the
+# reconstructed source tree is the expected release. dev37 bumps 41/dev36 -> 42/dev37.
+python - <<'PY'
+from pathlib import Path
+p = Path('tests/test_project_docs.py')
+s = p.read_text(encoding='utf-8')
+old = "assert 'versionCode 41' in gradle and \"versionName '0.9.0-dev36'\" in gradle"
+new = "assert 'versionCode 42' in gradle and \"versionName '0.9.0-dev37'\" in gradle"
+if old not in s:
+    raise SystemExit('expected stale dev36 version assertion was not found')
+p.write_text(s.replace(old, new, 1), encoding='utf-8')
+PY
+
 grep -q "versionCode 42" android/app/build.gradle
 grep -q "versionName '0.9.0-dev37'" android/app/build.gradle
 grep -q 'version = "0.9.0.dev37"' pyproject.toml
