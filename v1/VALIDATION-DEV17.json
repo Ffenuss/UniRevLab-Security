@@ -1,0 +1,25 @@
+{
+  "schema": "modkit-dev17-large-result-stability-1",
+  "version": "0.9.0-dev17",
+  "trigger": "Android process exited after Rodroid reported 28841 available methods",
+  "rootCause": "post-analysis peak memory amplification: full JSON serialization plus Java JSONObject materialization of the candidate/discovery catalogue",
+  "changes": [
+    "stream full analysis.json with json.dump",
+    "compact Android return object",
+    "file-backed analysis.ui.jsonl catalogue",
+    "asynchronous paged Android catalogue search",
+    "stale-search cancellation generation"
+  ],
+  "preserved": [
+    "full analysis.json report",
+    "Rodroid dump export",
+    "constant-return patch export",
+    "APK build path",
+    "semantic search aliases"
+  ],
+  "verification": {
+    "pytest": "240/240 passed",
+    "selftest": "ok",
+    "runtimeCheck": "builtin-runtime-v2 clang++ strict ok"
+  }
+}

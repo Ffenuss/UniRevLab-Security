@@ -1,0 +1,13 @@
+{
+  "schema": "modkit-validation-dev20-1.0",
+  "checkpoint": "0.9.0-dev20",
+  "versionCode": 27,
+  "focus": [
+    "unique-managed-interval semantic regression",
+    "native-only IL2CPP relationship chains",
+    "gameplay relevance ranking with technical-surface demotion",
+    "compact Menu Builder RE sidecar",
+    "exact evidence de-duplication"
+  ],
+  "safetyModel": "static evidence and executable bindings remain separate; ambiguous methods remain review-only"
+}

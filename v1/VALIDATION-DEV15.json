@@ -1,0 +1,54 @@
+{
+  "schema": "modkit-dev15-method-context-validation-1",
+  "version": "0.9.0-dev15-method-context",
+  "regression": {
+    "pytestPassed": 235,
+    "selftest": "ok",
+    "runtimeCheck": "builtin-runtime-v2 clang++ strict"
+  },
+  "realValidation": {
+    "metadataVersion": 29,
+    "metadataMethods": 167426,
+    "resolvedUniqueExecutableRva": 144135,
+    "dev14VerifiedSample": 16,
+    "matchedCallableRows": 16,
+    "methodContextMethods": 16,
+    "methodContextSummary": {
+      "outgoingManagedCalls": 32,
+      "stringRefs": 0,
+      "thisOffsetCandidates": 0
+    },
+    "semanticVerification": {
+      "schema": "modkit-semantic-control-verification-1.1",
+      "method": "metadata-callable + uniquely-attributed ARM64 direct-BL managed context",
+      "threshold": 0.68,
+      "candidates": 16,
+      "verified": 0,
+      "correlatedReview": 0,
+      "review": 16,
+      "semantics": "Static semantic correlation only; it does not prove runtime behavior or game effect."
+    },
+    "methodContextVerification": {
+      "schema": "modkit-method-context-verification-1.0",
+      "method": "exact metadata interval + outgoing managed BL + method-local string/field corroboration",
+      "candidates": 16,
+      "verified": 0,
+      "correlatedReview": 1,
+      "review": 15,
+      "semantics": "Static method-local context only; this does not prove runtime behavior or gameplay effect."
+    },
+    "result": "all 16 previously dev14-verified sample methods were demoted to review by technical rendering/quality provenance"
+  },
+  "failClosed": [
+    "ambiguous or oversized managed method interval",
+    "direct BL target without unique metadata ownership",
+    "printable-data reference inside executable segment",
+    "this-relative offset without exact owner+offset corroboration",
+    "framework or technical rendering/quality/presentation surface",
+    "unsupported ABI/signature",
+    "unverified instance resolver",
+    "ELF preflight block"
+  ],
+  "compatibility": "dev14/manual MenuSpec without context fields remains compatible; only explicit contextVerified=false blocks dev15 auto-confirm",
+  "note": "Static evidence only; runtime behavior and gameplay effect are not claimed."
+}

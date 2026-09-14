@@ -1,0 +1,25 @@
+{
+  "version": "0.9.0-dev31",
+  "versionCode": 36,
+  "scope": "PackageTarget and split-aware build phase",
+  "checks": [
+    "PackageTarget manifest and fingerprint",
+    "COMPLETE/PARTIAL scanner state",
+    "collision-resistant copied split names",
+    "IL2CPP metadata magic/version validation",
+    "ELF64/AArch64 libil2cpp validation",
+    "owning-split selection",
+    "target SHA-256 verification before build",
+    "whole APK-set same-key re-sign and .apks export",
+    "Patch Pack owning-target integration",
+    "Menu Builder owning-target preflight/build integration",
+    "project scaffold",
+    "embedded PKCS12 private key absent; AndroidKeyStore local identity used"
+  ],
+  "securityInvariants": {
+    "menuFailClosed": true,
+    "staticIsNotRuntimeConfirmed": true,
+    "partialScanIsNotCompleteEvidence": true,
+    "serverOrPaymentBypassAdded": false
+  }
+}

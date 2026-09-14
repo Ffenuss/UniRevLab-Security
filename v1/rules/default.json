@@ -1,0 +1,62 @@
+{
+  "_comment": "modkit rules — teach the analyzer how *this* target names things. Regenerate a project after editing; nothing here is compiled.",
+  "ignore_classes": [
+    { "class": "^System\\.|^Mono\\.|^Microsoft\\.|^Unity\\.|^UnityEngine" },
+    { "class": "^(Cysharp|Google|Newtonsoft|GooglePlayGames|LiteNetLib)" },
+    { "class": "(Attribute|Exception|EventArgs|__Gen|<PrivateImplementation|Tests?)$" },
+    { "class": "\\.(UI|Internal|Generated)\\." }
+  ],
+  "priority_classes": [
+    { "class": "(player|hero|character|save|profile|stats?|gameplay|run|inventory|wallet|shop|economy|weapon|difficulty)" }
+  ],
+  "groups": [
+    {
+      "id": "economy",
+      "label": "Economy",
+      "class": "(player|save|game|data|wallet|profile|economy|inventory|shop|run|stat)",
+      "member": "(^|_)(gold|coins?|money|cash|credits?|gems?|diamonds?|crystals?|tickets?|points?|score|xp|exp|currency|balance|keys?|wood|stone|food)(_|$)"
+    },
+    {
+      "id": "survival",
+      "label": "Survival",
+      "class": "(player|hero|character|health|life|status|body)",
+      "member": "(^|_)(hp|health|lives?|energy|stamina|hunger|thirst|shield|armour|armor)(_|$)"
+    },
+    {
+      "id": "movement",
+      "label": "Movement",
+      "class": "(player|controller|character|movement|vehicle|body)",
+      "member": "(movespeed|walkspeed|runs?speed|speed|maxspeed|jumps?|maxjumps?)"
+    },
+    {
+      "id": "progress",
+      "label": "Progress",
+      "class": "(progress|level|quest|story|save|unlock|achievement|game)",
+      "member": "(level|wave|stage|chapter|floor|depth|multiplier)"
+    }
+  ],
+  "bool_toggles": [
+    { "id": "god_mode", "label": "God Mode", "group": "Survival", "class": "(player|hero|character|game)", "member": "(god|invincib|immortal|indestruct|noDamage|unkillable)" },
+    { "id": "infinite_energy", "label": "Infinite Energy", "group": "Survival", "class": "(player|stat|energy|stamina|mana)", "member": "(infinite|unlimited|noCost|noDrain)" },
+    { "id": "unlock_all", "label": "Unlock Everything", "group": "Progress", "class": "(unlock|shop|save|profile|collection|progress)", "member": "(unlockall|allunlocked|fullunlock|isunlocked|debugunlocks)" },
+    { "id": "no_recoil", "label": "No Recoil / Spread", "group": "Aim", "class": "(weapon|gun|shoot|recoil|aim)", "member": "(recoil|spread|sway|kick)" }
+  ],
+  "const_returns": [
+    { "id": "no_damage", "label": "Ignore Damage", "group": "Survival", "value": 0, "class": "(player|hero|character|health|body)", "member": "^(TakeDamage|ApplyDamage|Damage|Hurt|ReceiveDamage|OnHit)$" },
+    { "id": "one_hit_kill", "label": "One Hit Kill", "group": "Combat", "value": 99999, "class": "(player|weapon|combat|attack|stat)", "member": "^(GetDamage|CalculateDamage|ComputeDamage|get_Damage)$" },
+    { "id": "no_cooldown", "label": "No Cooldown", "group": "Combat", "value": 0, "class": "(skill|ability|weapon|cooldown|player)", "member": "^(GetCooldown|get_Cooldown|GetCooldownTime|RemainingCooldown)$" },
+    { "id": "infinite_ammo", "label": "Infinite Ammo", "group": "Combat", "value": 999, "class": "(weapon|ammo|magazine|gun|inventory|player)", "member": "^(get_Ammo|get_Magazine|GetAmmoCount|get_CurrentAmmo|get_Bullets)$" }
+  ],
+  "hook_patches": [
+    { "id": "log_spawns", "label": "Log Enemy Spawns", "group": "Debug", "class": "(enemy|spawn|wave|director)", "member": "^(Spawn|OnSpawn|InstantiateEnemy)$", "patch_out": true, "allow_instance": true }
+  ],
+  "actions": [
+    { "id": "debug.save_now", "label": "Save Now", "group": "Utility", "kind": "action", "class": "(save|game|profile)", "member": "^(Save|ForceSave|SaveNow)$" },
+    { "id": "debug.skip_level", "label": "Skip Level", "group": "Utility", "kind": "action", "class": "(game|level|progress|director)", "member": "^(CompleteLevel|SkipLevel|Win)$" }
+  ],
+  "instance_capture": {
+    "methods": ["Update", "LateUpdate", "FixedUpdate", "OnEnable", "Awake", "Start", "Tick"],
+    "prefer_named": "(player|hero|character|weapon|game|director)"
+  },
+  "limits": { "max_features": 48, "min_confidence": 0.34 }
+}

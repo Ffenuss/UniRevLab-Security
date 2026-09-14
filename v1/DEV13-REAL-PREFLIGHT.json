@@ -1,0 +1,328 @@
+{
+  "metadataStats": {
+    "modules": 123,
+    "metadata_methods": 167426,
+    "resolved_unique": 144135,
+    "type_table_found": true,
+    "lazy_parameter_rows": 6851,
+    "high_signal_primitive_contract_rows": 38611
+  },
+  "target": {
+    "label": "FirstPaintController::HideFirstPaint",
+    "rva": 45672284,
+    "signature": "void Metadata__HideFirstPaint (void* __this, const MethodInfo* method);"
+  },
+  "resolver": {
+    "label": "FirstPaintController::get_Instance",
+    "rva": 45670120,
+    "kind": "return_ptr",
+    "targetClass": "FirstPaintController",
+    "verified": true,
+    "signature": "void* Metadata__get_Instance (const MethodInfo* method);"
+  },
+  "confirm": {
+    "schema": "modkit-menu-auto-confirm-1.1",
+    "minConfidence": 0.85,
+    "promoted": [
+      "firstpaint_hide"
+    ],
+    "promotionRecords": [
+      {
+        "id": "firstpaint_hide",
+        "title": "HideFirstPaint",
+        "binding": "action",
+        "type": "button",
+        "callAbi": "il2cpp",
+        "isStatic": false,
+        "rva": 45672284,
+        "resolverRva": 45670120,
+        "resolverKind": "return_ptr",
+        "resolverLabel": "",
+        "resolverVerified": true,
+        "resolverMatch": "metadata-target-type-exact",
+        "resolverTargetClass": "FirstPaintController",
+        "resolverContractSource": "global-metadata+CodeRegistration",
+        "resolverSignature": "void* Metadata__get_Instance (const MethodInfo* method);",
+        "targetSo": "libil2cpp.so",
+        "signature": "void Metadata__HideFirstPaint (void* __this, const MethodInfo* method);",
+        "confidence": 0.98,
+        "evidenceSource": "",
+        "evidenceKind": "",
+        "evidenceLocation": "",
+        "evidenceStatus": "",
+        "evidenceCount": 0,
+        "corroboratingEvidence": [],
+        "elfVerification": {
+          "control": "firstpaint_hide",
+          "binding": "action",
+          "callAbi": "il2cpp",
+          "isStatic": false,
+          "targetSo": "libil2cpp.so",
+          "apkPath": "external:library.so",
+          "moduleSource": "external-selected-library",
+          "targetSha256": "912abc74b676281c0d6f5c7286ea00e419cace234504a1a165a547f25baf003a",
+          "rva": 45672284,
+          "fileOffset": 45672284,
+          "section": "il2cpp",
+          "preview": [
+            {
+              "rva": 45672284,
+              "bytes": "f5 53 be a9",
+              "asm": ".word 0xa9be53f5"
+            },
+            {
+              "rva": 45672288,
+              "bytes": "f3 7b 01 a9",
+              "asm": ".word 0xa9017bf3"
+            },
+            {
+              "rva": 45672292,
+              "bytes": "74 f1 02 f0",
+              "asm": "adrp"
+            },
+            {
+              "rva": 45672296,
+              "bytes": "55 cb 02 b0",
+              "asm": "adrp"
+            }
+          ],
+          "resolverKind": "return_ptr",
+          "resolverRva": 45670120,
+          "resolverVerified": true,
+          "resolverMatch": "metadata-target-type-exact",
+          "resolverTargetClass": "FirstPaintController",
+          "resolverFileOffset": 45670120,
+          "resolverSection": "il2cpp",
+          "resolverPreview": [
+            {
+              "rva": 45670120,
+              "bytes": "f4 0f 1e f8",
+              "asm": ".word 0xf81e0ff4"
+            },
+            {
+              "rva": 45670124,
+              "bytes": "f3 7b 01 a9",
+              "asm": ".word 0xa9017bf3"
+            },
+            {
+              "rva": 45670128,
+              "bytes": "94 f1 02 90",
+              "asm": "adrp"
+            },
+            {
+              "rva": 45670132,
+              "bytes": "13 c9 02 f0",
+              "asm": "adrp"
+            }
+          ]
+        },
+        "decision": "auto-confirmed-signature-plus-type-verified-resolver-plus-elf"
+      }
+    ],
+    "rejected": [],
+    "skipped": [],
+    "validation": {
+      "schema": "modkit-menu-validation-1.2",
+      "sourceApk": "/mnt/data/modkit_dev13_real/base.apk",
+      "sourceApkSha256": "6c374c4a4a800752874745b24bf902831262e0287aabfeb910d1a0654c6d95b1",
+      "expectedSourceApkSha256": "6c374c4a4a800752874745b24bf902831262e0287aabfeb910d1a0654c6d95b1",
+      "expectedTargetSha256": "912abc74b676281c0d6f5c7286ea00e419cace234504a1a165a547f25baf003a",
+      "checks": [
+        {
+          "control": "firstpaint_hide",
+          "binding": "action",
+          "callAbi": "il2cpp",
+          "isStatic": false,
+          "targetSo": "libil2cpp.so",
+          "apkPath": "external:library.so",
+          "moduleSource": "external-selected-library",
+          "targetSha256": "912abc74b676281c0d6f5c7286ea00e419cace234504a1a165a547f25baf003a",
+          "rva": 45672284,
+          "fileOffset": 45672284,
+          "section": "il2cpp",
+          "preview": [
+            {
+              "rva": 45672284,
+              "bytes": "f5 53 be a9",
+              "asm": ".word 0xa9be53f5"
+            },
+            {
+              "rva": 45672288,
+              "bytes": "f3 7b 01 a9",
+              "asm": ".word 0xa9017bf3"
+            },
+            {
+              "rva": 45672292,
+              "bytes": "74 f1 02 f0",
+              "asm": "adrp"
+            },
+            {
+              "rva": 45672296,
+              "bytes": "55 cb 02 b0",
+              "asm": "adrp"
+            }
+          ],
+          "resolverKind": "return_ptr",
+          "resolverRva": 45670120,
+          "resolverVerified": true,
+          "resolverMatch": "metadata-target-type-exact",
+          "resolverTargetClass": "FirstPaintController",
+          "resolverFileOffset": 45670120,
+          "resolverSection": "il2cpp",
+          "resolverPreview": [
+            {
+              "rva": 45670120,
+              "bytes": "f4 0f 1e f8",
+              "asm": ".word 0xf81e0ff4"
+            },
+            {
+              "rva": 45670124,
+              "bytes": "f3 7b 01 a9",
+              "asm": ".word 0xa9017bf3"
+            },
+            {
+              "rva": 45670128,
+              "bytes": "94 f1 02 90",
+              "asm": "adrp"
+            },
+            {
+              "rva": 45670132,
+              "bytes": "13 c9 02 f0",
+              "asm": "adrp"
+            }
+          ]
+        }
+      ],
+      "issues": [],
+      "blocked": false,
+      "validatedBindings": 1,
+      "requestedBindings": 1
+    }
+  },
+  "preflight": {
+    "schema": "modkit-menu-preflight-1.1",
+    "sourceApk": "/mnt/data/modkit_dev13_real/base.apk",
+    "counts": {
+      "total": 1,
+      "bound": 1,
+      "evidenceOnly": 0,
+      "unresolved": 0,
+      "actionableReview": 0,
+      "informationalReview": 0
+    },
+    "controls": [
+      {
+        "id": "firstpaint_hide",
+        "title": "HideFirstPaint",
+        "state": "bound",
+        "type": "button",
+        "binding": "action",
+        "rva": 45672284,
+        "suggestedType": null,
+        "evidenceRva": 45672284,
+        "suggestedRva": 45672284,
+        "evidenceSource": "",
+        "evidenceKind": "",
+        "evidenceLocation": "",
+        "evidenceConfidence": 0.98,
+        "evidenceStatus": "",
+        "evidenceCount": 0,
+        "corroboratingEvidence": [],
+        "targetSo": "libil2cpp.so",
+        "suggestedTargetSo": null,
+        "suggestedBinding": "action",
+        "evidenceIsStatic": false,
+        "bindingBlocker": null,
+        "evidenceSignature": "void Metadata__HideFirstPaint (void* __this, const MethodInfo* method);",
+        "callAbi": "il2cpp",
+        "resolverRva": 45670120,
+        "resolverKind": "return_ptr",
+        "resolverLabel": "",
+        "resolverSource": "",
+        "findingId": null,
+        "actionableReview": false
+      }
+    ],
+    "validation": {
+      "schema": "modkit-menu-validation-1.2",
+      "sourceApk": "/mnt/data/modkit_dev13_real/base.apk",
+      "sourceApkSha256": "6c374c4a4a800752874745b24bf902831262e0287aabfeb910d1a0654c6d95b1",
+      "expectedSourceApkSha256": "6c374c4a4a800752874745b24bf902831262e0287aabfeb910d1a0654c6d95b1",
+      "expectedTargetSha256": "912abc74b676281c0d6f5c7286ea00e419cace234504a1a165a547f25baf003a",
+      "checks": [
+        {
+          "control": "firstpaint_hide",
+          "binding": "action",
+          "callAbi": "il2cpp",
+          "isStatic": false,
+          "targetSo": "libil2cpp.so",
+          "apkPath": "external:library.so",
+          "moduleSource": "external-selected-library",
+          "targetSha256": "912abc74b676281c0d6f5c7286ea00e419cace234504a1a165a547f25baf003a",
+          "rva": 45672284,
+          "fileOffset": 45672284,
+          "section": "il2cpp",
+          "preview": [
+            {
+              "rva": 45672284,
+              "bytes": "f5 53 be a9",
+              "asm": ".word 0xa9be53f5"
+            },
+            {
+              "rva": 45672288,
+              "bytes": "f3 7b 01 a9",
+              "asm": ".word 0xa9017bf3"
+            },
+            {
+              "rva": 45672292,
+              "bytes": "74 f1 02 f0",
+              "asm": "adrp"
+            },
+            {
+              "rva": 45672296,
+              "bytes": "55 cb 02 b0",
+              "asm": "adrp"
+            }
+          ],
+          "resolverKind": "return_ptr",
+          "resolverRva": 45670120,
+          "resolverVerified": true,
+          "resolverMatch": "metadata-target-type-exact",
+          "resolverTargetClass": "FirstPaintController",
+          "resolverFileOffset": 45670120,
+          "resolverSection": "il2cpp",
+          "resolverPreview": [
+            {
+              "rva": 45670120,
+              "bytes": "f4 0f 1e f8",
+              "asm": ".word 0xf81e0ff4"
+            },
+            {
+              "rva": 45670124,
+              "bytes": "f3 7b 01 a9",
+              "asm": ".word 0xa9017bf3"
+            },
+            {
+              "rva": 45670128,
+              "bytes": "94 f1 02 90",
+              "asm": "adrp"
+            },
+            {
+              "rva": 45670132,
+              "bytes": "13 c9 02 f0",
+              "asm": "adrp"
+            }
+          ]
+        }
+      ],
+      "issues": [],
+      "blocked": false,
+      "validatedBindings": 1,
+      "requestedBindings": 1
+    },
+    "issues": [],
+    "readyForPayload": true,
+    "readyForAutoBuild": true,
+    "blocked": false
+  }
+}

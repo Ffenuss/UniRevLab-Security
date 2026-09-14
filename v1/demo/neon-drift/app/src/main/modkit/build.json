@@ -1,0 +1,15 @@
+{
+  "generator": "modkit",
+  "app_name": "neondrift",
+  "package": "com.neondrift.game",
+  "abi": "arm64-v8a",
+  "target_so": "libil2cpp.so",
+  "metadata_magic": "0x676c6f62",
+  "metadata_version": 27,
+  "overlay": true,
+  "imgui": false,
+  "dobby": false,
+  "features": 21,
+  "instance_hooks": 3,
+  "dump_source": "dump.cs"
+}

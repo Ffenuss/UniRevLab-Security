@@ -1,0 +1,664 @@
+{
+  "schema": "modkit-dev12-real-resolver-validation-1",
+  "metadataVersion": 29,
+  "structuralResolution": {
+    "modules": 123,
+    "metadata_methods": 167426,
+    "resolved_unique": 144135,
+    "type_table_found": true,
+    "lazy_parameter_rows": 6851,
+    "high_signal_primitive_contract_rows": 38611
+  },
+  "applicationHighSignalCallableCount": 220,
+  "staticNoBlockerCount": 24,
+  "instanceNeedsResolverCount": 196,
+  "sample": [
+    {
+      "label": "BattleFxHelper::SetGlobalFrozenState",
+      "image": "Assembly-CSharp.dll",
+      "rva": 40041652,
+      "semantic": [
+        "state"
+      ],
+      "bindingSuggestion": "bool_setter",
+      "resolverSuggestion": null,
+      "isStatic": true,
+      "bindingBlocker": null,
+      "signature": "void Metadata__SetGlobalFrozenState (bool isFrozen, const MethodInfo* method);"
+    },
+    {
+      "label": "CommonUtils::SetDebugLogActive",
+      "image": "Assembly-CSharp.dll",
+      "rva": 33238676,
+      "semantic": [
+        "cheat"
+      ],
+      "bindingSuggestion": "bool_setter",
+      "resolverSuggestion": null,
+      "isStatic": true,
+      "bindingBlocker": null,
+      "signature": "void Metadata__SetDebugLogActive (bool active, const MethodInfo* method);"
+    },
+    {
+      "label": "CrashSightAnrMonitor::set_Paused",
+      "image": "Assembly-CSharp-firstpass.dll",
+      "rva": 27835204,
+      "semantic": [
+        "state"
+      ],
+      "bindingSuggestion": "bool_setter",
+      "resolverSuggestion": null,
+      "isStatic": true,
+      "bindingBlocker": null,
+      "signature": "void Metadata__set_Paused (bool value, const MethodInfo* method);"
+    },
+    {
+      "label": "DeviceQualityState::Reset",
+      "image": "Assembly-CSharp.dll",
+      "rva": 32843620,
+      "semantic": [
+        "state"
+      ],
+      "bindingSuggestion": "action",
+      "resolverSuggestion": null,
+      "isStatic": true,
+      "bindingBlocker": null,
+      "signature": "void Metadata__Reset (const MethodInfo* method);"
+    },
+    {
+      "label": "DG.Tweening.DOTween::set_debugStoreTargetId",
+      "image": "DOTween.dll",
+      "rva": 48603824,
+      "semantic": [
+        "cheat"
+      ],
+      "bindingSuggestion": "bool_setter",
+      "resolverSuggestion": null,
+      "isStatic": true,
+      "bindingBlocker": null,
+      "signature": "void Metadata__set_debugStoreTargetId (bool value, const MethodInfo* method);"
+    },
+    {
+      "label": "FMODUnity.RuntimeManager::ApplyMuteState",
+      "image": "FMODUnity.dll",
+      "rva": 49323440,
+      "semantic": [
+        "state"
+      ],
+      "bindingSuggestion": "action",
+      "resolverSuggestion": null,
+      "isStatic": true,
+      "bindingBlocker": null,
+      "signature": "void Metadata__ApplyMuteState (const MethodInfo* method);"
+    },
+    {
+      "label": "IGame.MapTimeMixerBehaviour::TryGetTime",
+      "image": "Assembly-CSharp.dll",
+      "rva": 30632448,
+      "semantic": [],
+      "bindingSuggestion": null,
+      "resolverSuggestion": "out_ptr_bool",
+      "isStatic": true,
+      "bindingBlocker": null,
+      "signature": "bool Metadata__TryGetTime (void** timeOfDay, const MethodInfo* method);"
+    },
+    {
+      "label": "IGame.QualityManager::set_deviceLevel",
+      "image": "Assembly-CSharp.dll",
+      "rva": 30509096,
+      "semantic": [
+        "progression"
+      ],
+      "bindingSuggestion": "number_setter",
+      "resolverSuggestion": null,
+      "isStatic": true,
+      "bindingBlocker": null,
+      "signature": "void Metadata__set_deviceLevel (int32_t value, const MethodInfo* method);"
+    },
+    {
+      "label": "IGame.QualityManager::set_qualityLevel",
+      "image": "Assembly-CSharp.dll",
+      "rva": 30508828,
+      "semantic": [
+        "progression"
+      ],
+      "bindingSuggestion": "number_setter",
+      "resolverSuggestion": null,
+      "isStatic": true,
+      "bindingBlocker": null,
+      "signature": "void Metadata__set_qualityLevel (int32_t value, const MethodInfo* method);"
+    },
+    {
+      "label": "IGame.QualityManager::SetDeviceLevel",
+      "image": "Assembly-CSharp.dll",
+      "rva": 30517804,
+      "semantic": [
+        "progression"
+      ],
+      "bindingSuggestion": "number_setter",
+      "resolverSuggestion": null,
+      "isStatic": true,
+      "bindingBlocker": null,
+      "signature": "void Metadata__SetDeviceLevel (int32_t level, const MethodInfo* method);"
+    },
+    {
+      "label": "IGame.QualityManager::SetQualityLevel",
+      "image": "Assembly-CSharp.dll",
+      "rva": 30517616,
+      "semantic": [
+        "progression"
+      ],
+      "bindingSuggestion": "number_setter",
+      "resolverSuggestion": null,
+      "isStatic": true,
+      "bindingBlocker": null,
+      "signature": "void Metadata__SetQualityLevel (int32_t level, const MethodInfo* method);"
+    },
+    {
+      "label": "IGame.UI.Controller.LogUtil::set_EnableDebugLog",
+      "image": "Assembly-CSharp.dll",
+      "rva": 30854684,
+      "semantic": [
+        "cheat"
+      ],
+      "bindingSuggestion": "bool_setter",
+      "resolverSuggestion": null,
+      "isStatic": true,
+      "bindingBlocker": null,
+      "signature": "void Metadata__set_EnableDebugLog (bool value, const MethodInfo* method);"
+    },
+    {
+      "label": "MemoryQualityState::Reset",
+      "image": "Assembly-CSharp.dll",
+      "rva": 32845952,
+      "semantic": [
+        "state"
+      ],
+      "bindingSuggestion": "action",
+      "resolverSuggestion": null,
+      "isStatic": true,
+      "bindingBlocker": null,
+      "signature": "void Metadata__Reset (const MethodInfo* method);"
+    },
+    {
+      "label": "MemoryQualityState::set_AntiAliasingQuality",
+      "image": "Assembly-CSharp.dll",
+      "rva": 32845372,
+      "semantic": [
+        "state"
+      ],
+      "bindingSuggestion": "number_setter",
+      "resolverSuggestion": null,
+      "isStatic": true,
+      "bindingBlocker": null,
+      "signature": "void Metadata__set_AntiAliasingQuality (int32_t value, const MethodInfo* method);"
+    },
+    {
+      "label": "MemoryQualityState::set_CharacterQuality",
+      "image": "Assembly-CSharp.dll",
+      "rva": 32844532,
+      "semantic": [
+        "state"
+      ],
+      "bindingSuggestion": "number_setter",
+      "resolverSuggestion": null,
+      "isStatic": true,
+      "bindingBlocker": null,
+      "signature": "void Metadata__set_CharacterQuality (float value, const MethodInfo* method);"
+    },
+    {
+      "label": "MemoryQualityState::set_GrassQuality",
+      "image": "Assembly-CSharp.dll",
+      "rva": 32844264,
+      "semantic": [
+        "state"
+      ],
+      "bindingSuggestion": "number_setter",
+      "resolverSuggestion": null,
+      "isStatic": true,
+      "bindingBlocker": null,
+      "signature": "void Metadata__set_GrassQuality (float value, const MethodInfo* method);"
+    },
+    {
+      "label": "MemoryQualityState::set_MasterTextureLimitQuality",
+      "image": "Assembly-CSharp.dll",
+      "rva": 32845280,
+      "semantic": [
+        "state"
+      ],
+      "bindingSuggestion": "number_setter",
+      "resolverSuggestion": null,
+      "isStatic": true,
+      "bindingBlocker": null,
+      "signature": "void Metadata__set_MasterTextureLimitQuality (int32_t value, const MethodInfo* method);"
+    },
+    {
+      "label": "MemoryQualityState::set_RenderTextureQuality",
+      "image": "Assembly-CSharp.dll",
+      "rva": 32843996,
+      "semantic": [
+        "state"
+      ],
+      "bindingSuggestion": "number_setter",
+      "resolverSuggestion": null,
+      "isStatic": true,
+      "bindingBlocker": null,
+      "signature": "void Metadata__set_RenderTextureQuality (float value, const MethodInfo* method);"
+    },
+    {
+      "label": "MemoryQualityState::set_ResolutionQuality",
+      "image": "Assembly-CSharp.dll",
+      "rva": 32845516,
+      "semantic": [
+        "state"
+      ],
+      "bindingSuggestion": "number_setter",
+      "resolverSuggestion": null,
+      "isStatic": true,
+      "bindingBlocker": null,
+      "signature": "void Metadata__set_ResolutionQuality (int32_t value, const MethodInfo* method);"
+    },
+    {
+      "label": "MemoryQualityState::set_ShadowMapQuality",
+      "image": "Assembly-CSharp.dll",
+      "rva": 32845068,
+      "semantic": [
+        "state"
+      ],
+      "bindingSuggestion": "number_setter",
+      "resolverSuggestion": null,
+      "isStatic": true,
+      "bindingBlocker": null,
+      "signature": "void Metadata__set_ShadowMapQuality (int32_t value, const MethodInfo* method);"
+    },
+    {
+      "label": "MemoryQualityState::set_StreamingMemoryBudget",
+      "image": "Assembly-CSharp.dll",
+      "rva": 32845660,
+      "semantic": [
+        "state"
+      ],
+      "bindingSuggestion": "number_setter",
+      "resolverSuggestion": null,
+      "isStatic": true,
+      "bindingBlocker": null,
+      "signature": "void Metadata__set_StreamingMemoryBudget (int32_t value, const MethodInfo* method);"
+    },
+    {
+      "label": "MemoryQualityState::set_StreamingMipmaps",
+      "image": "Assembly-CSharp.dll",
+      "rva": 32845804,
+      "semantic": [
+        "state"
+      ],
+      "bindingSuggestion": "bool_setter",
+      "resolverSuggestion": null,
+      "isStatic": true,
+      "bindingBlocker": null,
+      "signature": "void Metadata__set_StreamingMipmaps (bool value, const MethodInfo* method);"
+    },
+    {
+      "label": "MemoryQualityState::set_WaterQuality",
+      "image": "Assembly-CSharp.dll",
+      "rva": 32844800,
+      "semantic": [
+        "state"
+      ],
+      "bindingSuggestion": "number_setter",
+      "resolverSuggestion": null,
+      "isStatic": true,
+      "bindingBlocker": null,
+      "signature": "void Metadata__set_WaterQuality (float value, const MethodInfo* method);"
+    },
+    {
+      "label": "UWALocal.WrapperTool::TryGetSavedIP",
+      "image": "UWAWrapper_Android.dll",
+      "rva": 101666308,
+      "semantic": [],
+      "bindingSuggestion": null,
+      "resolverSuggestion": "out_ptr_bool",
+      "isStatic": true,
+      "bindingBlocker": null,
+      "signature": "bool Metadata__TryGetSavedIP (void** savedIP, const MethodInfo* method);"
+    },
+    {
+      "label": "AutoScrollState::Reset",
+      "image": "FancyScrollView.dll",
+      "rva": 49074076,
+      "semantic": [
+        "state"
+      ],
+      "bindingSuggestion": "action",
+      "resolverSuggestion": null,
+      "isStatic": false,
+      "bindingBlocker": "instance-method-needs-confirmed-instance-resolver",
+      "signature": "void Metadata__Reset (void* __this, const MethodInfo* method);"
+    },
+    {
+      "label": "BattleFxHelper::SetFrozenState",
+      "image": "Assembly-CSharp.dll",
+      "rva": 40042024,
+      "semantic": [
+        "state"
+      ],
+      "bindingSuggestion": "bool_setter",
+      "resolverSuggestion": null,
+      "isStatic": false,
+      "bindingBlocker": "instance-method-needs-confirmed-instance-resolver",
+      "signature": "void Metadata__SetFrozenState (void* __this, bool frozenState, const MethodInfo* method);"
+    },
+    {
+      "label": "BattleFxHelper::SetFxSpeed",
+      "image": "Assembly-CSharp.dll",
+      "rva": 40043652,
+      "semantic": [
+        "movement"
+      ],
+      "bindingSuggestion": "number_setter",
+      "resolverSuggestion": null,
+      "isStatic": false,
+      "bindingBlocker": "instance-method-needs-confirmed-instance-resolver",
+      "signature": "void Metadata__SetFxSpeed (void* __this, float speed, const MethodInfo* method);"
+    },
+    {
+      "label": "Cinemachine.AxisState::Reset",
+      "image": "Cinemachine.dll",
+      "rva": 48066944,
+      "semantic": [
+        "state"
+      ],
+      "bindingSuggestion": "action",
+      "resolverSuggestion": null,
+      "isStatic": false,
+      "bindingBlocker": "instance-method-needs-confirmed-instance-resolver",
+      "signature": "void Metadata__Reset (void* __this, const MethodInfo* method);"
+    },
+    {
+      "label": "Cinemachine.AxisState::set_HasRecentering",
+      "image": "Cinemachine.dll",
+      "rva": 48095708,
+      "semantic": [
+        "state"
+      ],
+      "bindingSuggestion": "bool_setter",
+      "resolverSuggestion": null,
+      "isStatic": false,
+      "bindingBlocker": "instance-method-needs-confirmed-instance-resolver",
+      "signature": "void Metadata__set_HasRecentering (void* __this, bool value, const MethodInfo* method);"
+    },
+    {
+      "label": "Cinemachine.AxisState::set_ValueRangeLocked",
+      "image": "Cinemachine.dll",
+      "rva": 48095688,
+      "semantic": [
+        "state"
+      ],
+      "bindingSuggestion": "bool_setter",
+      "resolverSuggestion": null,
+      "isStatic": false,
+      "bindingBlocker": "instance-method-needs-confirmed-instance-resolver",
+      "signature": "void Metadata__set_ValueRangeLocked (void* __this, bool value, const MethodInfo* method);"
+    },
+    {
+      "label": "Cinemachine.CameraState::set_NumCustomBlendables",
+      "image": "Cinemachine.dll",
+      "rva": 48097300,
+      "semantic": [
+        "state"
+      ],
+      "bindingSuggestion": "number_setter",
+      "resolverSuggestion": null,
+      "isStatic": false,
+      "bindingBlocker": "instance-method-needs-confirmed-instance-resolver",
+      "signature": "void Metadata__set_NumCustomBlendables (void* __this, int32_t value, const MethodInfo* method);"
+    },
+    {
+      "label": "Cinemachine.CinemachineFreeLook::set_PreviousStateIsValid",
+      "image": "Cinemachine.dll",
+      "rva": 47969088,
+      "semantic": [
+        "state"
+      ],
+      "bindingSuggestion": "bool_setter",
+      "resolverSuggestion": null,
+      "isStatic": false,
+      "bindingBlocker": "instance-method-needs-confirmed-instance-resolver",
+      "signature": "void Metadata__set_PreviousStateIsValid (void* __this, bool value, const MethodInfo* method);"
+    },
+    {
+      "label": "Cinemachine.CinemachineVirtualCameraBase::set_PreviousStateIsValid",
+      "image": "Cinemachine.dll",
+      "rva": 48128564,
+      "semantic": [
+        "state"
+      ],
+      "bindingSuggestion": "bool_setter",
+      "resolverSuggestion": null,
+      "isStatic": false,
+      "bindingBlocker": "instance-method-needs-confirmed-instance-resolver",
+      "signature": "void Metadata__set_PreviousStateIsValid (void* __this, bool value, const MethodInfo* method);"
+    },
+    {
+      "label": "Coffee.UIExtensions.UIEffect::set_toneLevel",
+      "image": "Assembly-CSharp.dll",
+      "rva": 31696496,
+      "semantic": [
+        "progression"
+      ],
+      "bindingSuggestion": "number_setter",
+      "resolverSuggestion": null,
+      "isStatic": false,
+      "bindingBlocker": "instance-method-needs-confirmed-instance-resolver",
+      "signature": "void Metadata__set_toneLevel (void* __this, float value, const MethodInfo* method);"
+    },
+    {
+      "label": "Coffee.UIExtensions.UIEffectCapturedImage::set_toneLevel",
+      "image": "Assembly-CSharp.dll",
+      "rva": 31700260,
+      "semantic": [
+        "progression"
+      ],
+      "bindingSuggestion": "number_setter",
+      "resolverSuggestion": null,
+      "isStatic": false,
+      "bindingBlocker": "instance-method-needs-confirmed-instance-resolver",
+      "signature": "void Metadata__set_toneLevel (void* __this, float value, const MethodInfo* method);"
+    },
+    {
+      "label": "CriWare.CriAtomEx3dListener::SetDirectionFocusLevel",
+      "image": "CriMw.CriWare.Runtime.dll",
+      "rva": 48352892,
+      "semantic": [
+        "progression"
+      ],
+      "bindingSuggestion": "number_setter",
+      "resolverSuggestion": null,
+      "isStatic": false,
+      "bindingBlocker": "instance-method-needs-confirmed-instance-resolver",
+      "signature": "void Metadata__SetDirectionFocusLevel (void* __this, float directionFocusLevel, const MethodInfo* method);"
+    },
+    {
+      "label": "CriWare.CriAtomEx3dListener::SetDistanceFocusLevel",
+      "image": "CriMw.CriWare.Runtime.dll",
+      "rva": 48352664,
+      "semantic": [
+        "progression"
+      ],
+      "bindingSuggestion": "number_setter",
+      "resolverSuggestion": null,
+      "isStatic": false,
+      "bindingBlocker": "instance-method-needs-confirmed-instance-resolver",
+      "signature": "void Metadata__SetDistanceFocusLevel (void* __this, float distanceFocusLevel, const MethodInfo* method);"
+    },
+    {
+      "label": "CriWare.CriAtomExPlayer::SetEnvelopeAttackTime",
+      "image": "CriMw.CriWare.Runtime.dll",
+      "rva": 48421928,
+      "semantic": [
+        "damage"
+      ],
+      "bindingSuggestion": "number_setter",
+      "resolverSuggestion": null,
+      "isStatic": false,
+      "bindingBlocker": "instance-method-needs-confirmed-instance-resolver",
+      "signature": "void Metadata__SetEnvelopeAttackTime (void* __this, float time, const MethodInfo* method);"
+    },
+    {
+      "label": "CriWare.CriAtomExPlayer::SetEnvelopeSustainLevel",
+      "image": "CriMw.CriWare.Runtime.dll",
+      "rva": 48422360,
+      "semantic": [
+        "progression"
+      ],
+      "bindingSuggestion": "number_setter",
+      "resolverSuggestion": null,
+      "isStatic": false,
+      "bindingBlocker": "instance-method-needs-confirmed-instance-resolver",
+      "signature": "void Metadata__SetEnvelopeSustainLevel (void* __this, float level, const MethodInfo* method);"
+    },
+    {
+      "label": "CriWare.CriAtomSourceBase::set_freezeOrientation",
+      "image": "CriMw.CriWare.Runtime.dll",
+      "rva": 48323692,
+      "semantic": [
+        "state"
+      ],
+      "bindingSuggestion": "bool_setter",
+      "resolverSuggestion": null,
+      "isStatic": false,
+      "bindingBlocker": "instance-method-needs-confirmed-instance-resolver",
+      "signature": "void Metadata__set_freezeOrientation (void* __this, bool value, const MethodInfo* method);"
+    },
+    {
+      "label": "CriWare.CriMana.Detail.RendererResource::SetUiRenderMode",
+      "image": "CriMw.CriWare.Runtime.dll",
+      "rva": 48569260,
+      "semantic": [
+        "state"
+      ],
+      "bindingSuggestion": "bool_setter",
+      "resolverSuggestion": null,
+      "isStatic": false,
+      "bindingBlocker": "instance-method-needs-confirmed-instance-resolver",
+      "signature": "void Metadata__SetUiRenderMode (void* __this, bool flag, const MethodInfo* method);"
+    },
+    {
+      "label": "CriWare.CriMana.Player::set_additiveMode",
+      "image": "CriMw.CriWare.Runtime.dll",
+      "rva": 48533356,
+      "semantic": [
+        "state"
+      ],
+      "bindingSuggestion": "bool_setter",
+      "resolverSuggestion": null,
+      "isStatic": false,
+      "bindingBlocker": "instance-method-needs-confirmed-instance-resolver",
+      "signature": "void Metadata__set_additiveMode (void* __this, bool value, const MethodInfo* method);"
+    },
+    {
+      "label": "CriWare.CriMana.Player::set_uiRenderMode",
+      "image": "CriMw.CriWare.Runtime.dll",
+      "rva": 48533412,
+      "semantic": [
+        "state"
+      ],
+      "bindingSuggestion": "bool_setter",
+      "resolverSuggestion": null,
+      "isStatic": false,
+      "bindingBlocker": "instance-method-needs-confirmed-instance-resolver",
+      "signature": "void Metadata__set_uiRenderMode (void* __this, bool value, const MethodInfo* method);"
+    },
+    {
+      "label": "CriWare.CriMana.Player::SetSpeed",
+      "image": "CriMw.CriWare.Runtime.dll",
+      "rva": 48540220,
+      "semantic": [
+        "movement"
+      ],
+      "bindingSuggestion": "number_setter",
+      "resolverSuggestion": null,
+      "isStatic": false,
+      "bindingBlocker": "instance-method-needs-confirmed-instance-resolver",
+      "signature": "void Metadata__SetSpeed (void* __this, float speed, const MethodInfo* method);"
+    },
+    {
+      "label": "CriWare.CriManaMovieMaterial::set_additiveMode",
+      "image": "CriMw.CriWare.Runtime.dll",
+      "rva": 48473884,
+      "semantic": [
+        "state"
+      ],
+      "bindingSuggestion": "bool_setter",
+      "resolverSuggestion": null,
+      "isStatic": false,
+      "bindingBlocker": "instance-method-needs-confirmed-instance-resolver",
+      "signature": "void Metadata__set_additiveMode (void* __this, bool value, const MethodInfo* method);"
+    },
+    {
+      "label": "CriWare.CriManaMovieMaterial::set_uiRenderMode",
+      "image": "CriMw.CriWare.Runtime.dll",
+      "rva": 48470844,
+      "semantic": [
+        "state"
+      ],
+      "bindingSuggestion": "bool_setter",
+      "resolverSuggestion": null,
+      "isStatic": false,
+      "bindingBlocker": "instance-method-needs-confirmed-instance-resolver",
+      "signature": "void Metadata__set_uiRenderMode (void* __this, bool value, const MethodInfo* method);"
+    },
+    {
+      "label": "CriwareControl::SetCriMovieSpeed",
+      "image": "Assembly-CSharp-firstpass.dll",
+      "rva": 27844452,
+      "semantic": [
+        "movement"
+      ],
+      "bindingSuggestion": "number_setter",
+      "resolverSuggestion": null,
+      "isStatic": false,
+      "bindingBlocker": "instance-method-needs-confirmed-instance-resolver",
+      "signature": "void Metadata__SetCriMovieSpeed (void* __this, float speed, const MethodInfo* method);"
+    },
+    {
+      "label": "DebugDrawJob::Execute",
+      "image": "AstarPathfindingProject.dll",
+      "rva": 47055600,
+      "semantic": [
+        "cheat"
+      ],
+      "bindingSuggestion": "action",
+      "resolverSuggestion": null,
+      "isStatic": false,
+      "bindingBlocker": "instance-method-needs-confirmed-instance-resolver",
+      "signature": "void Metadata__Execute (void* __this, const MethodInfo* method);"
+    },
+    {
+      "label": "debugIk::ApplyLookAtIk",
+      "image": "Assembly-CSharp-firstpass.dll",
+      "rva": 27887164,
+      "semantic": [
+        "cheat"
+      ],
+      "bindingSuggestion": "action",
+      "resolverSuggestion": null,
+      "isStatic": false,
+      "bindingBlocker": "instance-method-needs-confirmed-instance-resolver",
+      "signature": "void Metadata__ApplyLookAtIk (void* __this, const MethodInfo* method);"
+    },
+    {
+      "label": "debugIk::CloseIk",
+      "image": "Assembly-CSharp-firstpass.dll",
+      "rva": 27887648,
+      "semantic": [
+        "cheat"
+      ],
+      "bindingSuggestion": "action",
+      "resolverSuggestion": null,
+      "isStatic": false,
+      "bindingBlocker": "instance-method-needs-confirmed-instance-resolver",
+      "signature": "void Metadata__CloseIk (void* __this, const MethodInfo* method);"
+    }
+  ],
+  "note": "Structural metadata + CodeRegistration/Il2CppCodeGenModule validation only; runtime behavior is not asserted."
+}

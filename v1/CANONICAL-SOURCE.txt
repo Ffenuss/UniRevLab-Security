@@ -1,0 +1,3 @@
+ModKit v1 canonical source baseline
+Materialized from the exact 0.9.0-dev40 reconstruction without behavioral changes.
+Historical .devXX transports are retained only as provenance and are not v1 build inputs.

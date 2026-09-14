@@ -1,0 +1,520 @@
+{
+  "semanticVerification": {
+    "schema": "modkit-semantic-control-verification-1.0",
+    "method": "metadata-callable + uniquely-attributed ARM64 direct-BL managed context",
+    "threshold": 0.68,
+    "candidates": 46,
+    "verified": 16,
+    "correlatedReview": 2,
+    "review": 28,
+    "semantics": "Static semantic correlation only; it does not prove runtime behavior or game effect."
+  },
+  "verified": [
+    {
+      "value": "BattleFxHelper::SetFrozenState",
+      "rva": 40042024,
+      "confidence": 0.99,
+      "tags": [
+        "state"
+      ],
+      "evidence": [
+        {
+          "kind": "metadata-callable",
+          "label": "BattleFxHelper::SetFrozenState",
+          "image": "Assembly-CSharp.dll",
+          "rva": 40042024,
+          "rationale": "unique CodeRegistration RVA with managed call contract"
+        },
+        {
+          "kind": "managed-incoming-direct-call",
+          "peer": "BattleFxHelperWrap::SetFrozenState",
+          "peerImage": "Assembly-CSharp.dll",
+          "callRva": 33882964,
+          "targetRva": 40042024,
+          "sameOwner": false,
+          "sharedTags": [
+            "state"
+          ],
+          "rationale": "unique managed interval + exact ARM64 direct BL"
+        },
+        {
+          "kind": "managed-incoming-direct-call",
+          "peer": "BattleFxHelper::SetGlobalFrozenState",
+          "peerImage": "Assembly-CSharp.dll",
+          "callRva": 40041928,
+          "targetRva": 40042024,
+          "sameOwner": true,
+          "sharedTags": [
+            "state"
+          ],
+          "rationale": "unique managed interval + exact ARM64 direct BL"
+        }
+      ]
+    },
+    {
+      "value": "BattleFxHelper::SetFxSpeed",
+      "rva": 40043652,
+      "confidence": 0.7,
+      "tags": [
+        "movement"
+      ],
+      "evidence": [
+        {
+          "kind": "metadata-callable",
+          "label": "BattleFxHelper::SetFxSpeed",
+          "image": "Assembly-CSharp.dll",
+          "rva": 40043652,
+          "rationale": "unique CodeRegistration RVA with managed call contract"
+        },
+        {
+          "kind": "managed-incoming-direct-call",
+          "peer": "BattleFxHelperWrap::SetFxSpeed",
+          "peerImage": "Assembly-CSharp.dll",
+          "callRva": 33883384,
+          "targetRva": 40043652,
+          "sameOwner": false,
+          "sharedTags": [
+            "movement"
+          ],
+          "rationale": "unique managed interval + exact ARM64 direct BL"
+        }
+      ]
+    },
+    {
+      "value": "BattleFxHelper::SetGlobalFrozenState",
+      "rva": 40041652,
+      "confidence": 0.99,
+      "tags": [
+        "state"
+      ],
+      "evidence": [
+        {
+          "kind": "metadata-callable",
+          "label": "BattleFxHelper::SetGlobalFrozenState",
+          "image": "Assembly-CSharp.dll",
+          "rva": 40041652,
+          "rationale": "unique CodeRegistration RVA with managed call contract"
+        },
+        {
+          "kind": "managed-incoming-direct-call",
+          "peer": "BattleFxHelperWrap::SetGlobalFrozenState",
+          "peerImage": "Assembly-CSharp.dll",
+          "callRva": 33881200,
+          "targetRva": 40041652,
+          "sameOwner": false,
+          "sharedTags": [
+            "state"
+          ],
+          "rationale": "unique managed interval + exact ARM64 direct BL"
+        },
+        {
+          "kind": "managed-outgoing-direct-call",
+          "peer": "BattleFxHelper::SetFrozenState",
+          "peerImage": "Assembly-CSharp.dll",
+          "callRva": 40041928,
+          "targetRva": 40042024,
+          "sameOwner": true,
+          "sharedTags": [
+            "state"
+          ],
+          "rationale": "unique managed interval + exact ARM64 direct BL"
+        }
+      ]
+    },
+    {
+      "value": "DeviceQualityState::Reset",
+      "rva": 32843620,
+      "confidence": 0.7,
+      "tags": [
+        "state"
+      ],
+      "evidence": [
+        {
+          "kind": "metadata-callable",
+          "label": "DeviceQualityState::Reset",
+          "image": "Assembly-CSharp.dll",
+          "rva": 32843620,
+          "rationale": "unique CodeRegistration RVA with managed call contract"
+        },
+        {
+          "kind": "managed-incoming-direct-call",
+          "peer": "DeviceQualityStateWrap::Reset",
+          "peerImage": "Assembly-CSharp.dll",
+          "callRva": 35475804,
+          "targetRva": 32843620,
+          "sameOwner": false,
+          "sharedTags": [
+            "state"
+          ],
+          "rationale": "unique managed interval + exact ARM64 direct BL"
+        }
+      ]
+    },
+    {
+      "value": "MemoryQualityState::Reset",
+      "rva": 32845952,
+      "confidence": 0.7,
+      "tags": [
+        "state"
+      ],
+      "evidence": [
+        {
+          "kind": "metadata-callable",
+          "label": "MemoryQualityState::Reset",
+          "image": "Assembly-CSharp.dll",
+          "rva": 32845952,
+          "rationale": "unique CodeRegistration RVA with managed call contract"
+        },
+        {
+          "kind": "managed-incoming-direct-call",
+          "peer": "MemoryQualityStateWrap::Reset",
+          "peerImage": "Assembly-CSharp.dll",
+          "callRva": 39447196,
+          "targetRva": 32845952,
+          "sameOwner": false,
+          "sharedTags": [
+            "state"
+          ],
+          "rationale": "unique managed interval + exact ARM64 direct BL"
+        }
+      ]
+    },
+    {
+      "value": "MemoryQualityState::set_AntiAliasingQuality",
+      "rva": 32845372,
+      "confidence": 0.7,
+      "tags": [
+        "state"
+      ],
+      "evidence": [
+        {
+          "kind": "metadata-callable",
+          "label": "MemoryQualityState::set_AntiAliasingQuality",
+          "image": "Assembly-CSharp.dll",
+          "rva": 32845372,
+          "rationale": "unique CodeRegistration RVA with managed call contract"
+        },
+        {
+          "kind": "managed-incoming-direct-call",
+          "peer": "MemoryQualityStateWrap::set_AntiAliasingQuality",
+          "peerImage": "Assembly-CSharp.dll",
+          "callRva": 39452212,
+          "targetRva": 32845372,
+          "sameOwner": false,
+          "sharedTags": [
+            "state"
+          ],
+          "rationale": "unique managed interval + exact ARM64 direct BL"
+        }
+      ]
+    },
+    {
+      "value": "MemoryQualityState::set_CharacterQuality",
+      "rva": 32844532,
+      "confidence": 0.7,
+      "tags": [
+        "state"
+      ],
+      "evidence": [
+        {
+          "kind": "metadata-callable",
+          "label": "MemoryQualityState::set_CharacterQuality",
+          "image": "Assembly-CSharp.dll",
+          "rva": 32844532,
+          "rationale": "unique CodeRegistration RVA with managed call contract"
+        },
+        {
+          "kind": "managed-incoming-direct-call",
+          "peer": "MemoryQualityStateWrap::set_CharacterQuality",
+          "peerImage": "Assembly-CSharp.dll",
+          "callRva": 39451024,
+          "targetRva": 32844532,
+          "sameOwner": false,
+          "sharedTags": [
+            "state"
+          ],
+          "rationale": "unique managed interval + exact ARM64 direct BL"
+        }
+      ]
+    },
+    {
+      "value": "MemoryQualityState::set_GrassQuality",
+      "rva": 32844264,
+      "confidence": 0.7,
+      "tags": [
+        "state"
+      ],
+      "evidence": [
+        {
+          "kind": "metadata-callable",
+          "label": "MemoryQualityState::set_GrassQuality",
+          "image": "Assembly-CSharp.dll",
+          "rva": 32844264,
+          "rationale": "unique CodeRegistration RVA with managed call contract"
+        },
+        {
+          "kind": "managed-incoming-direct-call",
+          "peer": "MemoryQualityStateWrap::set_GrassQuality",
+          "peerImage": "Assembly-CSharp.dll",
+          "callRva": 39450720,
+          "targetRva": 32844264,
+          "sameOwner": false,
+          "sharedTags": [
+            "state"
+          ],
+          "rationale": "unique managed interval + exact ARM64 direct BL"
+        }
+      ]
+    },
+    {
+      "value": "MemoryQualityState::set_MasterTextureLimitQuality",
+      "rva": 32845280,
+      "confidence": 0.7,
+      "tags": [
+        "state"
+      ],
+      "evidence": [
+        {
+          "kind": "metadata-callable",
+          "label": "MemoryQualityState::set_MasterTextureLimitQuality",
+          "image": "Assembly-CSharp.dll",
+          "rva": 32845280,
+          "rationale": "unique CodeRegistration RVA with managed call contract"
+        },
+        {
+          "kind": "managed-incoming-direct-call",
+          "peer": "MemoryQualityStateWrap::set_MasterTextureLimitQuality",
+          "peerImage": "Assembly-CSharp.dll",
+          "callRva": 39451920,
+          "targetRva": 32845280,
+          "sameOwner": false,
+          "sharedTags": [
+            "state"
+          ],
+          "rationale": "unique managed interval + exact ARM64 direct BL"
+        }
+      ]
+    },
+    {
+      "value": "MemoryQualityState::set_RenderTextureQuality",
+      "rva": 32843996,
+      "confidence": 0.7,
+      "tags": [
+        "state"
+      ],
+      "evidence": [
+        {
+          "kind": "metadata-callable",
+          "label": "MemoryQualityState::set_RenderTextureQuality",
+          "image": "Assembly-CSharp.dll",
+          "rva": 32843996,
+          "rationale": "unique CodeRegistration RVA with managed call contract"
+        },
+        {
+          "kind": "managed-incoming-direct-call",
+          "peer": "MemoryQualityStateWrap::set_RenderTextureQuality",
+          "peerImage": "Assembly-CSharp.dll",
+          "callRva": 39450416,
+          "targetRva": 32843996,
+          "sameOwner": false,
+          "sharedTags": [
+            "state"
+          ],
+          "rationale": "unique managed interval + exact ARM64 direct BL"
+        }
+      ]
+    },
+    {
+      "value": "MemoryQualityState::set_ResolutionQuality",
+      "rva": 32845516,
+      "confidence": 0.7,
+      "tags": [
+        "state"
+      ],
+      "evidence": [
+        {
+          "kind": "metadata-callable",
+          "label": "MemoryQualityState::set_ResolutionQuality",
+          "image": "Assembly-CSharp.dll",
+          "rva": 32845516,
+          "rationale": "unique CodeRegistration RVA with managed call contract"
+        },
+        {
+          "kind": "managed-incoming-direct-call",
+          "peer": "MemoryQualityStateWrap::set_ResolutionQuality",
+          "peerImage": "Assembly-CSharp.dll",
+          "callRva": 39452504,
+          "targetRva": 32845516,
+          "sameOwner": false,
+          "sharedTags": [
+            "state"
+          ],
+          "rationale": "unique managed interval + exact ARM64 direct BL"
+        }
+      ]
+    },
+    {
+      "value": "MemoryQualityState::set_ShadowMapQuality",
+      "rva": 32845068,
+      "confidence": 0.7,
+      "tags": [
+        "state"
+      ],
+      "evidence": [
+        {
+          "kind": "metadata-callable",
+          "label": "MemoryQualityState::set_ShadowMapQuality",
+          "image": "Assembly-CSharp.dll",
+          "rva": 32845068,
+          "rationale": "unique CodeRegistration RVA with managed call contract"
+        },
+        {
+          "kind": "managed-incoming-direct-call",
+          "peer": "MemoryQualityStateWrap::set_ShadowMapQuality",
+          "peerImage": "Assembly-CSharp.dll",
+          "callRva": 39451628,
+          "targetRva": 32845068,
+          "sameOwner": false,
+          "sharedTags": [
+            "state"
+          ],
+          "rationale": "unique managed interval + exact ARM64 direct BL"
+        }
+      ]
+    },
+    {
+      "value": "MemoryQualityState::set_StreamingMemoryBudget",
+      "rva": 32845660,
+      "confidence": 0.7,
+      "tags": [
+        "state"
+      ],
+      "evidence": [
+        {
+          "kind": "metadata-callable",
+          "label": "MemoryQualityState::set_StreamingMemoryBudget",
+          "image": "Assembly-CSharp.dll",
+          "rva": 32845660,
+          "rationale": "unique CodeRegistration RVA with managed call contract"
+        },
+        {
+          "kind": "managed-incoming-direct-call",
+          "peer": "MemoryQualityStateWrap::set_StreamingMemoryBudget",
+          "peerImage": "Assembly-CSharp.dll",
+          "callRva": 39452796,
+          "targetRva": 32845660,
+          "sameOwner": false,
+          "sharedTags": [
+            "state"
+          ],
+          "rationale": "unique managed interval + exact ARM64 direct BL"
+        }
+      ]
+    },
+    {
+      "value": "MemoryQualityState::set_StreamingMipmaps",
+      "rva": 32845804,
+      "confidence": 0.7,
+      "tags": [
+        "state"
+      ],
+      "evidence": [
+        {
+          "kind": "metadata-callable",
+          "label": "MemoryQualityState::set_StreamingMipmaps",
+          "image": "Assembly-CSharp.dll",
+          "rva": 32845804,
+          "rationale": "unique CodeRegistration RVA with managed call contract"
+        },
+        {
+          "kind": "managed-incoming-direct-call",
+          "peer": "MemoryQualityStateWrap::set_StreamingMipmaps",
+          "peerImage": "Assembly-CSharp.dll",
+          "callRva": 39453088,
+          "targetRva": 32845804,
+          "sameOwner": false,
+          "sharedTags": [
+            "state"
+          ],
+          "rationale": "unique managed interval + exact ARM64 direct BL"
+        }
+      ]
+    },
+    {
+      "value": "MemoryQualityState::set_WaterQuality",
+      "rva": 32844800,
+      "confidence": 0.7,
+      "tags": [
+        "state"
+      ],
+      "evidence": [
+        {
+          "kind": "metadata-callable",
+          "label": "MemoryQualityState::set_WaterQuality",
+          "image": "Assembly-CSharp.dll",
+          "rva": 32844800,
+          "rationale": "unique CodeRegistration RVA with managed call contract"
+        },
+        {
+          "kind": "managed-incoming-direct-call",
+          "peer": "MemoryQualityStateWrap::set_WaterQuality",
+          "peerImage": "Assembly-CSharp.dll",
+          "callRva": 39451328,
+          "targetRva": 32844800,
+          "sameOwner": false,
+          "sharedTags": [
+            "state"
+          ],
+          "rationale": "unique managed interval + exact ARM64 direct BL"
+        }
+      ]
+    },
+    {
+      "value": "IGame.QualityManager::set_qualityLevel",
+      "rva": 30508828,
+      "confidence": 0.8,
+      "tags": [
+        "progression"
+      ],
+      "evidence": [
+        {
+          "kind": "metadata-callable",
+          "label": "IGame.QualityManager::set_qualityLevel",
+          "image": "Assembly-CSharp.dll",
+          "rva": 30508828,
+          "rationale": "unique CodeRegistration RVA with managed call contract"
+        },
+        {
+          "kind": "managed-incoming-direct-call",
+          "peer": "IGame.QualityManager::SetQualityLevel_",
+          "peerImage": "Assembly-CSharp.dll",
+          "callRva": 30512912,
+          "targetRva": 30508828,
+          "sameOwner": true,
+          "sharedTags": [
+            "progression"
+          ],
+          "rationale": "unique managed interval + exact ARM64 direct BL"
+        }
+      ]
+    }
+  ],
+  "schema": "modkit-dev14-real-semantic-validation-1",
+  "inputs": {
+    "metadataVersion": 29,
+    "metadataMethods": 167426,
+    "resolvedUnique": 144135,
+    "targetSample": 50,
+    "sourceApkSha256": "6c374c4a4a800752874745b24bf902831262e0287aabfeb910d1a0654c6d95b1",
+    "libil2cppSha256": "912abc74b676281c0d6f5c7286ea00e419cace234504a1a165a547f25baf003a"
+  },
+  "xrefValidation": {
+    "targetSample": 50,
+    "directBlRefs": 35,
+    "exactMetadataCallerAttribution": 35,
+    "directBlHostScanSeconds": 1.86,
+    "metadataCallerAttributionSeconds": 14.99,
+    "note": "Host benchmark only; device performance will differ."
+  },
+  "note": "Static semantic/xref validation only. No target code was executed and gameplay effect is not asserted."
+}

@@ -1,0 +1,71 @@
+{
+  "module": "libil2cpp.so",
+  "abi": "arm64-v8a",
+  "arch": "arm64",
+  "applied_by": "modkit::patch_memory at runtime, or `modkit apply` offline",
+  "patches": [
+    {
+      "feature": "infinite_ammo.Weapon.get_Ammo",
+      "rva": "0x1210",
+      "length": 8,
+      "bytes": "e07c8052c0035fd6",
+      "note": "return 999 (System.Int32)"
+    },
+    {
+      "feature": "no_cooldown.Weapon.GetCooldown",
+      "rva": "0x1240",
+      "length": 8,
+      "bytes": "00008052c0035fd6",
+      "note": "return 0 (System.Single)"
+    },
+    {
+      "feature": "one_hit_kill.Weapon.GetDamage",
+      "rva": "0x1230",
+      "length": 12,
+      "bytes": "e0d390522000a072c0035fd6",
+      "note": "return 99999 (System.Single)"
+    },
+    {
+      "feature": "economy.GameOptions.coins.lock",
+      "rva": "0x1400",
+      "length": 12,
+      "bytes": "e03f99524073a772c0035fd6",
+      "note": "return 999999999 (System.Int32)"
+    },
+    {
+      "feature": "economy.PlayerSave.gems.lock",
+      "rva": "0x1060",
+      "length": 12,
+      "bytes": "e03f99524073a772c0035fd6",
+      "note": "return 999999999 (System.Int32)"
+    },
+    {
+      "feature": "economy.PlayerSave.gold.lock",
+      "rva": "0x1040",
+      "length": 12,
+      "bytes": "e03f99524073a772c0035fd6",
+      "note": "return 999999999 (System.Int32)"
+    },
+    {
+      "feature": "movement.PlayerController.moveSpeed.lock",
+      "rva": "0x1120",
+      "length": 8,
+      "bytes": "e07c8052c0035fd6",
+      "note": "return 999 (System.Single)"
+    },
+    {
+      "feature": "progress.PlayerSave.level.lock",
+      "rva": "0x1080",
+      "length": 12,
+      "bytes": "e03f99524073a772c0035fd6",
+      "note": "return 999999999 (System.Int32)"
+    },
+    {
+      "feature": "god_mode.PlayerController.get_IsGodMode",
+      "rva": "0x1150",
+      "length": 8,
+      "bytes": "20008052c0035fd6",
+      "note": "return 1 (System.Boolean)"
+    }
+  ]
+}

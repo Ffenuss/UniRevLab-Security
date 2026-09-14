@@ -1,0 +1,4 @@
+// top-level: nothing but the plugin classpath, the module is self-contained
+plugins {
+    id 'com.android.application' version '8.5.2' apply false
+}

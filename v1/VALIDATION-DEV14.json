@@ -1,0 +1,36 @@
+{
+  "schema": "modkit-dev14-semantic-xref-validation-1",
+  "version": "0.9.0-dev14-semantic-xref",
+  "regression": {
+    "pytestPassed": 229,
+    "selftest": "ok",
+    "runtimeCheck": "builtin-runtime-v2 clang++ strict"
+  },
+  "realValidation": {
+    "schema": "modkit-semantic-control-verification-1.0",
+    "method": "metadata-callable + uniquely-attributed ARM64 direct-BL managed context",
+    "threshold": 0.68,
+    "candidates": 46,
+    "verified": 16,
+    "correlatedReview": 2,
+    "review": 28,
+    "semantics": "Static semantic correlation only; it does not prove runtime behavior or game effect."
+  },
+  "xrefValidation": {
+    "targetSample": 50,
+    "directBlRefs": 35,
+    "exactMetadataCallerAttribution": 35,
+    "directBlHostScanSeconds": 1.86,
+    "metadataCallerAttributionSeconds": 14.99,
+    "note": "Host benchmark only; device performance will differ."
+  },
+  "failClosed": [
+    "ambiguous managed caller interval",
+    "framework-only target",
+    "no semantic affinity",
+    "unsupported ABI/signature",
+    "unverified instance resolver",
+    "ELF preflight block"
+  ],
+  "note": "Static evidence only; runtime gameplay behavior is not claimed."
+}

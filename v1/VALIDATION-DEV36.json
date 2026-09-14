@@ -1,0 +1,27 @@
+{
+  "version": "0.9.0-dev36",
+  "versionCode": 41,
+  "tests": 334,
+  "backend": {
+    "dexJava": "JADX 1.5.6",
+    "smali": "JADX JavaClass.getSmali",
+    "resources": "JADX resources/AXML/ARSC",
+    "native": "existing ModKit ELF/HEX/ARM64 disassembly"
+  },
+  "focus": [
+    "apk-set-aware-decompiler",
+    "lazy-dex-to-java",
+    "smali-view",
+    "resource-preview",
+    "class-xrefs",
+    "bounded-cancellable-full-text-search",
+    "explicit-full-export"
+  ],
+  "invariants": {
+    "noInternetPermission": true,
+    "il2cppNotRequired": true,
+    "javaOutputIsNotClaimedRecompilable": true,
+    "nativeDisassemblyIsNotClaimedCDecompile": true,
+    "probeMenuFailClosedUnchanged": true
+  }
+}

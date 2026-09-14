@@ -1,0 +1,26 @@
+{
+  "version": "0.9.0-dev33",
+  "versionCode": 38,
+  "scope": "RE pipeline architecture, streaming APK-set, mmap ELF and content-addressed cache",
+  "checks": [
+    "typed RE report contract without breaking modkit-re-1.2",
+    "nested APK streaming via SpooledTemporaryFile",
+    "large ELF members use read-only mmap",
+    "external libil2cpp function correlation uses mmap",
+    "direct BL scan uses memoryview without executable-section copy",
+    "ADRP+ADD scan avoids whole-section instruction list",
+    "native library relation lookup indexed by artifact name",
+    "content-addressed generic RE correlation cache",
+    "cache is bounded and atomically written",
+    "runtime/probe truth is excluded from generic cache semantics",
+    "pipeline stage/merge helpers moved out of mobile engine"
+  ],
+  "securityInvariants": {
+    "menuFailClosed": true,
+    "staticIsNotRuntimeConfirmed": true,
+    "cacheDoesNotPromoteRuntimeTruth": true,
+    "externalReportSchemaBackwardCompatible": true,
+    "serverOrPaymentBypassAdded": false
+  },
+  "tests": 318
+}

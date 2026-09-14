@@ -1,0 +1,8 @@
+Rodroid Il2CppDumper 0.7.0
+Source: https://github.com/rodroidmods/il2cpp-dumper-rs
+Pinned source commit: 8bfb90229539833999e725c5cf6402a435b47f15
+License declared by the upstream Cargo package: MIT.
+
+The bundled Android executables are unmodified release builds for arm64-v8a and
+x86_64. ModKit invokes the dumper as a local subprocess and consumes dump.cs and
+script.json as the source of truth for subsequent analysis.

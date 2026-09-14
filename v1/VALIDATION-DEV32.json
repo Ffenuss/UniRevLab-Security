@@ -1,0 +1,32 @@
+{
+  "version": "0.9.0-dev32",
+  "versionCode": 37,
+  "scope": "Target profiles, application discovery, adaptive home UI",
+  "checks": [
+    "GAME/APPLICATION/HYBRID/UNKNOWN target profile",
+    "12-surface DEX trust-boundary classifier",
+    "CONFIRMED/REVIEW/NOT_FOUND_LOCAL application discovery semantics",
+    "server/platform/local/unknown trust boundary",
+    "local authority kept separate from vulnerability claims",
+    "Installed Scanner optional DEX trust scan across base/splits",
+    "Application Discovery available without IL2CPP pair",
+    "Target profile persisted into PackageTarget",
+    "adaptive App/Game/Hybrid search hints",
+    "Installed Apps icons and All/Games/Apps filters",
+    "structured progress stepper and percent extraction",
+    "Material 3 Day/Night theme",
+    "dark-palette compatibility for primary activities",
+    "Installed Apps uses RecyclerView + LinearLayoutManager",
+    "dedicated Discovery / Probe / Menu / Reports home navigation",
+    "main Home and Installed Scanner strings externalized to RU/EN resources",
+    "RU and EN string resource key sets match"
+  ],
+  "securityInvariants": {
+    "menuFailClosed": true,
+    "staticIsNotRuntimeConfirmed": true,
+    "notFoundLocalIsScoped": true,
+    "partialScanIsNotCompleteEvidence": true,
+    "serverOrPaymentBypassAdded": false
+  },
+  "tests": 312
+}

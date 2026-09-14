@@ -1,0 +1,10 @@
+{
+  "version": "0.9.0-dev35",
+  "tests": 330,
+  "focus": [
+    "dex-evidence-not-patchable",
+    "context-aware-menu",
+    "dex-method-xref",
+    "profile-false-hybrid"
+  ]
+}

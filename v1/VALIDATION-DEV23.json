@@ -1,0 +1,50 @@
+{
+  "schema": "modkit-validation-dev23-1.0",
+  "checkpoint": "0.9.0-dev23",
+  "scope": "application-agnostic on-demand IL2CPP deep method resolver",
+  "applicationSpecificProductionRules": false,
+  "expectedArtifacts": [
+    "analysis.methods.jsonl",
+    "analysis.methods.jsonl.idx",
+    "analysis.methods.meta.json",
+    "analysis-deep/method-<metadata_method_id>.json"
+  ],
+  "invariants": [
+    "deep selection is by exact metadata method id, not readable names",
+    "ABI confirmation is independent from automatic UI binding intent",
+    "incoming BL callsites and managed caller attribution are separate proofs",
+    "method-local outgoing calls/strings/this-offset context are bounded",
+    "instance resolver promotion requires exact target type plus machine-code proof",
+    "Menu candidate requires semantic and method-local context verification",
+    "static analysis never asserts runtime confirmation",
+    "Deep Menu seed still requires independent APK ELF preflight before executable binding"
+  ],
+  "validation": {
+    "pythonTests": {
+      "passed": 275,
+      "failed": 0,
+      "method": "module-split pytest runs due whole-suite execution timeout"
+    },
+    "nativeCppContract": {
+      "passed": 3,
+      "failed": 0
+    },
+    "productionAppSpecificTokenScan": {
+      "passed": true,
+      "bannedTokens": [
+        "Drova",
+        "AFK",
+        "MotionPlayer",
+        "Just2D",
+        "SetFxSpeedLifeTime"
+      ]
+    },
+    "pythonCompile": {
+      "passed": true
+    },
+    "androidGradleBuild": {
+      "status": "not-run",
+      "reason": "Android SDK/Gradle wrapper unavailable in validation environment"
+    }
+  }
+}

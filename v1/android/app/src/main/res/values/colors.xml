@@ -1,0 +1,8 @@
+<resources>
+    <color name="mk_primary">#006B60</color>
+    <color name="mk_on_primary">#FFFFFF</color>
+    <color name="mk_background">#F4F7FB</color>
+    <color name="mk_surface">#FFFFFF</color>
+    <color name="mk_on_surface">#19283E</color>
+    <color name="mk_outline">#D8E0E9</color>
+</resources>

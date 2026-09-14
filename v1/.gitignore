@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# generated Android trees
+local.properties
+.gradle/
+.cxx/
+*.apk
+*.aab
+.idea/
+*.iml

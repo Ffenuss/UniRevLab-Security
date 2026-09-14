@@ -1,0 +1,21 @@
+{
+  "schema": "modkit-validation-dev30-1.0",
+  "versionName": "0.9.0-dev30",
+  "versionCode": 35,
+  "focus": "installed package APK-set discovery and automatic IL2CPP pair selection",
+  "testsExpected": 301,
+  "runtimeContract": "builtin-runtime-v4 clang++ strict",
+  "installedScanner": {
+    "source": "PackageManager sourceDir + splitSourceDirs",
+    "packageVisibility": "launcher intent queries; no QUERY_ALL_PACKAGES",
+    "autoSelect": ["global-metadata.dat", "arm64-v8a/libil2cpp.so"],
+    "fallback": "multi-split DEX/native/Unity/content RE discovery",
+    "nestedPackageEvidence": true,
+    "readOnlyProbeSeedAfterIl2cpp": true
+  },
+  "safetyTruth": {
+    "staticEvidenceIsRuntimeConfirmation": false,
+    "discoveryCreatesExecutableBinding": false,
+    "serverPurchaseBypass": false
+  }
+}

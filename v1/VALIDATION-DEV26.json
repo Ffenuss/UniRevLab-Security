@@ -1,0 +1,19 @@
+{
+  "version": "0.9.0-dev26",
+  "status": "local-green-pending-github-actions",
+  "policy": "fail-closed universal Menu Autopilot",
+  "tests": {
+    "pytest": 288,
+    "selftest": "ok",
+    "runtimeCheck": "ok"
+  },
+  "android": "pending-github-actions",
+  "pipeline": [
+    "full-catalog-structural-prefilter",
+    "bounded-diverse-deep-resolver",
+    "canonical-rva-dedup",
+    "typed-menu-spec",
+    "apk-elf-auto-confirm",
+    "payload-preflight"
+  ]
+}

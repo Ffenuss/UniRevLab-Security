@@ -1,0 +1,18 @@
+{
+  "schema": "modkit-validation-dev22-1.0",
+  "checkpoint": "0.9.0-dev22",
+  "scope": "universal full file-backed IL2CPP metadata method catalog",
+  "applicationSpecificProductionRules": false,
+  "expectedArtifacts": [
+    "analysis.methods.jsonl",
+    "analysis.methods.jsonl.idx",
+    "analysis.methods.meta.json"
+  ],
+  "invariants": [
+    "every metadata method can be represented without semantic-name retention",
+    "unique CodeRegistration mapping is separated from semantic meaning",
+    "ABI materialization is streamed and not limited to the Menu Builder shortlist",
+    "static analysis never asserts runtime confirmation",
+    "full catalog rows are non-selectable evidence until promoted by binding policy"
+  ]
+}

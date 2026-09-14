@@ -1,0 +1,21 @@
+{
+  "schema": "modkit-validation-dev21-1.0",
+  "checkpoint": "0.9.0-dev21",
+  "versionCode": 28,
+  "focus": [
+    "application-agnostic IL2CPP method retention",
+    "separate address/ABI/xref/context/semantic/runtime evidence states",
+    "name-independent all-unique-CodeRegistration-RVA direct-BL discovery for obfuscated methods",
+    "bounded observed-target materialization using frequency+rare+address-spread selection",
+    "generic callable xref targeting without gameplay vocabulary",
+    "generic control candidate admission from structural proof",
+    "Menu Builder method-verification propagation and fail-closed auto-confirm",
+    "Android file-backed universal callable catalogue",
+    "semantic verification requires at least two independent static semantic sources",
+    "stripped-ELF direct-BL fallback to executable PT_LOAD segments"
+  ],
+  "safetyModel": "method names are ranking signals only; address/ABI must be structurally proven; runtime behavior is never claimed by static analysis",
+  "pythonTests": "265 passed",
+  "selftest": "ok (7 types, 28 methods, 21 features, 25 files; strict C++ builtin-runtime-v2)",
+  "androidGradleBuild": "not run: Gradle wrapper/Gradle executable and Android SDK are not available in the current runtime"
+}

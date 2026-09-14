@@ -1,0 +1,20 @@
+{
+  "version": "0.9.0-dev39",
+  "versionCode": 44,
+  "features": [
+    "dex-direct-virtual-index-correctness",
+    "framework-sdk-signal-ranking",
+    "monetization-noise-filter",
+    "currency-noise-filter",
+    "security-summary-groups",
+    "human-readable-simple-mode",
+    "ready-dex-code-offset"
+  ],
+  "policy": {
+    "activeNetworkUse": false,
+    "credentialValueExtraction": false,
+    "keyValueExtraction": false,
+    "autoBuildRequiresValidatedExecutableBinding": true
+  },
+  "ci": "full pytest + selftest + runtime-check + assembleDebug + lintDebug + zipalign + apksigner"
+}

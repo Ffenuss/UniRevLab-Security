@@ -1,0 +1,60 @@
+package dev.modkit.mobile;
+
+import android.app.Application;
+import org.json.JSONObject;
+import java.io.File;
+import java.nio.file.Files;
+import java.util.Locale;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+public class App extends Application {
+    public final AtomicBoolean busy = new AtomicBoolean(false), cancelled = new AtomicBoolean(false);
+    public volatile String status = "Выберите установленное приложение/игру или локальный APK.";
+    public volatile String stage = "IDLE";
+    public volatile int stageProgress = -1;
+    public volatile JSONObject result;
+    public volatile long revision = 0;
+    private static final Pattern PERCENT=Pattern.compile("(?:^|\\D)(100|[0-9]{1,2})%");
+    public File file(String name) { return new File(getFilesDir(), name); }
+    private String stageFor(String message) {
+        String s=message==null?"":message.toLowerCase(Locale.ROOT);
+        if(s.contains("ошибка")||s.contains("отмен"))return "STOPPED";
+        if(s.contains("сохран")||s.contains("сбор")||s.contains("подпис")||s.contains("apk-set: подпись"))return "OUTPUT";
+        if(s.contains("menu")||s.contains("payload"))return "MENU";
+        if(s.contains("probe"))return "PROBE";
+        if(s.contains("re:")||s.contains("discovery")||s.contains("relationship graph")||s.contains("trust"))return "DISCOVERY";
+        if(s.contains("rodroid")||s.contains("il2cpp")||s.contains("metadata")||s.contains("gameplay"))return "ANALYSIS";
+        if(s.contains("installed scan")||s.contains("инвентар")||s.contains("поиск"))return "INVENTORY";
+        if(s.contains("копирован")||s.contains("импорт")||s.contains("подготов"))return "INPUT";
+        if(s.startsWith("готово")||s.contains(" готов"))return "DONE";
+        return stage==null?"IDLE":stage;
+    }
+    public void progress(String message) {
+        status = message;
+        stage = stageFor(message);
+        stageProgress = -1;
+        Matcher m=PERCENT.matcher(message==null?"":message);
+        if(m.find())try{stageProgress=Integer.parseInt(m.group(1));}catch(Exception ignored){}
+        revision++;
+    }
+    @Override public void onCreate() {
+        super.onCreate();
+        if (getSharedPreferences("state",0).getBoolean("running",false)) {
+            status = "Предыдущая операция прервана системой. Можно запустить её заново.";
+            stage = "STOPPED";
+            getSharedPreferences("state",0).edit().putBoolean("running",false).apply();
+        }
+        new Thread(() -> {
+            synchronized (this) {
+                if (busy.get()) return;
+                try {
+                    File f = file("analysis.summary.json");
+                    if (f.exists()) result = new JSONObject(new String(Files.readAllBytes(f.toPath()), java.nio.charset.StandardCharsets.UTF_8));
+                } catch (Exception ignored) { }
+                revision++;
+            }
+        }, "restore").start();
+    }
+}

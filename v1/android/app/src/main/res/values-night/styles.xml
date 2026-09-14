@@ -1,0 +1,12 @@
+<resources>
+    <style name="Theme.ModKit" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/mk_primary</item>
+        <item name="colorOnPrimary">@color/mk_on_primary</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:navigationBarColor">@color/mk_background</item>
+        <item name="android:windowBackground">@color/mk_background</item>
+        <item name="colorSurface">@color/mk_surface</item>
+        <item name="colorOnSurface">@color/mk_on_surface</item>
+        <item name="colorOutline">@color/mk_outline</item>
+    </style>
+</resources>

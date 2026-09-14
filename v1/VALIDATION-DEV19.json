@@ -1,0 +1,24 @@
+{
+  "schema": "modkit-dev19-re-save-stability-1",
+  "version": "0.9.0-dev19",
+  "versionCode": 26,
+  "regressionTarget": "large RE report process death during final correlation save and crash when reopening RE Workspace",
+  "expectedTestCollection": 243,
+  "localChecks": {
+    "nonCliUniqueTests": "229 passed",
+    "selftest": "ok",
+    "runtimeCheck": "ok",
+    "cliLocal": "delegated to GitHub Actions because local container command budget interrupts the subprocess-heavy CLI group"
+  },
+  "behavior": {
+    "fullReportPreserved": true,
+    "streamedJsonWrite": true,
+    "atomicFullReportReplace": true,
+    "boundedUiProjection": true,
+    "javaDoesNotParseFullReReport": true,
+    "legacyDev18FullReportGuard": true,
+    "savingCompleteState": true,
+    "splitIl2cppBridgePreserved": true
+  },
+  "safety": "UI memory bounding changes storage/rendering only; analysis evidence and full report content are not reduced."
+}

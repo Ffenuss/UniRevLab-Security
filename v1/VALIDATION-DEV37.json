@@ -1,0 +1,20 @@
+{
+  "version": "0.9.0-dev37",
+  "versionCode": 42,
+  "tests": 344,
+  "features": [
+    "simple-mode-all-findings-catalog",
+    "validated-local-control-selection",
+    "server-trust-audit-fail-closed",
+    "cocos-runtime-detection",
+    "file-workspace-text-hex-editor",
+    "generic-apk-entry-workspace-patch",
+    "apk-set-resign-for-edited-split"
+  ],
+  "localChecks": {
+    "targetedPytest": "23 passed",
+    "selftest": "ok",
+    "runtimeCheck": "ok"
+  },
+  "ci": "required: full pytest + assembleDebug + lintDebug + zipalign + apksigner"
+}

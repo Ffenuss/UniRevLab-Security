@@ -1,0 +1,57 @@
+{
+  "schema": "modkit-dev13-instance-resolver-validation-1",
+  "metadataVersion": 29,
+  "regression": {
+    "pytestPassed": 223
+  },
+  "structuralResolution": {
+    "modules": 123,
+    "metadata_methods": 167426,
+    "resolved_unique": 144135,
+    "type_table_found": true,
+    "lazy_parameter_rows": 6851,
+    "high_signal_primitive_contract_rows": 38611
+  },
+  "resolverResolution": {
+    "resolverCandidates": 143,
+    "typeVerified": 142,
+    "returnPtr": 141,
+    "outPtrBool": 2,
+    "primitiveInstanceMethods": 2074,
+    "exactTypePairableInstanceMethods": 55,
+    "policy": "Only exact metadata type identity may auto-promote an instance resolver."
+  },
+  "splitApkPreflight": {
+    "baseApkContainsNativeLibs": false,
+    "sourceApkSha256": "6c374c4a4a800752874745b24bf902831262e0287aabfeb910d1a0654c6d95b1",
+    "targetSha256": "912abc74b676281c0d6f5c7286ea00e419cace234504a1a165a547f25baf003a",
+    "moduleSource": "external-selected-library",
+    "target": {
+      "label": "FirstPaintController::HideFirstPaint",
+      "rva": 45672284,
+      "signature": "void Metadata__HideFirstPaint (void* __this, const MethodInfo* method);"
+    },
+    "resolver": {
+      "label": "FirstPaintController::get_Instance",
+      "rva": 45670120,
+      "kind": "return_ptr",
+      "targetClass": "FirstPaintController",
+      "verified": true,
+      "signature": "void* Metadata__get_Instance (const MethodInfo* method);"
+    },
+    "promoted": [
+      "firstpaint_hide"
+    ],
+    "blocked": false,
+    "readyForPayload": true
+  },
+  "failClosed": [
+    "resolver target type mismatch",
+    "resolver type identity unavailable",
+    "unsupported resolver ABI",
+    "source APK SHA-256 mismatch",
+    "external target SHA-256 unavailable or mismatch",
+    "resolver or target RVA outside executable ELF"
+  ],
+  "note": "Static structural validation only; target/game code was not executed and runtime gameplay effect is not asserted."
+}

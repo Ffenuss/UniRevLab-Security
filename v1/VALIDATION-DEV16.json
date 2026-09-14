@@ -1,0 +1,39 @@
+{
+  "schema": "modkit-dev16-afk-scale-validation-1",
+  "version": "0.9.0-dev16",
+  "target": "AFK Journey user-provided artifact set",
+  "realValidation": {
+    "metadataVersion": 29,
+    "metadataMethods": 167426,
+    "resolvedUniqueExecutableRva": 144135,
+    "highSignalCallableInventory": 2500,
+    "provenancePriority": "Assembly-CSharp before known middleware/framework",
+    "metadataResolverPeakRssMiBApproxBefore": 713,
+    "metadataResolverPeakRssMiBApproxAfter": 385,
+    "semanticPolicy": "debug/logging evidence is not treated as cheat/gameplay evidence",
+    "exampleReviewOnly": "CommonUtils::SetDebugLogActive remains non-executable when contextVerified=false"
+  },
+  "dev16Changes": [
+    "provenance classifier",
+    "middleware/compiler-glue shortlist demotion",
+    "bounded method-context budgets",
+    "streaming/compact metadata caller index",
+    "aggressive ELF temporary-structure release",
+    "lazy bounded DEX method cache",
+    "staged heavy-analysis evidence merge"
+  ],
+  "failClosed": [
+    "non-game/third-party/framework provenance",
+    "ambiguous caller attribution",
+    "explicit contextVerified=false",
+    "unsupported ABI/signature",
+    "unverified instance resolver",
+    "ELF/hash preflight block"
+  ],
+  "note": "Static evidence only; runtime behavior and gameplay effect are not claimed. Final release verification completed before packaging.",
+  "finalVerification": {
+    "pytest": "235/235 passed",
+    "selftest": "ok",
+    "runtimeCheck": "builtin-runtime-v2 clang++ strict ok"
+  }
+}

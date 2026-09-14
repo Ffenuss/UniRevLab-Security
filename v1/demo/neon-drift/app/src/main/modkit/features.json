@@ -1,0 +1,653 @@
+{
+  "generator": "modkit",
+  "summary": {
+    "classes": 7,
+    "methods": 28,
+    "addressed_methods": 27,
+    "fields": 17,
+    "images": [
+      "Assembly-CSharp.dll",
+      "UnityEngine.dll",
+      "mscorlib.dll"
+    ],
+    "metadata_version": 27,
+    "source": "dump.cs"
+  },
+  "features": [
+    {
+      "id": "infinite_ammo.Weapon.get_Ammo",
+      "label": "Infinite Ammo",
+      "group": "Combat",
+      "cls": "NeonDrift.Play.Weapon",
+      "member": "get_Ammo",
+      "c_type": "System.Int32",
+      "arg_type": null,
+      "value": 999,
+      "min_value": 0,
+      "max_value": 1000000000.0,
+      "rva": "0x1210",
+      "field_offset": null,
+      "is_static": false,
+      "needs_instance": false,
+      "confidence": 0.74,
+      "params": [],
+      "notes": [
+        "get_Ammo → return 999",
+        "patch site 0x1210 (8 bytes)"
+      ],
+      "enabled_by_default": false,
+      "kind": "const_return",
+      "patch": {
+        "rva": "0x1210",
+        "bytes": "e07c8052c0035fd6",
+        "restore": "0000000000000000",
+        "note": "return 999 (System.Int32)"
+      },
+      "swallow": false
+    },
+    {
+      "id": "no_cooldown.Weapon.GetCooldown",
+      "label": "No Cooldown",
+      "group": "Combat",
+      "cls": "NeonDrift.Play.Weapon",
+      "member": "GetCooldown",
+      "c_type": "System.Single",
+      "arg_type": null,
+      "value": 0,
+      "min_value": 0,
+      "max_value": 1000000000.0,
+      "rva": "0x1240",
+      "field_offset": null,
+      "is_static": false,
+      "needs_instance": false,
+      "confidence": 0.74,
+      "params": [],
+      "notes": [
+        "GetCooldown → return 0",
+        "patch site 0x1240 (8 bytes)"
+      ],
+      "enabled_by_default": false,
+      "kind": "const_return",
+      "patch": {
+        "rva": "0x1240",
+        "bytes": "00008052c0035fd6",
+        "restore": "0000000000000000",
+        "note": "return 0 (System.Single)"
+      },
+      "swallow": false
+    },
+    {
+      "id": "one_hit_kill.Weapon.GetDamage",
+      "label": "One Hit Kill",
+      "group": "Combat",
+      "cls": "NeonDrift.Play.Weapon",
+      "member": "GetDamage",
+      "c_type": "System.Single",
+      "arg_type": null,
+      "value": 99999,
+      "min_value": 0,
+      "max_value": 1000000000.0,
+      "rva": "0x1230",
+      "field_offset": null,
+      "is_static": false,
+      "needs_instance": false,
+      "confidence": 0.74,
+      "params": [],
+      "notes": [
+        "GetDamage → return 99999",
+        "patch site 0x1230 (12 bytes)"
+      ],
+      "enabled_by_default": false,
+      "kind": "const_return",
+      "patch": {
+        "rva": "0x1230",
+        "bytes": "e0d390522000a072c0035fd6",
+        "restore": "000000000000000000000000",
+        "note": "return 99999 (System.Single)"
+      },
+      "swallow": false
+    },
+    {
+      "id": "log_spawns.EnemySpawner.Spawn",
+      "label": "Log Enemy Spawns",
+      "group": "Debug",
+      "cls": "NeonDrift.Play.EnemySpawner",
+      "member": "Spawn",
+      "c_type": "System.Void",
+      "arg_type": null,
+      "value": 1,
+      "min_value": 0,
+      "max_value": 1,
+      "rva": "0x1310",
+      "field_offset": null,
+      "is_static": false,
+      "needs_instance": false,
+      "confidence": 0.66,
+      "params": [
+        "System.Int32"
+      ],
+      "notes": [
+        "native callback on Spawn(argc=1) , patch-out allowed"
+      ],
+      "enabled_by_default": false,
+      "kind": "hook",
+      "patch": null,
+      "swallow": false
+    },
+    {
+      "id": "economy.GameOptions.coins",
+      "label": "Coins → set",
+      "group": "Economy",
+      "cls": "NeonDrift.Save.GameOptions",
+      "member": "set_Coins",
+      "c_type": "System.Void",
+      "arg_type": "System.Int32",
+      "value": 999999,
+      "min_value": 0.0,
+      "max_value": 1000000000.0,
+      "rva": "0x1410",
+      "field_offset": null,
+      "is_static": false,
+      "needs_instance": true,
+      "confidence": 0.95,
+      "params": [
+        "System.Int32"
+      ],
+      "notes": [
+        "setter System.Void NeonDrift.Save.GameOptions.set_Coins(System.Int32 value)",
+        "instance from hook NeonDrift.Save.GameOptions.UnlockAllTracks (+0x1420)"
+      ],
+      "enabled_by_default": false,
+      "kind": "value_set",
+      "patch": null,
+      "swallow": false
+    },
+    {
+      "id": "economy.GameOptions.coins.lock",
+      "label": "Coins lock",
+      "group": "Economy",
+      "cls": "NeonDrift.Save.GameOptions",
+      "member": "get_Coins",
+      "c_type": "System.Int32",
+      "arg_type": null,
+      "value": 999999999,
+      "min_value": 0.0,
+      "max_value": 1000000000.0,
+      "rva": "0x1400",
+      "field_offset": null,
+      "is_static": false,
+      "needs_instance": false,
+      "confidence": 0.9,
+      "params": [],
+      "notes": [
+        "prologue patched to return the constant; UI slider writes it live",
+        "patch site 0x1400 (12 bytes)"
+      ],
+      "enabled_by_default": false,
+      "kind": "const_return",
+      "patch": {
+        "rva": "0x1400",
+        "bytes": "e03f99524073a772c0035fd6",
+        "restore": "000000000000000000000000",
+        "note": "return 999999999 (System.Int32)"
+      },
+      "swallow": false
+    },
+    {
+      "id": "economy.PlayerSave.gems",
+      "label": "Gems → set",
+      "group": "Economy",
+      "cls": "NeonDrift.Save.PlayerSave",
+      "member": "set_Gems",
+      "c_type": "System.Void",
+      "arg_type": "System.Int32",
+      "value": 999999,
+      "min_value": 0.0,
+      "max_value": 1000000000.0,
+      "rva": "0x1070",
+      "field_offset": null,
+      "is_static": false,
+      "needs_instance": true,
+      "confidence": 0.95,
+      "params": [
+        "System.Int32"
+      ],
+      "notes": [
+        "setter System.Void NeonDrift.Save.PlayerSave.set_Gems(System.Int32 value)",
+        "instance from hook NeonDrift.Save.PlayerSave.Save (+0x10a0)"
+      ],
+      "enabled_by_default": false,
+      "kind": "value_set",
+      "patch": null,
+      "swallow": false
+    },
+    {
+      "id": "economy.PlayerSave.gems.lock",
+      "label": "Gems lock",
+      "group": "Economy",
+      "cls": "NeonDrift.Save.PlayerSave",
+      "member": "get_Gems",
+      "c_type": "System.Int32",
+      "arg_type": null,
+      "value": 999999999,
+      "min_value": 0.0,
+      "max_value": 1000000000.0,
+      "rva": "0x1060",
+      "field_offset": null,
+      "is_static": false,
+      "needs_instance": false,
+      "confidence": 0.9,
+      "params": [],
+      "notes": [
+        "prologue patched to return the constant; UI slider writes it live",
+        "patch site 0x1060 (12 bytes)"
+      ],
+      "enabled_by_default": false,
+      "kind": "const_return",
+      "patch": {
+        "rva": "0x1060",
+        "bytes": "e03f99524073a772c0035fd6",
+        "restore": "000000000000000000000000",
+        "note": "return 999999999 (System.Int32)"
+      },
+      "swallow": false
+    },
+    {
+      "id": "economy.PlayerSave.gold",
+      "label": "Gold → set",
+      "group": "Economy",
+      "cls": "NeonDrift.Save.PlayerSave",
+      "member": "set_Gold",
+      "c_type": "System.Void",
+      "arg_type": "System.Int32",
+      "value": 999999,
+      "min_value": 0.0,
+      "max_value": 1000000000.0,
+      "rva": "0x1050",
+      "field_offset": null,
+      "is_static": false,
+      "needs_instance": true,
+      "confidence": 0.95,
+      "params": [
+        "System.Int32"
+      ],
+      "notes": [
+        "setter System.Void NeonDrift.Save.PlayerSave.set_Gold(System.Int32 value)",
+        "instance from hook NeonDrift.Save.PlayerSave.Save (+0x10a0)"
+      ],
+      "enabled_by_default": false,
+      "kind": "value_set",
+      "patch": null,
+      "swallow": false
+    },
+    {
+      "id": "economy.PlayerSave.gold.lock",
+      "label": "Gold lock",
+      "group": "Economy",
+      "cls": "NeonDrift.Save.PlayerSave",
+      "member": "get_Gold",
+      "c_type": "System.Int32",
+      "arg_type": null,
+      "value": 999999999,
+      "min_value": 0.0,
+      "max_value": 1000000000.0,
+      "rva": "0x1040",
+      "field_offset": null,
+      "is_static": false,
+      "needs_instance": false,
+      "confidence": 0.9,
+      "params": [],
+      "notes": [
+        "prologue patched to return the constant; UI slider writes it live",
+        "patch site 0x1040 (12 bytes)"
+      ],
+      "enabled_by_default": false,
+      "kind": "const_return",
+      "patch": {
+        "rva": "0x1040",
+        "bytes": "e03f99524073a772c0035fd6",
+        "restore": "000000000000000000000000",
+        "note": "return 999999999 (System.Int32)"
+      },
+      "swallow": false
+    },
+    {
+      "id": "movement.PlayerController.jumpsLeft.mem",
+      "label": "Jumpsleft → write",
+      "group": "Movement",
+      "cls": "NeonDrift.Play.PlayerController",
+      "member": "jumpsLeft",
+      "c_type": "System.Int32",
+      "arg_type": "System.Int32",
+      "value": 999999,
+      "min_value": 0.0,
+      "max_value": 1000000000.0,
+      "rva": null,
+      "field_offset": "0x2c",
+      "is_static": false,
+      "needs_instance": true,
+      "confidence": 0.8,
+      "params": [],
+      "notes": [
+        "instance field at +0x2c, needs captured `this`",
+        "instance from hook NeonDrift.Play.PlayerController.Update (+0x1100)"
+      ],
+      "enabled_by_default": false,
+      "kind": "field_write",
+      "patch": null,
+      "swallow": false
+    },
+    {
+      "id": "movement.PlayerController.moveSpeed",
+      "label": "Movespeed → set",
+      "group": "Movement",
+      "cls": "NeonDrift.Play.PlayerController",
+      "member": "set_MoveSpeed",
+      "c_type": "System.Void",
+      "arg_type": "System.Single",
+      "value": 10.0,
+      "min_value": -1000.0,
+      "max_value": 1000.0,
+      "rva": "0x1130",
+      "field_offset": null,
+      "is_static": false,
+      "needs_instance": true,
+      "confidence": 0.95,
+      "params": [
+        "System.Single"
+      ],
+      "notes": [
+        "setter System.Void NeonDrift.Play.PlayerController.set_MoveSpeed(System.Single value)",
+        "instance from hook NeonDrift.Play.PlayerController.Update (+0x1100)"
+      ],
+      "enabled_by_default": false,
+      "kind": "value_set",
+      "patch": null,
+      "swallow": false
+    },
+    {
+      "id": "movement.PlayerController.moveSpeed.lock",
+      "label": "Movespeed lock",
+      "group": "Movement",
+      "cls": "NeonDrift.Play.PlayerController",
+      "member": "get_MoveSpeed",
+      "c_type": "System.Single",
+      "arg_type": null,
+      "value": 999.0,
+      "min_value": -1000.0,
+      "max_value": 1000.0,
+      "rva": "0x1120",
+      "field_offset": null,
+      "is_static": false,
+      "needs_instance": false,
+      "confidence": 0.9,
+      "params": [],
+      "notes": [
+        "prologue patched to return the constant; UI slider writes it live",
+        "patch site 0x1120 (8 bytes)"
+      ],
+      "enabled_by_default": false,
+      "kind": "const_return",
+      "patch": {
+        "rva": "0x1120",
+        "bytes": "e07c8052c0035fd6",
+        "restore": "0000000000000000",
+        "note": "return 999 (System.Single)"
+      },
+      "swallow": false
+    },
+    {
+      "id": "progress.PlayerSave.level",
+      "label": "Level → set",
+      "group": "Progress",
+      "cls": "NeonDrift.Save.PlayerSave",
+      "member": "set_Level",
+      "c_type": "System.Void",
+      "arg_type": "System.Int32",
+      "value": 999999,
+      "min_value": 0.0,
+      "max_value": 1000000000.0,
+      "rva": "0x1090",
+      "field_offset": null,
+      "is_static": false,
+      "needs_instance": true,
+      "confidence": 0.95,
+      "params": [
+        "System.Int32"
+      ],
+      "notes": [
+        "setter System.Void NeonDrift.Save.PlayerSave.set_Level(System.Int32 value)",
+        "instance from hook NeonDrift.Save.PlayerSave.Save (+0x10a0)"
+      ],
+      "enabled_by_default": false,
+      "kind": "value_set",
+      "patch": null,
+      "swallow": false
+    },
+    {
+      "id": "progress.PlayerSave.level.lock",
+      "label": "Level lock",
+      "group": "Progress",
+      "cls": "NeonDrift.Save.PlayerSave",
+      "member": "get_Level",
+      "c_type": "System.Int32",
+      "arg_type": null,
+      "value": 999999999,
+      "min_value": 0.0,
+      "max_value": 1000000000.0,
+      "rva": "0x1080",
+      "field_offset": null,
+      "is_static": false,
+      "needs_instance": false,
+      "confidence": 0.9,
+      "params": [],
+      "notes": [
+        "prologue patched to return the constant; UI slider writes it live",
+        "patch site 0x1080 (12 bytes)"
+      ],
+      "enabled_by_default": false,
+      "kind": "const_return",
+      "patch": {
+        "rva": "0x1080",
+        "bytes": "e03f99524073a772c0035fd6",
+        "restore": "000000000000000000000000",
+        "note": "return 999999999 (System.Int32)"
+      },
+      "swallow": false
+    },
+    {
+      "id": "unlock_all.PlayerSave.s_debugUnlocks",
+      "label": "Unlock Everything",
+      "group": "Progress",
+      "cls": "NeonDrift.Save.PlayerSave",
+      "member": "s_debugUnlocks",
+      "c_type": "System.Boolean",
+      "arg_type": "System.Boolean",
+      "value": 1,
+      "min_value": 0,
+      "max_value": 1,
+      "rva": "0x5010",
+      "field_offset": "0x5010",
+      "is_static": true,
+      "needs_instance": false,
+      "confidence": 0.7,
+      "params": [],
+      "notes": [
+        "static bool flipped directly"
+      ],
+      "enabled_by_default": false,
+      "kind": "static_write",
+      "patch": null,
+      "swallow": false
+    },
+    {
+      "id": "god_mode.PlayerController.get_IsGodMode",
+      "label": "God Mode",
+      "group": "Survival",
+      "cls": "NeonDrift.Play.PlayerController",
+      "member": "get_IsGodMode",
+      "c_type": "System.Boolean",
+      "arg_type": null,
+      "value": true,
+      "min_value": 0,
+      "max_value": 1,
+      "rva": "0x1150",
+      "field_offset": null,
+      "is_static": false,
+      "needs_instance": false,
+      "confidence": 0.8,
+      "params": [],
+      "notes": [
+        "force get_IsGodMode() == true",
+        "patch site 0x1150 (8 bytes)"
+      ],
+      "enabled_by_default": false,
+      "kind": "const_return",
+      "patch": {
+        "rva": "0x1150",
+        "bytes": "20008052c0035fd6",
+        "restore": "0000000000000000",
+        "note": "return 1 (System.Boolean)"
+      },
+      "swallow": false
+    },
+    {
+      "id": "god_mode.PlayerController.set_IsGodMode",
+      "label": "God Mode",
+      "group": "Survival",
+      "cls": "NeonDrift.Play.PlayerController",
+      "member": "set_IsGodMode",
+      "c_type": "System.Void",
+      "arg_type": "System.Boolean",
+      "value": true,
+      "min_value": 0,
+      "max_value": 1,
+      "rva": "0x1140",
+      "field_offset": null,
+      "is_static": false,
+      "needs_instance": true,
+      "confidence": 0.72,
+      "params": [
+        "System.Boolean"
+      ],
+      "notes": [
+        "call set_IsGodMode(state) on toggle",
+        "instance from hook NeonDrift.Play.PlayerController.Update (+0x1100)"
+      ],
+      "enabled_by_default": false,
+      "kind": "toggle",
+      "patch": null,
+      "swallow": false
+    },
+    {
+      "id": "no_damage.PlayerController.TakeDamage",
+      "label": "Ignore Damage",
+      "group": "Survival",
+      "cls": "NeonDrift.Play.PlayerController",
+      "member": "TakeDamage",
+      "c_type": "System.Void",
+      "arg_type": null,
+      "value": true,
+      "min_value": 0,
+      "max_value": 1,
+      "rva": "0x1110",
+      "field_offset": null,
+      "is_static": false,
+      "needs_instance": false,
+      "confidence": 0.8,
+      "params": [
+        "System.Single"
+      ],
+      "notes": [
+        "early-return hook: body never runs while on",
+        "swallow"
+      ],
+      "enabled_by_default": true,
+      "kind": "hook",
+      "patch": null,
+      "swallow": true
+    },
+    {
+      "id": "survival.PlayerController.maxHealth.mem",
+      "label": "Maxhealth → write",
+      "group": "Survival",
+      "cls": "NeonDrift.Play.PlayerController",
+      "member": "maxHealth",
+      "c_type": "System.Single",
+      "arg_type": "System.Single",
+      "value": 10.0,
+      "min_value": -1000.0,
+      "max_value": 1000.0,
+      "rva": null,
+      "field_offset": "0x28",
+      "is_static": false,
+      "needs_instance": true,
+      "confidence": 0.8,
+      "params": [],
+      "notes": [
+        "instance field at +0x28, needs captured `this`",
+        "instance from hook NeonDrift.Play.PlayerController.Update (+0x1100)"
+      ],
+      "enabled_by_default": false,
+      "kind": "field_write",
+      "patch": null,
+      "swallow": false
+    },
+    {
+      "id": "debug.save_now",
+      "label": "Save Now",
+      "group": "Utility",
+      "cls": "NeonDrift.Save.PlayerSave",
+      "member": "Save",
+      "c_type": "System.Void",
+      "arg_type": null,
+      "value": 1,
+      "min_value": 0,
+      "max_value": 1,
+      "rva": "0x10a0",
+      "field_offset": null,
+      "is_static": false,
+      "needs_instance": true,
+      "confidence": 0.9,
+      "params": [],
+      "notes": [
+        "System.Void NeonDrift.Save.PlayerSave.Save()",
+        "instance from hook NeonDrift.Save.PlayerSave.Save (+0x10a0)"
+      ],
+      "enabled_by_default": false,
+      "kind": "action",
+      "patch": null,
+      "swallow": false
+    }
+  ],
+  "instance_hooks": [
+    {
+      "cls": "NeonDrift.Save.GameOptions",
+      "method": "UnlockAllTracks",
+      "rva": "0x1420",
+      "slot_name": "inst_GameOptions"
+    },
+    {
+      "cls": "NeonDrift.Save.PlayerSave",
+      "method": "Save",
+      "rva": "0x10a0",
+      "slot_name": "inst_PlayerSave"
+    },
+    {
+      "cls": "NeonDrift.Play.PlayerController",
+      "method": "Update",
+      "rva": "0x1100",
+      "slot_name": "inst_PlayerController"
+    }
+  ],
+  "notes": [
+    "rules: /home/user/il2cpp-modkit/rules/default.json",
+    "arch: arm64, page: 0x10000",
+    "dump.cs: 7 types, 28 methods (27 with an RVA)",
+    "libil2cpp: aarch64, PIE, .text=0x4000, 3 symbols"
+  ],
+  "target_package": "com.neondrift.game",
+  "abi": "arm64-v8a",
+  "overlay": true,
+  "dobby": false
+}

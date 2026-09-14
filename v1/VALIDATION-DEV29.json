@@ -1,0 +1,35 @@
+{
+  "schema": "modkit-validation-dev29-1.0",
+  "version": "0.9.0-dev29",
+  "versionCode": 34,
+  "pythonTests": 298,
+  "features": {
+    "runtimeConfigVersion": 4,
+    "legacyRuntimeConfigRead": ["v1", "v2", "v3"],
+    "readOnlyRuntimeProbe": true,
+    "probePrimitives": ["bool", "int32", "uint32", "float"],
+    "exactClassIdentity": true,
+    "exactRuntimeFieldOffset": true,
+    "selfProcessSafeRead": "process_vm_readv",
+    "probeNeverExecutesBinding": true,
+    "splitNativeHostPreflight": true,
+    "failClosedExecution": true,
+    "gameSpecificProductionRules": false
+  },
+  "afkRegression": {
+    "probeFields": 39,
+    "probeSpecReady": true,
+    "singleBasePayloadReady": false,
+    "singleBasePayloadBlocker": "NATIVE_SPLIT_APK_REQUIRED"
+  },
+  "requiredActions": [
+    "pytest",
+    "selftest",
+    "runtime-check",
+    "assembleDebug",
+    "lintDebug",
+    "unzip",
+    "zipalign",
+    "apksigner"
+  ]
+}

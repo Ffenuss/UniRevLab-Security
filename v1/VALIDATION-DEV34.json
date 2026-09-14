@@ -1,0 +1,30 @@
+{
+  "version": "0.9.0-dev34",
+  "versionCode": 39,
+  "branch": "Modkit1",
+  "goals": [
+    "split per-artifact scanning out of correlate.py",
+    "bounded parallel scan for small immutable artifacts only",
+    "keep native and mmap-backed artifacts synchronous",
+    "add disk-backed metadata token search index",
+    "debounce Android catalogue search",
+    "preserve fail-closed Probe/Menu semantics"
+  ],
+  "invariants": {
+    "largeElfRemainsSequential": true,
+    "mmapLifetimeNotCrossedByWorker": true,
+    "searchIndexIsCandidateLocatorOnly": true,
+    "searchIndexDoesNotPromoteRuntimeTruth": true,
+    "externalReSchema": "modkit-re-1.2",
+    "runtimeProbeCached": false,
+    "menuEligibilityCached": false
+  },
+  "tests": 323,
+  "securityInvariants": {
+    "menuFailClosed": true,
+    "staticIsNotRuntimeConfirmed": true,
+    "searchIndexDoesNotPromoteRuntimeTruth": true,
+    "externalReportSchemaBackwardCompatible": true,
+    "serverOrPaymentBypassAdded": false
+  }
+}

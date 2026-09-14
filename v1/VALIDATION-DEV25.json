@@ -1,0 +1,19 @@
+{
+  "version": "0.9.0-dev25",
+  "checkpoint": "receiver-vtable-exact-proof",
+  "claims": {
+    "metadata_vtable_methods": true,
+    "metadata_interface_offsets": true,
+    "receiver_type_from_managed_abi": true,
+    "no_hardcoded_il2cppclass_vtable_base": true,
+    "unique_vtable_base_intersection": true,
+    "virtual_blr_exact_promotion_fail_closed": true,
+    "feeds_existing_deep_menu_pipeline": true,
+    "runtime_truth_remains_not_observed": true
+  },
+  "android_apk": {
+    "local_build": false,
+    "github_actions_branch": "Modkit1",
+    "status": "pending-ci"
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "version": "0.9.0-dev24",
+  "checkpoint": "universal-indirect-flow-deep-menu-pipeline",
+  "tests": {
+    "full_pytest": {"passed": 281, "failed": 0},
+    "runtime_cpp_contract": {"passed": 3, "failed": 0},
+    "modkit_selftest": {"status": "ok", "types": 7, "methods": 28, "features": 21, "files": 25},
+    "python_compileall": "ok"
+  },
+  "resolver": {
+    "direct_bl": true,
+    "tail_thunk_canonicalization": true,
+    "exact_blr_static_flow": true,
+    "virtual_interface_candidates_fail_closed": true,
+    "function_pointer_slot_corroboration": true,
+    "sha256_input_cache": true,
+    "runtime_truth": "not-observed"
+  },
+  "menu_pipeline": {
+    "deep_to_menu_spec": true,
+    "apk_elf_auto_confirm": true,
+    "payload_preflight": true,
+    "generated_menu_project": true,
+    "android_deep_auto_prepare_source_integrated": true,
+    "android_deep_auto_build_signed_apk_source_integrated": true,
+    "numeric_range_guessing": false
+  },
+  "application_specific_production_rules": {
+    "tokens_checked": ["Drova", "AFK", "MotionPlayer", "Just2D", "SetFxSpeedLifeTime"],
+    "hits": 0
+  },
+  "android_build": {
+    "performed": false,
+    "reason": "No Gradle wrapper, Gradle executable, ANDROID_HOME or ANDROID_SDK_ROOT in this environment"
+  }
+}

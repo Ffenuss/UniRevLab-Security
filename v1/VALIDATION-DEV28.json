@@ -1,0 +1,36 @@
+{
+  "schema": "modkit-validation-dev28-1.0",
+  "version": "0.9.0-dev28",
+  "versionCode": 33,
+  "pythonTests": 292,
+  "features": {
+    "runtimeConfigVersion": 3,
+    "tabs": [
+      "ALL",
+      "Combat",
+      "Player",
+      "Resources",
+      "World",
+      "Debug"
+    ],
+    "dragSafeHitTesting": true,
+    "pressFeedback": true,
+    "resetAll": true,
+    "legacyRuntimeConfigRead": [
+      "v1",
+      "v2"
+    ],
+    "failClosedBinding": true,
+    "gameSpecificProductionRules": false
+  },
+  "requiredActions": [
+    "pytest",
+    "selftest",
+    "runtime-check",
+    "assembleDebug",
+    "lintDebug",
+    "unzip",
+    "zipalign",
+    "apksigner"
+  ]
+}

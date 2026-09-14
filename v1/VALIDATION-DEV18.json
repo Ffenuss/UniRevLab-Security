@@ -1,0 +1,25 @@
+{
+  "schema": "modkit-dev18-split-il2cpp-bridge-1",
+  "version": "0.9.0-dev18",
+  "versionCode": 25,
+  "regressionTarget": "split base.apk without embedded libil2cpp.so + selected external metadata/library + reusable Rodroid report",
+  "expectedTestCollection": 242,
+  "localChecks": {
+    "mobile_reworkspace_project_docs": "80 passed",
+    "menu_runtime_codegen_patchpack_elf_arm64": "97 passed",
+    "remaining_non_cli_groups": "61 passed",
+    "selftest": "ok",
+    "runtimeCheck": "ok"
+  },
+  "behavior": {
+    "apkExtractedPairPreferredWhenComplete": true,
+    "selectedExternalPairFallback": true,
+    "reuseMainRodroidWhenCurrent": true,
+    "externalLibraryPassedToIl2cppXref": true,
+    "compactJavaReturn": true,
+    "inputSourceDiagnostics": true,
+    "exactSearchBeforeSemanticAlias": true,
+    "abiAndProvenanceShownInSearch": true
+  },
+  "safety": "Static xref/context evidence remains review-oriented; no runtime game effect is claimed from names or addresses alone."
+}

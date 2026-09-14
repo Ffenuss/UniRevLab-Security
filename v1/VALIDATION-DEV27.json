@@ -1,0 +1,50 @@
+{
+  "version": "0.9.0-dev27",
+  "versionCode": 32,
+  "status": "local-green-ci-required",
+  "policy": "universal gameplay discovery + fail-closed executable binding",
+  "tests": {
+    "pytest": 291,
+    "selftest": "ok",
+    "runtimeCheck": "ok"
+  },
+  "afkRegression": {
+    "productionRulesTargetSpecific": false,
+    "metadataMethods": 167426,
+    "gameplay": {
+      "healthLifeState": "FIELD OBSERVED",
+      "numericHpSetterAttributed": false,
+      "progression": "FIELD OBSERVED",
+      "movement": "CONFIRMED",
+      "damage": "SCRIPT/CONTENT SEARCH",
+      "currency": "PACKAGE OBSERVED",
+      "resource": "SCRIPT/CONTENT SEARCH",
+      "cooldown": "CONFIRMED"
+    },
+    "exactFields": [
+      "IGame.RealMapUnit.alive @ 0x19",
+      "IGame.HeroData.level @ 0x14",
+      "IGame.HeroData.rank @ 0x18",
+      "IGame.AvatarActor.globalSpeed @ 0x88",
+      "IGame.AvatarActor.actionSpeed @ 0x8c",
+      "IGame.InterActCD.cd @ 0x28"
+    ],
+    "deepResolver24BatchSeconds": 0.82,
+    "menuBuilder": {
+      "instanceMethodsRequireResolver": true,
+      "numericRangesInvented": false,
+      "timeScaleBinding": "evidence-only: numeric-range-review-required"
+    }
+  },
+  "githubActionsRequired": [
+    "full-pytest",
+    "selftest",
+    "runtime-check",
+    "assembleDebug",
+    "lintDebug",
+    "unzip-apk",
+    "zipalign",
+    "apksigner-verify",
+    "exact-sources-zip"
+  ]
+}
