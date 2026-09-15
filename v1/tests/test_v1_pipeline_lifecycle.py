@@ -168,6 +168,22 @@ def test_evidence_wakelock_covers_long_release_pipeline():
     assert "if(wake!=null&&wake.isHeld())wake.release();" in source
 
 
+def test_evidence_handoff_preserves_full_run_epoch_start_and_clears_terminal_fields():
+    source = _read("AutomaticEvidenceService.java")
+    helper = source.split("private JSONObject initialManifest()", 1)[1].split("@Override public int onStartCommand", 1)[0]
+    assert 'readJson("automatic-evidence.json")' in helper
+    assert '"RUNNING".equals(previous.optString("status"))' in helper
+    assert 'previous.optLong("startedAtMs",0L)>0L' in helper
+    assert "return previous;" in helper
+    assert "return new JSONObject();" in helper
+    assert 'JSONObject manifest=initialManifest();' in source
+    assert 'long inheritedStartedAt=manifest.optLong("startedAtMs",0L);' in source
+    assert 'startedAt=inheritedStartedAt>0L?inheritedStartedAt:System.currentTimeMillis();' in source
+    assert '.put("startedAtMs",startedAt)' in source
+    assert '.remove("finishedAtMs")' in source
+    assert 'manifest.remove("error")' in source
+
+
 def test_core_cache_hit_requires_re_analysis_and_complete_il2cpp_artifacts_when_pair_exists():
     source = _read("AutomaticEvidenceService.java")
     assert 'boolean hasIl2cppPair=app.file("metadata.bin").isFile()&&app.file("library.so").isFile();' in source
