@@ -52,7 +52,7 @@ public class TargetPreparationService extends Service {
         app.result=null;
         String[] names={
             "full-reconstruction.json","modkit-decompiled.zip","apktool-analysis.json","apktool-workspace",
-            "artifact-families.json","embedded-analysis.json","automatic-evidence.json","automod-plan.json","automod-plan.json.part",
+            "artifact-families.json","embedded-analysis.json","automatic-evidence.json","automatic-evidence.json.part","automod-plan.json","automod-plan.json.part",
             "runtime-session.json","runtime-correlation.json",
             "il2cpp-crosscheck.json","il2cpp-crosscheck.json.part","il2cpp-crosscheck.methods.jsonl","il2cpp-crosscheck.methods.jsonl.part",
             "il2cpp-metadata-identity.json","il2cpp-metadata-identity.json.part","il2cpp-metadata-identity.methods.jsonl","il2cpp-metadata-identity.methods.jsonl.part",
