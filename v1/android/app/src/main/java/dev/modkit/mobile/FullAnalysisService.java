@@ -31,7 +31,7 @@ public class FullAnalysisService extends Service {
     private Notification note(String text){Intent stop=new Intent(this,FullAnalysisService.class).setAction("cancel");PendingIntent cancel=PendingIntent.getService(this,92,stop,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);PendingIntent open=PendingIntent.getActivity(this,91,new Intent(this,AutoAnalysisActivity.class),PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);return new Notification.Builder(this,"full-analysis").setSmallIcon(R.drawable.ic_modkit).setContentTitle("ModKit · полный анализ").setContentText(text).setContentIntent(open).setOngoing(true).addAction(0,"Отмена",cancel).build();}
     private void progress(String text){app.progress(text);((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).notify(91,note(text));}
 
-    /** Chaquopy callback shared with embedded backends. */
+    /** Chaquopy callback shared with inventory and embedded backends. */
     public final class Progress {
         public boolean isCancelled(){return app.cancelled.get();}
         public void progress(String text){FullAnalysisService.this.progress(text);}
@@ -128,7 +128,7 @@ public class FullAnalysisService extends Service {
     private String runInventory(List<File> inputs)throws Exception{
         JSONArray paths=new JSONArray();for(File file:inputs)paths.put(file.getCanonicalPath());
         PyObject module=Python.getInstance().getModule("modkit.mobile.apkset");
-        PyObject result=module.callAttr("inspect_apk_paths",paths.toString(),app.file("metadata.bin").getPath(),app.file("library.so").getPath(),app.file("installed-scan.json").getPath(),null,false);
+        PyObject result=module.callAttr("inspect_apk_paths",paths.toString(),app.file("metadata.bin").getPath(),app.file("library.so").getPath(),app.file("installed-scan.json").getPath(),new Progress(),false);
         String json=result.toString();new JSONObject(json);return json;
     }
 
