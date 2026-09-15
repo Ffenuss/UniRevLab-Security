@@ -5,13 +5,31 @@ SERVICE = Path("android/app/src/main/java/dev/modkit/mobile/TargetPreparationSer
 APP = Path("android/app/src/main/java/dev/modkit/mobile/App.java")
 
 
-def test_target_preparation_persists_in_progress_marker_until_service_finally():
+def test_target_preparation_persists_in_progress_marker_before_worker_and_clears_in_finally():
     source = SERVICE.read_text(encoding="utf-8")
 
-    start = source.index('putBoolean("running",true).putBoolean("target.preparing",true).apply()')
+    helper = source.split("private boolean persistPreparationState", 1)[1].split("@Override public int onStartCommand", 1)[0]
+    assert 'putBoolean("running",running)' in helper
+    assert 'putBoolean("target.preparing",running)' in helper
+    assert ".commit()" in helper
+    assert ".apply()" not in helper
+
+    start = source.index("if(!persistPreparationState(true))")
     worker = source.index('new Thread(()->', start)
-    final = source.index('putBoolean("running",false).putBoolean("target.preparing",false).apply()', worker)
+    final = source.index("persistPreparationState(false)", worker)
     assert start < worker < final
+
+
+def test_target_copy_fails_closed_when_durable_recovery_marker_cannot_be_committed():
+    source = SERVICE.read_text(encoding="utf-8")
+    failure = source.split("if(!persistPreparationState(true))", 1)[1].split('new Thread(()->', 1)[0]
+
+    assert "recovery marker" in failure
+    assert "wake.release()" in failure
+    assert "app.busy.set(false)" in failure
+    assert "stopForeground(true)" in failure
+    assert "stopSelf()" in failure
+    assert "return START_NOT_STICKY" in failure
 
 
 def test_app_process_restart_cleans_partial_target_and_current_evidence_fail_closed():
