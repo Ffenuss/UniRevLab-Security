@@ -31,6 +31,14 @@ def test_app_process_restart_cleans_partial_target_and_current_evidence_fail_clo
         "automod-plan.json",
         "connected-report.json",
         "hermes-deep",
+        "runtime-correlation.json",
+        "il2cpp-crosscheck.json",
+        "il2cpp-metadata-identity.json",
+        "il2cpp-no-rva-native.json",
+        "patchpack-report.json",
+        "workspace-report.json",
+        "target-signed.apk",
+        "target-signed-set",
     ):
         assert f'"{name}"' in helper
 
@@ -47,9 +55,10 @@ def test_app_process_restart_cleans_partial_target_and_current_evidence_fail_clo
     assert "Частичный APK/APK-set очищен" in on_create
 
 
-def test_interrupted_target_cleanup_preserves_historical_project_tree_and_signing_identity():
+def test_interrupted_target_cleanup_preserves_historical_project_tree_signing_identity_and_user_patchpack():
     source = APP.read_text(encoding="utf-8")
     helper = source.split("private void cleanupInterruptedTargetPreparation()", 1)[1].split("@Override public void onCreate()", 1)[0]
 
     assert 'file("projects")' not in helper
     assert "SigningKeyManager" not in helper
+    assert '"patchpack.zip"' not in helper
