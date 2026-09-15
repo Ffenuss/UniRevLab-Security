@@ -53,7 +53,7 @@ public class FullAnalysisService extends Service {
         }catch(Exception ignored){}
     }
     private void invalidatePreparedAutoModState()throws Exception{
-        for(String name:new String[]{"automod-plan.json","automod-plan.json.part","menu-spec.json","menu-preflight.json","menu-validation.json","menu-auto-confirm.json","menu-autopilot.json","menu-native-recovery.json"}){
+        for(String name:new String[]{"automod-plan.json","automod-plan.json.part","menu-spec.json","menu-preflight.json","menu-validation.json","menu-auto-confirm.json","menu-autopilot.json","menu-native-recovery.json","menu-native-recovery.json.tmp"}){
             if(app.cancelled.get())throw new java.io.InterruptedIOException("cancelled");
             Files.deleteIfExists(app.file(name).toPath());
         }
