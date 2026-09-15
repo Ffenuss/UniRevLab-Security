@@ -8,11 +8,29 @@ def _read(name: str) -> str:
     return (ANDROID / name).read_text(encoding="utf-8")
 
 
-def test_rerun_invalidates_old_final_manifest_before_reconstruction():
+def test_rerun_publishes_running_manifest_before_reconstruction():
     source = _read("FullAnalysisService.java")
 
-    assert 'pipelineState("RUNNING","RECONSTRUCTION",false,false,null);' in source
-    assert 'writeAtomicJson("automatic-evidence.json",state)' in source
+    helper = source.split("private void writePipelineState", 1)[1].split("private boolean bestEffortPipelineState", 1)[0]
+    assert '.put("status",status).put("phase",phase)' in helper
+    assert 'writeAtomicJson("automatic-evidence.json",state)' in helper
+    start = source.index('writePipelineState("RUNNING","RECONSTRUCTION",false,false,null);pipelineStarted=true;')
+    prepared = source.index("invalidatePreparedAutoModState();", start)
+    assert start < prepared
+
+
+def test_running_manifest_write_failure_blocks_all_reconstruction_backends():
+    source = _read("FullAnalysisService.java")
+
+    assert "boolean pipelineStarted=false;" in source
+    assert 'writePipelineState("RUNNING","RECONSTRUCTION",false,false,null);pipelineStarted=true;' in source
+    assert 'if(!pipelineStarted)reconstructionFailure="PIPELINE_MANIFEST_WRITE_FAILED:' in source
+    cleanup = 'Files.deleteIfExists(app.file("automatic-evidence.json").toPath());Files.deleteIfExists(app.file("automatic-evidence.json.part").toPath())'
+    assert cleanup in source
+    start = source.index('writePipelineState("RUNNING","RECONSTRUCTION",false,false,null);pipelineStarted=true;')
+    resolve = source.index("DecompilerEngine.resolveTargetInputs(app)", start)
+    inventory = source.index('stage(1,4,"Inventory:', resolve)
+    assert start < resolve < inventory
 
 
 def test_full_rerun_invalidates_prepared_automod_and_per_run_evidence_before_target_work():
@@ -168,7 +186,7 @@ def test_failed_run_epoch_invalidation_is_terminal_reconstruction_failure():
 
     assert "boolean runStateInvalidated=false;" in source
     assert 'reconstructionFailure="RUN_EPOCH_INVALIDATION_FAILED:' in source
-    assert 'pipelineState("FAILED","RECONSTRUCTION",false,false,reconstructionFailure)' in source
+    assert 'bestEffortPipelineState("FAILED","RECONSTRUCTION",false,false,reconstructionFailure)' in source
 
 
 def test_unexpected_reconstruction_error_never_hands_off_evidence_graph():
@@ -190,10 +208,22 @@ def test_unexpected_reconstruction_error_never_hands_off_evidence_graph():
 def test_pre_evidence_cancel_reconstruction_failure_and_handoff_failure_are_terminal_states():
     source = _read("FullAnalysisService.java")
 
-    assert 'pipelineState("CANCELLED","RECONSTRUCTION",false,true,"USER_CANCELLED")' in source
-    assert 'pipelineState("FAILED","RECONSTRUCTION",false,false,reconstructionFailure)' in source
-    assert 'pipelineState("FAILED","HANDOFF",false,false' in source
+    assert 'bestEffortPipelineState("CANCELLED","RECONSTRUCTION",false,true,"USER_CANCELLED")' in source
+    assert 'bestEffortPipelineState("FAILED","RECONSTRUCTION",false,false,reconstructionFailure)' in source
+    assert 'bestEffortPipelineState("FAILED","HANDOFF",false,false' in source
     assert 'EVIDENCE_HANDOFF_NOT_STARTED' in source
+
+
+def test_terminal_manifest_write_is_best_effort_only_after_running_manifest_was_published():
+    source = _read("FullAnalysisService.java")
+
+    helper = source.split("private boolean bestEffortPipelineState", 1)[1].split("private void invalidatePreparedAutoModState", 1)[0]
+    assert "try{writePipelineState" in helper
+    terminal = source.split("if(!handedOff){", 1)[1].split("getSharedPreferences", 1)[0]
+    assert "if(pipelineStarted)" in terminal
+    assert "bestEffortPipelineState" in terminal
+    assert 'Files.deleteIfExists(app.file("automatic-evidence.json").toPath())' in terminal
+    assert 'Files.deleteIfExists(app.file("automatic-evidence.json.part").toPath())' in terminal
 
 
 def test_evidence_service_persists_live_phase_before_heavy_pipeline():
