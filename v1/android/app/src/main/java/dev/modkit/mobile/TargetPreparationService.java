@@ -137,8 +137,8 @@ public class TargetPreparationService extends Service {
     private void clearTargetDependentOutputs(){
         String[] names={
                 "full-reconstruction.json","modkit-decompiled.zip","apktool-analysis.json","apktool-workspace",
-                "artifact-families.json","embedded-analysis.json","automatic-evidence.json","hermes-deep","hermes-deep.json",
-                "native-deep.json","native-deep-cache","flutter-deep.json",
+                "artifact-families.json","embedded-analysis.json","automatic-evidence.json","lua-deep.json","hermes-deep","hermes-deep.json",
+                "native-deep.json","native-deep-cache","cocos-deep.json","flutter-deep.json",
                 "installed-apk-set.zip","installed-scan.json","metadata.bin","library.so",
                 "analysis.json","analysis.summary.json","analysis.methods.jsonl","analysis.fields.jsonl","analysis.evidence-graph.jsonl",
                 "analysis.gameplay-coverage.json","analysis-deep","re-analysis.json","re-analysis.ui.json","re-analysis.menu.json","security-surfaces.json",
