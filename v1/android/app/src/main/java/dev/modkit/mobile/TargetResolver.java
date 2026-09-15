@@ -74,6 +74,25 @@ final class TargetResolver {
         return new Target(app,manifest,members,packageName,targetId,fingerprint,apkSet);
     }
 
+    static JSONObject verify(Target target,AtomicBoolean cancelled)throws Exception{
+        JSONArray rows=new JSONArray();boolean ok=true;int patchOwnerIndex=-1;
+        if(target.manifest!=null){JSONObject owner=target.manifest.optJSONObject("patchOwner");if(owner!=null)patchOwnerIndex=owner.optInt("splitIndex",-1);}
+        boolean patchOwnerSeen=patchOwnerIndex<0;
+        for(Member member:target.members){
+            check(cancelled);JSONObject row=new JSONObject().put("index",member.index).put("name",member.name).put("path",member.file.getAbsolutePath()).put("expectedSha256",member.sha256).put("size",member.file.length());
+            if(!member.file.isFile()){row.put("ok",false).put("reason","missing");ok=false;rows.put(row);continue;}
+            String actual=sha256(member.file,cancelled);boolean match=member.sha256==null||member.sha256.isEmpty()||member.sha256.equalsIgnoreCase(actual);
+            row.put("actualSha256",actual).put("ok",match);if(!match){row.put("reason","sha256-mismatch");ok=false;}if(member.index==patchOwnerIndex)patchOwnerSeen=true;rows.put(row);
+        }
+        if(!patchOwnerSeen)ok=false;
+        if(target.manifest!=null&&"PARTIAL".equals(target.manifest.optString("scanCompleteness")))ok=false;
+        return new JSONObject().put("schema","modkit-target-resolver-verify-1.0").put("ok",ok&&rows.length()>0).put("targetId",target.targetId).put("apkSet",target.apkSet).put("memberCount",rows.length()).put("patchOwnerIndex",patchOwnerIndex).put("patchOwnerPresent",patchOwnerSeen).put("currentTargetDigest",targetDigest(target,cancelled)).put("members",rows);
+    }
+
+    static JSONObject requireVerified(Target target,AtomicBoolean cancelled)throws Exception{
+        JSONObject verified=verify(target,cancelled);if(!verified.optBoolean("ok"))throw new IOException("Canonical target изменился, неполон или не совпадает с сохранёнными SHA-256. Выберите target заново перед продолжением.");return verified;
+    }
+
     static File prepareAnalysisContainer(Target target,AtomicBoolean cancelled,Progress progress)throws Exception{
         if(!target.apkSet)return target.baseApk();
         File output=target.app.file("installed-apk-set.zip"),tmp=target.app.file("installed-apk-set.zip.tmp");
@@ -92,13 +111,14 @@ final class TargetResolver {
 
     static String targetDigest(Target target,AtomicBoolean cancelled)throws Exception{
         MessageDigest digest=MessageDigest.getInstance("SHA-256");byte[] buffer=new byte[1024*1024];
-        for(Member member:target.members){check(cancelled);digest.update(Integer.toString(member.index).getBytes(java.nio.charset.StandardCharsets.UTF_8));digest.update((byte)0);digest.update(member.name.getBytes(java.nio.charset.StandardCharsets.UTF_8));digest.update((byte)0);if(member.sha256!=null&&!member.sha256.isEmpty())digest.update(member.sha256.getBytes(java.nio.charset.StandardCharsets.US_ASCII));else try(FileInputStream in=new FileInputStream(member.file)){int n;while((n=in.read(buffer))!=-1){check(cancelled);digest.update(buffer,0,n);}}}
+        for(Member member:target.members){check(cancelled);digest.update(Integer.toString(member.index).getBytes(java.nio.charset.StandardCharsets.UTF_8));digest.update((byte)0);digest.update(member.name.getBytes(java.nio.charset.StandardCharsets.UTF_8));digest.update((byte)0);digest.update(Long.toString(member.file.length()).getBytes(java.nio.charset.StandardCharsets.US_ASCII));digest.update((byte)0);try(FileInputStream in=new FileInputStream(member.file)){int n;while((n=in.read(buffer))!=-1){check(cancelled);digest.update(buffer,0,n);}}}
         StringBuilder out=new StringBuilder();for(byte b:digest.digest())out.append(String.format(Locale.ROOT,"%02x",b));return out.toString();
     }
 
     static JSONObject describe(Target target){
-        JSONObject out=new JSONObject();JSONArray members=new JSONArray();try{out.put("schema","modkit-target-resolver-1.0").put("packageName",target.packageName).put("targetId",target.targetId).put("fingerprintSha256",target.fingerprint).put("apkSet",target.apkSet).put("memberCount",target.members.size());for(Member member:target.members)members.put(new JSONObject().put("index",member.index).put("name",member.name).put("path",member.file.getAbsolutePath()).put("sha256",member.sha256).put("nativeCount",member.nativeCount).put("dexCount",member.dexCount));out.put("members",members).put("patchOwner",target.patchOwnerApk().getAbsolutePath());}catch(Exception ignored){}return out;
+        JSONObject out=new JSONObject();JSONArray members=new JSONArray();try{out.put("schema","modkit-target-resolver-1.1").put("packageName",target.packageName).put("targetId",target.targetId).put("fingerprintSha256",target.fingerprint).put("apkSet",target.apkSet).put("memberCount",target.members.size());for(Member member:target.members)members.put(new JSONObject().put("index",member.index).put("name",member.name).put("path",member.file.getAbsolutePath()).put("sha256",member.sha256).put("nativeCount",member.nativeCount).put("dexCount",member.dexCount));out.put("members",members).put("patchOwner",target.patchOwnerApk().getAbsolutePath());}catch(Exception ignored){}return out;
     }
 
+    private static String sha256(File file,AtomicBoolean cancelled)throws Exception{MessageDigest digest=MessageDigest.getInstance("SHA-256");byte[] buffer=new byte[1024*1024];try(FileInputStream in=new FileInputStream(file)){int n;while((n=in.read(buffer))!=-1){check(cancelled);digest.update(buffer,0,n);}}StringBuilder out=new StringBuilder();for(byte b:digest.digest())out.append(String.format(Locale.ROOT,"%02x",b));return out.toString();}
     private static void check(AtomicBoolean cancelled)throws java.io.InterruptedIOException{if((cancelled!=null&&cancelled.get())||Thread.currentThread().isInterrupted())throw new java.io.InterruptedIOException("cancelled");}
 }
