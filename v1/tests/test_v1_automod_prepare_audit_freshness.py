@@ -86,7 +86,8 @@ def test_automod_build_routes_through_final_sha_guard_only_for_automod_path():
     guard = (ANDROID / "AutoModBuildGuardService.java").read_text(encoding="utf-8")
     manifest = Path("android/app/src/main/AndroidManifest.xml").read_text(encoding="utf-8")
 
-    assert '"menu_build_apk".equals(op)?AutoModBuildGuardService.class:WorkerService.class' in activity
+    assert 'boolean buildOp="menu_build_apk".equals(op);' in activity
+    assert 'Class<?> service=buildOp?AutoModBuildGuardService.class:WorkerService.class;' in activity
     assert '<service android:name=".AutoModBuildGuardService"' in manifest
 
     verify = guard.index("AutoModAuditVerifier.verifyCurrent")
@@ -96,6 +97,16 @@ def test_automod_build_routes_through_final_sha_guard_only_for_automod_path():
     assert 'preflight.optBoolean("readyForAutoBuild")' in guard
     assert '.putExtra("op","menu_build_apk")' in guard
     assert '()->app.cancelled.get()' in guard
+
+
+def test_patch_lab_cleans_saf_destination_and_busy_state_when_build_service_does_not_start():
+    activity = (ANDROID / "AutoModActivity.java").read_text(encoding="utf-8")
+
+    assert "DocumentsContract.deleteDocument(getContentResolver(),uri)" in activity
+    assert "if(!canStart()){if(buildOp)deleteCreatedDocument(uri);return false;}" in activity
+    assert "catch(Exception e){app.busy.set(false);app.revision++;if(buildOp)deleteCreatedDocument(uri);" in activity
+    assert "try{startForegroundService(new Intent(this,AutoModPrepareService.class));}" in activity
+    assert "catch(Exception e){app.busy.set(false);app.revision++;" in activity
 
 
 def test_blocked_prebuild_guard_removes_created_saf_destination():
