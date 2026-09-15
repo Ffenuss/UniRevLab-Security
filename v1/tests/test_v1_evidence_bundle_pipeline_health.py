@@ -34,6 +34,7 @@ def test_bundle_export_requires_terminal_pipeline_state_and_blocks_running_or_mi
     ).read_text(encoding="utf-8")
 
     assert 'static void ensureExportable(Context context)' in source
+    assert 'private static JSONObject terminalPipeline(Context context)' in source
     assert 'app.busy.get()' in source
     assert '"RUNNING".equals(pipeline.optString("status"))' in source
     assert 'if (pipeline == null)' in source
@@ -41,7 +42,20 @@ def test_bundle_export_requires_terminal_pipeline_state_and_blocks_running_or_mi
     for status in ("SUCCESS", "PARTIAL", "FAILED", "CANCELLED"):
         assert f'"{status}".equals(status)' in source
     assert "Pipeline state не является terminal" in source
-    assert 'ensureExportable(context);' in source
+
+
+def test_bundle_export_is_bound_to_one_pipeline_epoch():
+    source = Path(
+        "android/app/src/main/java/dev/modkit/mobile/EvidenceBundleExporter.java"
+    ).read_text(encoding="utf-8")
+
+    assert "private static String pipelineEpoch(JSONObject pipeline)" in source
+    assert "static String exportEpoch(Context context)" in source
+    assert "String initialEpoch = exportEpoch(context);" in source
+    assert "String finalEpoch = exportEpoch(context);" in source
+    assert "if (!initialEpoch.equals(finalEpoch))" in source
+    assert "if (!initialEpoch.equals(exportEpoch(context)))" in source
+    assert "epoch consistency" in source
 
 
 def test_bundle_streaming_loops_are_interruptible():
@@ -67,15 +81,17 @@ def test_failed_bundle_export_clears_partial_destination():
     assert "throw error;" in source
 
 
-def test_report_center_preflights_before_building_connected_report():
+def test_report_center_binds_connected_report_to_same_pipeline_epoch_before_export():
     source = Path(
         "android/app/src/main/java/dev/modkit/mobile/ReportCenterActivity.java"
     ).read_text(encoding="utf-8")
 
-    preflight = source.index("EvidenceBundleExporter.ensureExportable(this)")
-    connected = source.index("JSONObject connected=buildConnected()")
-    export = source.index("EvidenceBundleExporter.export(this,uri)")
-    assert preflight < connected < export
+    first_epoch = source.index("String epoch=EvidenceBundleExporter.exportEpoch(this)")
+    connected = source.index("JSONObject connected=buildConnected()", first_epoch)
+    second_epoch = source.index("EvidenceBundleExporter.exportEpoch(this)", connected)
+    export = source.index("EvidenceBundleExporter.export(this,uri)", second_epoch)
+    assert first_epoch < connected < second_epoch < export
+    assert "Pipeline изменился во время построения connected report" in source
     assert 'manifest.optString("pipelineStatus","UNKNOWN")' in source
 
 
