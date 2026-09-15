@@ -56,7 +56,7 @@ public class TargetPreparationService extends Service {
             "runtime-session.json","runtime-correlation.json",
             "il2cpp-crosscheck.json","il2cpp-crosscheck.json.part","il2cpp-crosscheck.methods.jsonl","il2cpp-crosscheck.methods.jsonl.part",
             "il2cpp-metadata-identity.json","il2cpp-metadata-identity.json.part","il2cpp-metadata-identity.methods.jsonl","il2cpp-metadata-identity.methods.jsonl.part",
-            "il2cpp-no-rva-native.json","il2cpp-no-rva-native.methods.jsonl","il2cpp-no-rva-native.failures.jsonl",
+            "il2cpp-no-rva-native.json","il2cpp-no-rva-native.json.part","il2cpp-no-rva-native.methods.jsonl","il2cpp-no-rva-native.failures.jsonl",
             "lua-deep.json","hermes-deep","hermes-deep.json","native-deep.json","native-deep-cache","cocos-deep.json","flutter-deep.json","deep-gameplay.json",
             "installed-target.json","installed-apk-set.zip","installed-apk-set.zip.tmp","installed-scan.json","installed-apks",
             "metadata.bin","library.so","game.apk","game-native-split.apk","game.apk.part",
