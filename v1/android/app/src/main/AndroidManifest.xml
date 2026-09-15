@@ -11,6 +11,7 @@
 <activity android:name=".TargetSelectionActivity" android:exported="false"/>
 <activity android:name=".AnalysisStorageActivity" android:exported="false"/>
 <activity android:name=".DeepEvidenceActivity" android:exported="false"/>
+<activity android:name=".AutoModActivity" android:exported="false"/>
 <activity android:name=".MainActivity" android:exported="false"/>
 <activity android:name=".SimpleModeActivity" android:exported="false"/>
 <activity android:name=".ProcessLabActivity" android:exported="false"/>
