@@ -91,8 +91,8 @@ public class AutomaticEvidenceService extends Service {
 
         File reTarget=targetForReAnalysis();stage(2,6,unchanged&&haveAnalysis?"cache hit: IL2CPP/DEX/native correlation":"IL2CPP + DEX/native correlation");JSONObject engines=new JSONObject();manifest.put("engines",engines);
         if(!unchanged||!haveAnalysis){
-            try{engines.put("il2cpp",runIl2cpp(reTarget));}catch(Exception e){engines.put("il2cpp",new JSONObject().put("status","PARTIAL").put("error",String.valueOf(e.getMessage())));progress("IL2CPP частичен: "+e.getMessage()+" · продолжаю DEX/native correlation.");}
-            check();try{engines.put("re",runReAnalysis(reTarget));}catch(Exception e){engines.put("re",new JSONObject().put("status","PARTIAL").put("error",String.valueOf(e.getMessage())));progress("DEX/native correlation частична: "+e.getMessage()+" · продолжаю остальные evidence backend'ы.");}
+            try{engines.put("il2cpp",runIl2cpp(reTarget));}catch(Exception e){if(app.cancelled.get())check();engines.put("il2cpp",new JSONObject().put("status","PARTIAL").put("error",String.valueOf(e.getMessage())));progress("IL2CPP частичен: "+e.getMessage()+" · продолжаю DEX/native correlation.");}
+            check();try{engines.put("re",runReAnalysis(reTarget));}catch(Exception e){if(app.cancelled.get())check();engines.put("re",new JSONObject().put("status","PARTIAL").put("error",String.valueOf(e.getMessage())));progress("DEX/native correlation частична: "+e.getMessage()+" · продолжаю остальные evidence backend'ы.");}
         }else{engines.put("il2cpp",new JSONObject().put("status","CACHE_HIT"));engines.put("re",new JSONObject().put("status","CACHE_HIT"));}
 
         check();stage(3,6,"embedded evidence + gameplay ownership correlation");JSONObject artifactSummary=readJson("artifact-families.json");JSONObject embeddedSummary=readJson("embedded-analysis.json");manifest.put("artifactFamilies",artifactSummary==null?JSONObject.NULL:new JSONObject().put("total",artifactSummary.optInt("total")).put("familyCounts",artifactSummary.optJSONObject("familyCounts")));manifest.put("embeddedAnalysis",embeddedSummary==null?JSONObject.NULL:embeddedSummary);
@@ -111,20 +111,20 @@ public class AutomaticEvidenceService extends Service {
                 JSONObject recovered=new JSONObject(recovery.callAttr("recover_workspace",getFilesDir().getPath(),app.file("il2cpp-no-rva-native.json").getPath(),new Progress()).toString());
                 JSONObject rc=recovered.optJSONObject("counts");
                 manifest.put("noRvaNative",new JSONObject().put("status","SUCCESS").put("schema",recovered.optString("schema")).put("resolvedModules",recovered.optInt("resolvedModuleCount")).put("recoveredExact",rc==null?0:rc.optInt("recoveredExact")).put("sharedPointers",rc==null?0:rc.optInt("sharedExecutablePointer")).put("identityMismatch",rc==null?0:rc.optInt("identityMismatch")));
-            }catch(Exception e){manifest.put("noRvaNative",new JSONObject().put("status","PARTIAL").put("error",String.valueOf(e.getMessage())));progress("No-RVA native recovery частичен: "+e.getMessage()+" · продолжаю AutoMod/report.");}
+            }catch(Exception e){if(app.cancelled.get())check();manifest.put("noRvaNative",new JSONObject().put("status","PARTIAL").put("error",String.valueOf(e.getMessage())));progress("No-RVA native recovery частичен: "+e.getMessage()+" · продолжаю AutoMod/report.");}
         }else manifest.put("noRvaNative",new JSONObject().put("status","NOT_APPLICABLE").put("reason","complete IL2CPP pair/catalog not available"));
 
         check();
         try{
             PyObject autoMod=Python.getInstance().getModule("modkit.mobile.automod_cancellable");JSONObject autoPlan=new JSONObject(autoMod.callAttr("build_workspace_plan",getFilesDir().getPath(),app.file("automod-plan.json").getPath(),new Progress()).toString());
             manifest.put("autoMod",new JSONObject().put("readyToBuild",autoPlan.optInt("readyToBuildCount")).put("readyForPreflight",autoPlan.optInt("readyForPreflightCount")).put("runtimeNeeded",autoPlan.optInt("runtimeNeededCount")).put("review",autoPlan.optInt("reviewCount")).put("auditOnly",autoPlan.optInt("auditOnlyCount")).put("excluded",autoPlan.optInt("excludedCount")).put("metadataIdentityNoRva",autoPlan.optInt("metadataIdentityObservedCount")).put("metadataQualifiedNoRva",autoPlan.optInt("metadataQualifiedNoRvaCount")));
-        }catch(Exception e){manifest.put("autoMod",new JSONObject().put("status","PARTIAL").put("error",String.valueOf(e.getMessage())));progress("AutoMod-план частичен: "+e.getMessage()+" · основной Evidence Graph сохранён.");}
+        }catch(Exception e){if(app.cancelled.get())check();manifest.put("autoMod",new JSONObject().put("status","PARTIAL").put("error",String.valueOf(e.getMessage())));progress("AutoMod-план частичен: "+e.getMessage()+" · основной Evidence Graph сохранён.");}
 
         check();
         try{
             PyObject reportModule=Python.getInstance().getModule("modkit.mobile.connected_report_streaming");JSONObject connected=new JSONObject(reportModule.callAttr("build_connected_report",getFilesDir().getPath(),app.file("connected-report.json").getPath(),app.file("connected-report.md").getPath(),new Progress()).toString());
             manifest.put("connectedReport",new JSONObject().put("status","SUCCESS").put("schema",connected.optString("schema")).put("findingCount",connected.optInt("findingCount")).put("exactLinked",connected.optInt("exactLinked")).put("runtimeObserved",connected.optInt("runtimeObservedFindings")).put("il2cppStructural",connected.optInt("il2cppStructuralFindings")).put("metadataIdentityNoRva",connected.optInt("metadataIdentityConfirmedFindings")).put("metadataQualifiedNoRva",connected.optInt("metadataQualifiedIdentityFindings")).put("metadataTokenNoRva",connected.optInt("metadataTokenIdentityFindings")).put("metadataTokenConflicts",connected.optInt("metadataTokenConflictFindings")).put("nativeRvaRecovered",connected.optInt("nativeRvaRecoveredFindings")));
-        }catch(Exception e){manifest.put("connectedReport",new JSONObject().put("status","PARTIAL").put("error",String.valueOf(e.getMessage())));progress("Connected report частичен: "+e.getMessage()+" · AutoMod/Evidence Graph сохранены.");}
+        }catch(Exception e){if(app.cancelled.get())check();manifest.put("connectedReport",new JSONObject().put("status","PARTIAL").put("error",String.valueOf(e.getMessage())));progress("Connected report частичен: "+e.getMessage()+" · AutoMod/Evidence Graph сохранены.");}
 
         JSONObject il2cppEngine=engines.optJSONObject("il2cpp"),reEngine=engines.optJSONObject("re");
         String il2cppStatus=il2cppEngine==null?"":il2cppEngine.optString("status"),reStatus=reEngine==null?"":reEngine.optString("status");
