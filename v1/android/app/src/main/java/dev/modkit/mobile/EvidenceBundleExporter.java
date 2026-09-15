@@ -53,58 +53,69 @@ final class EvidenceBundleExporter {
         List<File> candidates = collect(app.getFilesDir());
         JSONArray entries = new JSONArray();
         long[] total = {0L};
-        try (OutputStream raw = context.getContentResolver().openOutputStream(output, "wt")) {
-            if (raw == null) throw new java.io.IOException("Не удалось открыть Evidence Bundle для записи");
-            try (ZipOutputStream zip = new ZipOutputStream(new BufferedOutputStream(raw, BUFFER))) {
-                for (File file : candidates) {
-                    checkInterrupted();
-                    if (!file.isFile() || file.length() <= 0 || file.length() > MAX_SINGLE_FILE) continue;
-                    if (total[0] + file.length() > MAX_TEXT_TOTAL) break;
-                    String relative = app.getFilesDir().toPath().relativize(file.toPath()).toString().replace(File.separatorChar, '/');
-                    if (!isEvidenceFile(relative)) continue;
-                    String hash = sha256(file);
-                    ZipEntry ze = new ZipEntry("evidence/" + relative); ze.setTime(0L); zip.putNextEntry(ze);
-                    try (BufferedInputStream in = new BufferedInputStream(new FileInputStream(file), BUFFER)) {
-                        byte[] buf = new byte[BUFFER]; int n;
-                        while ((n = in.read(buf)) != -1) { checkInterrupted(); zip.write(buf, 0, n); }
+        try {
+            try (OutputStream raw = context.getContentResolver().openOutputStream(output, "wt")) {
+                if (raw == null) throw new java.io.IOException("Не удалось открыть Evidence Bundle для записи");
+                try (ZipOutputStream zip = new ZipOutputStream(new BufferedOutputStream(raw, BUFFER))) {
+                    for (File file : candidates) {
+                        checkInterrupted();
+                        if (!file.isFile() || file.length() <= 0 || file.length() > MAX_SINGLE_FILE) continue;
+                        if (total[0] + file.length() > MAX_TEXT_TOTAL) break;
+                        String relative = app.getFilesDir().toPath().relativize(file.toPath()).toString().replace(File.separatorChar, '/');
+                        if (!isEvidenceFile(relative)) continue;
+                        String hash = sha256(file);
+                        ZipEntry ze = new ZipEntry("evidence/" + relative); ze.setTime(0L); zip.putNextEntry(ze);
+                        try (BufferedInputStream in = new BufferedInputStream(new FileInputStream(file), BUFFER)) {
+                            byte[] buf = new byte[BUFFER]; int n;
+                            while ((n = in.read(buf)) != -1) { checkInterrupted(); zip.write(buf, 0, n); }
+                        }
+                        zip.closeEntry(); total[0] += file.length();
+                        entries.put(new JSONObject().put("path", relative).put("size", file.length()).put("sha256", hash));
                     }
-                    zip.closeEntry(); total[0] += file.length();
-                    entries.put(new JSONObject().put("path", relative).put("size", file.length()).put("sha256", hash));
-                }
 
-                checkInterrupted();
-                String engineCatalog = engineCatalog(context);
-                writeText(zip, "toolchain/engine-catalog.json", engineCatalog);
-                JSONObject pipeline = readJson(new File(app.getFilesDir(), "automatic-evidence.json"));
-                JSONArray degradedReasons = pipeline == null ? new JSONArray() : pipeline.optJSONArray("degradedReasons");
-                if (degradedReasons == null) degradedReasons = new JSONArray();
-                JSONObject manifest = new JSONObject()
-                        .put("schema", "modkit-evidence-bundle-1.0")
-                        .put("createdAtMs", System.currentTimeMillis())
-                        .put("modkitVersion", appVersion(context))
-                        .put("evidenceFiles", entries)
-                        .put("evidenceFileCount", entries.length())
-                        .put("evidenceBytes", total[0])
-                        .put("pipelineStatus", pipeline == null ? "UNKNOWN" : pipeline.optString("status", "UNKNOWN"))
-                        .put("pipelineComplete", pipeline != null && pipeline.optBoolean("complete", false))
-                        .put("pipelineDegraded", pipeline != null && pipeline.optBoolean("degraded", false))
-                        .put("pipelineDegradedReasons", degradedReasons)
-                        .put("rawTargetBinariesIncluded", false)
-                        .put("note", "Target APK/SO/metadata are intentionally not duplicated; hashes/locators remain in analysis evidence.");
-                if (pipeline != null && !pipeline.optString("error", "").isEmpty()) manifest.put("pipelineError", pipeline.optString("error"));
-                writeText(zip, "bundle-manifest.json", manifest.toString(2));
-
-                StringBuilder hashes = new StringBuilder();
-                for (int i = 0; i < entries.length(); i++) {
                     checkInterrupted();
-                    JSONObject row = entries.getJSONObject(i);
-                    hashes.append(row.getString("sha256")).append("  evidence/").append(row.getString("path")).append('\n');
+                    String engineCatalog = engineCatalog(context);
+                    writeText(zip, "toolchain/engine-catalog.json", engineCatalog);
+                    JSONObject pipeline = readJson(new File(app.getFilesDir(), "automatic-evidence.json"));
+                    JSONArray degradedReasons = pipeline == null ? new JSONArray() : pipeline.optJSONArray("degradedReasons");
+                    if (degradedReasons == null) degradedReasons = new JSONArray();
+                    JSONObject manifest = new JSONObject()
+                            .put("schema", "modkit-evidence-bundle-1.0")
+                            .put("createdAtMs", System.currentTimeMillis())
+                            .put("modkitVersion", appVersion(context))
+                            .put("evidenceFiles", entries)
+                            .put("evidenceFileCount", entries.length())
+                            .put("evidenceBytes", total[0])
+                            .put("pipelineStatus", pipeline == null ? "UNKNOWN" : pipeline.optString("status", "UNKNOWN"))
+                            .put("pipelineComplete", pipeline != null && pipeline.optBoolean("complete", false))
+                            .put("pipelineDegraded", pipeline != null && pipeline.optBoolean("degraded", false))
+                            .put("pipelineDegradedReasons", degradedReasons)
+                            .put("rawTargetBinariesIncluded", false)
+                            .put("note", "Target APK/SO/metadata are intentionally not duplicated; hashes/locators remain in analysis evidence.");
+                    if (pipeline != null && !pipeline.optString("error", "").isEmpty()) manifest.put("pipelineError", pipeline.optString("error"));
+                    writeText(zip, "bundle-manifest.json", manifest.toString(2));
+
+                    StringBuilder hashes = new StringBuilder();
+                    for (int i = 0; i < entries.length(); i++) {
+                        checkInterrupted();
+                        JSONObject row = entries.getJSONObject(i);
+                        hashes.append(row.getString("sha256")).append("  evidence/").append(row.getString("path")).append('\n');
+                    }
+                    writeText(zip, "hashes.sha256", hashes.toString());
+                    checkInterrupted();
+                    return manifest;
                 }
-                writeText(zip, "hashes.sha256", hashes.toString());
-                checkInterrupted();
-                return manifest;
             }
+        } catch (Exception error) {
+            clearFailedOutput(context, output);
+            throw error;
         }
+    }
+
+    private static void clearFailedOutput(Context context, Uri output) {
+        try (OutputStream wipe = context.getContentResolver().openOutputStream(output, "wt")) {
+            if (wipe != null) wipe.flush();
+        } catch (Exception ignored) { }
     }
 
     private static JSONObject readJson(File file) {
