@@ -1,8 +1,9 @@
 """Connected report 1.2: base report plus read-only runtime and IL2CPP corroboration.
 
-The v1.1 report builder remains available for compatibility.  This wrapper enriches its
-finding rows without changing their buildability or method-link status.  Runtime procfs
-layout and the embedded IL2CPP metadata/ELF structural cross-check are evidence only.
+The v1.1 report builder remains available for compatibility. This wrapper enriches its
+finding rows without changing their buildability or method-link status. Runtime procfs
+layout, IL2CPP metadata/ELF structural checks, and no-RVA metadata identity are evidence
+only; none of them can create an executable patch binding.
 """
 from __future__ import annotations
 
@@ -45,7 +46,7 @@ def _jsonl(path: Path) -> list[dict[str, Any]]:
 
 
 def _norm_hex(value: Any) -> str:
-    if value in (None, "", 0, "0"):
+    if value in (None, "", 0, "0", "0x0"):
         return ""
     if isinstance(value, int):
         return f"0x{value:x}"
@@ -135,11 +136,106 @@ def _il2cpp_index(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return out
 
 
+def _ensure_metadata_identity(root: Path) -> dict[str, Any]:
+    summary_path = root / "il2cpp-metadata-identity.json"
+    rows_path = root / "il2cpp-metadata-identity.methods.jsonl"
+    existing = _json(summary_path)
+    if existing and rows_path.is_file():
+        return existing
+    if not (root / "metadata.bin").is_file() or not (root / "analysis.methods.jsonl").is_file():
+        return {}
+    try:
+        from modkit.mobile.il2cpp_metadata_identity import build_workspace_identity
+        return build_workspace_identity(root, summary_path)
+    except Exception as exc:
+        failure = {
+            "schema": "modkit-il2cpp-metadata-identity-error-1.0",
+            "engine": "il2cpp.metadata-identity-embedded",
+            "error": str(exc),
+            "addressResolver": False,
+            "promotesBuildability": False,
+        }
+        try:
+            summary_path.write_text(json.dumps(failure, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+        return failure
+
+
+def _safe_identity(row: dict[str, Any]) -> dict[str, Any] | None:
+    if bool(row.get("promotesBuildability")) or bool(row.get("actionable")) or bool(row.get("buildable")):
+        return None
+    if row.get("rva") not in (None, "", 0, "0", "0x0") or bool(row.get("addressConfirmed")):
+        return None
+    status = str(row.get("status") or "UNRESOLVED_NO_RVA")
+    return {
+        "engine": "il2cpp.metadata-identity-embedded",
+        "status": status,
+        "class": row.get("class"),
+        "methodName": row.get("methodName"),
+        "metadataMethodNamePresent": bool(row.get("metadataMethodNamePresent")),
+        "metadataQualifiedMethodPresent": bool(row.get("metadataQualifiedMethodPresent")),
+        "addressConfirmed": False,
+        "rva": None,
+        "actionable": False,
+        "buildable": False,
+        "promotesBuildability": False,
+    }
+
+
+def _identity_indexes(rows: list[dict[str, Any]]) -> tuple[dict[str, dict[str, Any]], dict[tuple[str, str], dict[str, Any]], dict[str, list[dict[str, Any]]]]:
+    by_id: dict[str, dict[str, Any]] = {}
+    by_qualified: dict[tuple[str, str], dict[str, Any]] = {}
+    by_name: dict[str, list[dict[str, Any]]] = {}
+    for raw in rows:
+        if not isinstance(raw, dict):
+            continue
+        safe = _safe_identity(raw)
+        if safe is None or str(safe.get("status")) == "UNRESOLVED_NO_RVA":
+            continue
+        row_id = raw.get("id")
+        if row_id not in (None, ""):
+            by_id[str(row_id)] = safe
+        method = str(safe.get("methodName") or "").strip().casefold()
+        cls = str(safe.get("class") or "").strip().replace("/", ".").casefold()
+        if method:
+            by_name.setdefault(method, []).append(safe)
+        if method and cls:
+            by_qualified[(cls, method)] = safe
+            by_qualified[(cls.rsplit(".", 1)[-1], method)] = safe
+    return by_id, by_qualified, by_name
+
+
 def _finding_rva(finding: dict[str, Any]) -> str:
     locator = finding.get("locator")
     if isinstance(locator, dict):
         return _norm_hex(locator.get("rva"))
     return ""
+
+
+def _finding_method_id(finding: dict[str, Any]) -> str:
+    locator = finding.get("locator")
+    if isinstance(locator, dict) and locator.get("methodId") not in (None, ""):
+        return str(locator.get("methodId"))
+    linked = finding.get("linkedMethods")
+    if isinstance(linked, list) and len(linked) == 1 and isinstance(linked[0], dict):
+        value = linked[0].get("id")
+        if value not in (None, ""):
+            return str(value)
+    return ""
+
+
+def _finding_class_method(finding: dict[str, Any]) -> tuple[str, str]:
+    locator = finding.get("locator")
+    if not isinstance(locator, dict):
+        return "", ""
+    cls = str(locator.get("class") or "").strip().replace("/", ".").casefold()
+    method = str(locator.get("method") or "").strip()
+    if "::" in method:
+        method = method.rsplit("::", 1)[1]
+    if "(" in method:
+        method = method.split("(", 1)[0]
+    return cls, method.strip().casefold()
 
 
 def _append_artifact_guide(report: dict[str, Any], root: Path) -> None:
@@ -153,6 +249,8 @@ def _append_artifact_guide(report: dict[str, Any], root: Path) -> None:
         ("runtime-correlation.json", "Static RVA → observed runtime VA correlation", "Use as runtime layout corroboration; it does not prove method execution or patch safety."),
         ("il2cpp-crosscheck.json", "Independent IL2CPP metadata + ELF structural summary", "Checks metadata layout and executable ELF ranges without claiming an independent CodeRegistration mapping."),
         ("il2cpp-crosscheck.methods.jsonl", "Per-method IL2CPP structural cross-check", "Use to see whether method-name presence and executable RVA range are independently present for each catalog row."),
+        ("il2cpp-metadata-identity.json", "No-RVA IL2CPP metadata identity summary", "Confirms method identity from global metadata while leaving native address unresolved."),
+        ("il2cpp-metadata-identity.methods.jsonl", "Per-method no-RVA metadata identity", "Distinguishes exact declaring-type+method confirmation from weaker method-name-only presence."),
     ]
     for name, purpose, use in specs:
         if name in present:
@@ -177,10 +275,14 @@ def _append_markdown(path: Path, report: dict[str, Any]) -> None:
         f"- Runtime-observed findings: {report.get('runtimeObservedFindings', 0)}",
         f"- IL2CPP structural findings: {report.get('il2cppStructuralFindings', 0)}",
         f"- IL2CPP metadata+executable-range both present: {report.get('il2cppStructuralBothFindings', 0)}",
+        f"- No-RVA metadata identity confirmed: {report.get('metadataIdentityConfirmedFindings', 0)}",
+        f"- No-RVA qualified class+method confirmed: {report.get('metadataQualifiedIdentityFindings', 0)}",
         "",
-        "> Runtime VA here means the RVA landed in an observed procfs module mapping. It is not proof that the method executed.",
+        "> Runtime VA means the RVA landed in an observed procfs module mapping. It is not proof that the method executed.",
         "",
         "> IL2CPP structural cross-check verifies metadata method-name presence and executable ELF range independently. It does not independently prove the method-to-RVA association and never promotes buildability.",
+        "",
+        "> Metadata identity can confirm Class::Method even when RVA is absent. That resolves identity only; the native address remains unresolved, non-actionable and non-buildable.",
         "",
     ]
     for finding in report.get("findings") or []:
@@ -188,7 +290,8 @@ def _append_markdown(path: Path, report: dict[str, Any]) -> None:
             continue
         runtime = finding.get("runtimeObservation")
         il2cpp = finding.get("il2cppStructural")
-        if not isinstance(runtime, dict) and not isinstance(il2cpp, dict):
+        identity = finding.get("metadataIdentity")
+        if not isinstance(runtime, dict) and not isinstance(il2cpp, dict) and not isinstance(identity, dict):
             continue
         lines.append(f"### Corroboration · {finding.get('title') or finding.get('id') or 'Finding'}")
         if isinstance(runtime, dict):
@@ -205,6 +308,12 @@ def _append_markdown(path: Path, report: dict[str, Any]) -> None:
                 + f" · executable-range={il2cpp.get('executableElfRangePresent')}"
                 + " · associationConfirmed=false"
             )
+        if isinstance(identity, dict):
+            lines.append(
+                "- IL2CPP metadata identity: "
+                + f"{identity.get('status')} · class={identity.get('class') or '?'}"
+                + f" · method={identity.get('methodName') or '?'} · RVA=UNRESOLVED · buildable=false"
+            )
         lines.append("")
     with path.open("a", encoding="utf-8") as stream:
         stream.write("\n".join(lines))
@@ -213,7 +322,6 @@ def _append_markdown(path: Path, report: dict[str, Any]) -> None:
 def build_connected_report(workdir: str | Path, output_json: str | Path | None = None,
                            output_md: str | Path | None = None) -> dict[str, Any]:
     root = Path(workdir)
-    # Let the v1.1 builder keep all existing method/deep-engine/report semantics.
     report = _build_base(root, None, output_md)
     report["schema"] = SCHEMA
 
@@ -221,10 +329,16 @@ def build_connected_report(workdir: str | Path, output_json: str | Path | None =
     runtime_by_id, runtime_by_rva = _runtime_indexes(runtime_summary)
     il2cpp_summary = _json(root / "il2cpp-crosscheck.json")
     il2cpp_by_rva = _il2cpp_index(_jsonl(root / "il2cpp-crosscheck.methods.jsonl"))
+    identity_summary = _ensure_metadata_identity(root)
+    identity_by_id, identity_by_qualified, identity_by_name = _identity_indexes(
+        _jsonl(root / "il2cpp-metadata-identity.methods.jsonl")
+    )
 
     runtime_count = 0
     il2cpp_count = 0
     il2cpp_both = 0
+    identity_count = 0
+    identity_qualified_count = 0
     findings = report.get("findings") if isinstance(report.get("findings"), list) else []
     for finding in findings:
         if not isinstance(finding, dict):
@@ -234,7 +348,6 @@ def build_connected_report(workdir: str | Path, output_json: str | Path | None =
         rva = _finding_rva(finding)
 
         runtime = runtime_by_id.get(str(card_id)) if card_id not in (None, "") else None
-        # Exact-RVA fallback is used only when the observed runtime evidence is unique.
         if runtime is None and rva and len(runtime_by_rva.get(rva, [])) == 1:
             runtime = runtime_by_rva[rva][0]
         if isinstance(runtime, dict):
@@ -254,12 +367,35 @@ def build_connected_report(workdir: str | Path, output_json: str | Path | None =
             if il2cpp.get("status") == "STRUCTURAL_BOTH_PRESENT":
                 il2cpp_both += 1
 
-        # Corroboration is forbidden from changing the base report's buildability decision.
+        # Metadata identity is only relevant when no native RVA was resolved.
+        if not rva:
+            identity = None
+            method_id = _finding_method_id(finding)
+            if method_id:
+                identity = identity_by_id.get(method_id)
+            if identity is None:
+                cls, method = _finding_class_method(finding)
+                if cls and method:
+                    identity = identity_by_qualified.get((cls, method)) or identity_by_qualified.get((cls.rsplit(".", 1)[-1], method))
+                elif method and len(identity_by_name.get(method, [])) == 1:
+                    identity = identity_by_name[method][0]
+            if isinstance(identity, dict):
+                finding["metadataIdentity"] = identity
+                finding["metadataIdentityConfirmed"] = bool(
+                    identity.get("metadataQualifiedMethodPresent") or identity.get("metadataMethodNamePresent")
+                )
+                if finding["metadataIdentityConfirmed"]:
+                    identity_count += 1
+                if identity.get("metadataQualifiedMethodPresent"):
+                    identity_qualified_count += 1
+
         finding["buildable"] = original_buildable
 
     report["runtimeObservedFindings"] = runtime_count
     report["il2cppStructuralFindings"] = il2cpp_count
     report["il2cppStructuralBothFindings"] = il2cpp_both
+    report["metadataIdentityConfirmedFindings"] = identity_count
+    report["metadataQualifiedIdentityFindings"] = identity_qualified_count
     summary = report.get("summary")
     if not isinstance(summary, dict):
         summary = {}
@@ -267,6 +403,8 @@ def build_connected_report(workdir: str | Path, output_json: str | Path | None =
     summary["runtimeObservedFindings"] = runtime_count
     summary["il2cppStructuralFindings"] = il2cpp_count
     summary["il2cppStructuralBothFindings"] = il2cpp_both
+    summary["metadataIdentityConfirmedFindings"] = identity_count
+    summary["metadataQualifiedIdentityFindings"] = identity_qualified_count
 
     report["corroboration"] = {
         "runtime": {
@@ -288,6 +426,16 @@ def build_connected_report(workdir: str | Path, output_json: str | Path | None =
             "executesTargetCode": False,
             "promotesBuildability": False,
         },
+        "il2cppMetadataIdentity": {
+            "available": bool(identity_summary),
+            "schema": identity_summary.get("schema"),
+            "engine": identity_summary.get("engine"),
+            "typeLayout": identity_summary.get("typeLayout"),
+            "counts": identity_summary.get("counts"),
+            "addressResolver": False,
+            "actionable": False,
+            "promotesBuildability": False,
+        },
     }
     semantics = report.get("evidenceSemantics")
     if not isinstance(semantics, dict):
@@ -299,8 +447,11 @@ def build_connected_report(workdir: str | Path, output_json: str | Path | None =
     semantics["IL2CPP_STRUCTURAL_CROSSCHECK"] = (
         "Metadata method-name presence and executable ELF range are checked independently; this backend does not confirm the method-to-RVA association."
     )
+    semantics["IL2CPP_METADATA_IDENTITY_NO_RVA"] = (
+        "Global metadata confirms method identity/name while RVA remains unresolved. This evidence is non-actionable and cannot become a patch binding."
+    )
     semantics["corroborationBuildability"] = (
-        "Runtime and IL2CPP structural corroboration never make a finding buildable; signed build still requires validated local executable binding and successful preflight."
+        "Runtime, IL2CPP structural, and metadata-identity corroboration never make a finding buildable; signed build still requires validated local executable binding and successful preflight."
     )
     _append_artifact_guide(report, root)
 
