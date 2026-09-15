@@ -34,7 +34,12 @@ final class EvidenceBundleExporter {
 
     private EvidenceBundleExporter() {}
 
+    private static void checkInterrupted() throws java.io.InterruptedIOException {
+        if (Thread.currentThread().isInterrupted()) throw new java.io.InterruptedIOException("Evidence Bundle export cancelled");
+    }
+
     static void ensureExportable(Context context) throws Exception {
+        checkInterrupted();
         App app = (App)context.getApplicationContext();
         JSONObject pipeline = readJson(new File(app.getFilesDir(), "automatic-evidence.json"));
         if (app.busy.get() || (pipeline != null && "RUNNING".equals(pipeline.optString("status")))) {
@@ -52,6 +57,7 @@ final class EvidenceBundleExporter {
             if (raw == null) throw new java.io.IOException("Не удалось открыть Evidence Bundle для записи");
             try (ZipOutputStream zip = new ZipOutputStream(new BufferedOutputStream(raw, BUFFER))) {
                 for (File file : candidates) {
+                    checkInterrupted();
                     if (!file.isFile() || file.length() <= 0 || file.length() > MAX_SINGLE_FILE) continue;
                     if (total[0] + file.length() > MAX_TEXT_TOTAL) break;
                     String relative = app.getFilesDir().toPath().relativize(file.toPath()).toString().replace(File.separatorChar, '/');
@@ -60,12 +66,13 @@ final class EvidenceBundleExporter {
                     ZipEntry ze = new ZipEntry("evidence/" + relative); ze.setTime(0L); zip.putNextEntry(ze);
                     try (BufferedInputStream in = new BufferedInputStream(new FileInputStream(file), BUFFER)) {
                         byte[] buf = new byte[BUFFER]; int n;
-                        while ((n = in.read(buf)) != -1) zip.write(buf, 0, n);
+                        while ((n = in.read(buf)) != -1) { checkInterrupted(); zip.write(buf, 0, n); }
                     }
                     zip.closeEntry(); total[0] += file.length();
                     entries.put(new JSONObject().put("path", relative).put("size", file.length()).put("sha256", hash));
                 }
 
+                checkInterrupted();
                 String engineCatalog = engineCatalog(context);
                 writeText(zip, "toolchain/engine-catalog.json", engineCatalog);
                 JSONObject pipeline = readJson(new File(app.getFilesDir(), "automatic-evidence.json"));
@@ -89,10 +96,12 @@ final class EvidenceBundleExporter {
 
                 StringBuilder hashes = new StringBuilder();
                 for (int i = 0; i < entries.length(); i++) {
+                    checkInterrupted();
                     JSONObject row = entries.getJSONObject(i);
                     hashes.append(row.getString("sha256")).append("  evidence/").append(row.getString("path")).append('\n');
                 }
                 writeText(zip, "hashes.sha256", hashes.toString());
+                checkInterrupted();
                 return manifest;
             }
         }
@@ -116,14 +125,17 @@ final class EvidenceBundleExporter {
         }
     }
 
-    private static List<File> collect(File root) {
+    private static List<File> collect(File root) throws java.io.InterruptedIOException {
+        checkInterrupted();
         ArrayList<File> out = new ArrayList<>();
         collectInto(root, root, out, 0);
+        checkInterrupted();
         out.sort(Comparator.comparing(File::getAbsolutePath));
         return out;
     }
 
-    private static void collectInto(File root, File node, List<File> out, int depth) {
+    private static void collectInto(File root, File node, List<File> out, int depth) throws java.io.InterruptedIOException {
+        checkInterrupted();
         if (depth > 8 || node == null || !node.exists()) return;
         if (node.isFile()) { out.add(node); return; }
         String rel = root.toPath().relativize(node.toPath()).toString().replace(File.separatorChar, '/');
@@ -141,11 +153,16 @@ final class EvidenceBundleExporter {
         return lower.endsWith("session") || lower.endsWith("manifest");
     }
 
-    private static String engineCatalog(Context context) {
+    private static String engineCatalog(Context context) throws java.io.InterruptedIOException {
+        checkInterrupted();
         try {
             if (!Python.isStarted()) Python.start(new AndroidPlatform(context));
             PyObject module = Python.getInstance().getModule("modkit.engines");
-            return module.callAttr("catalog_json").toString();
+            String value = module.callAttr("catalog_json").toString();
+            checkInterrupted();
+            return value;
+        } catch (java.io.InterruptedIOException cancelled) {
+            throw cancelled;
         } catch (Exception e) {
             String message = String.valueOf(e.getMessage()).replace("\\", "\\\\").replace("\"", "\\\"");
             return "{\"schema\":\"modkit-engine-catalog-error-1.0\",\"error\":\"" + message + "\"}";
@@ -153,15 +170,19 @@ final class EvidenceBundleExporter {
     }
 
     private static void writeText(ZipOutputStream zip, String name, String text) throws Exception {
+        checkInterrupted();
         ZipEntry entry = new ZipEntry(name); entry.setTime(0L); zip.putNextEntry(entry);
         zip.write(text.getBytes(StandardCharsets.UTF_8)); zip.closeEntry();
+        checkInterrupted();
     }
 
     private static String sha256(File file) throws Exception {
+        checkInterrupted();
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         try (BufferedInputStream in = new BufferedInputStream(new FileInputStream(file), BUFFER)) {
-            byte[] buf = new byte[BUFFER]; int n; while ((n = in.read(buf)) != -1) digest.update(buf, 0, n);
+            byte[] buf = new byte[BUFFER]; int n; while ((n = in.read(buf)) != -1) { checkInterrupted(); digest.update(buf, 0, n); }
         }
+        checkInterrupted();
         StringBuilder out = new StringBuilder(); for (byte b : digest.digest()) out.append(String.format(Locale.ROOT, "%02x", b));
         return out.toString();
     }
