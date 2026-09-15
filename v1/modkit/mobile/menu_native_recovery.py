@@ -111,6 +111,7 @@ def prepare(metadata_path: str | Path, library_path: str | Path, catalog_path: s
         "mode": "EXACT_METADATA_TOKEN_DOMAIN_CODEGENMODULE_ADAPTER",
         "freshnessPolicy": "EXACT_INPUT_SHA256",
         "inputFingerprints": input_fingerprints,
+        "outputFingerprints": [],
         "contiguousTokenDomains": len(expected),
         "nonContiguousTokenDomains": len(non_contiguous),
         "calls": 0,
@@ -141,6 +142,7 @@ def prepare(metadata_path: str | Path, library_path: str | Path, catalog_path: s
                 str(dump_dir) if dump_dir else None,
                 str(title), int(max_deep), int(target_controls), cb,
             )
+            audit["outputFingerprints"] = [_fingerprint("menuSpec", menu_json_path, cb)]
             audit["completed"] = True
             return result
         except Exception as exc:
