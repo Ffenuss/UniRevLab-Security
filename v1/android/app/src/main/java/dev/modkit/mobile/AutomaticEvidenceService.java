@@ -34,7 +34,8 @@ import java.util.zip.ZipOutputStream;
  *
  * This coordinator is deliberately separate from WorkerService: the normal automatic flow no
  * longer enters the legacy multi-tool backend. It consumes reconstruction artifacts produced by
- * FullAnalysisService, runs IL2CPP/DEX/native/security correlation, and writes the ranked catalog.
+ * FullAnalysisService, runs IL2CPP/DEX/native/security correlation, writes the ranked catalog,
+ * and creates the fail-closed AutoMod readiness plan.
  */
 public class AutomaticEvidenceService extends Service {
     private static final int NOTE_ID=95;
@@ -88,7 +89,7 @@ public class AutomaticEvidenceService extends Service {
             JSONObject manifest=new JSONObject();
             try{
                 startedAt=System.currentTimeMillis();
-                manifest.put("schema","modkit-automatic-evidence-1.0")
+                manifest.put("schema","modkit-automatic-evidence-1.1")
                         .put("startedAtMs",startedAt)
                         .put("legacyWorkerUsed",false)
                         .put("executesTargetCode",false);
@@ -152,10 +153,26 @@ public class AutomaticEvidenceService extends Service {
         JSONObject catalog=new JSONObject(simple.callAttr("build_catalog",getFilesDir().getPath(),app.file("simple-catalog.json").getPath()).toString());
         manifest.put("catalog",new JSONObject().put("total",catalog.optInt("total")).put("important",catalog.optInt("important")).put("buildable",catalog.optInt("buildable")).put("actionable",catalog.optInt("actionable")).put("serverAudit",catalog.optInt("serverAudit")));
 
-        check();stage(6,6,"сохранение кэша и итогового каталога");
+        check();stage(6,6,"AutoMod readiness + сохранение кэша");
+        try{
+            PyObject autoMod=Python.getInstance().getModule("modkit.mobile.automod");
+            JSONObject autoPlan=new JSONObject(autoMod.callAttr("build_workspace_plan",getFilesDir().getPath(),app.file("automod-plan.json").getPath()).toString());
+            manifest.put("autoMod",new JSONObject()
+                    .put("readyToBuild",autoPlan.optInt("readyToBuildCount"))
+                    .put("readyForPreflight",autoPlan.optInt("readyForPreflightCount"))
+                    .put("runtimeNeeded",autoPlan.optInt("runtimeNeededCount"))
+                    .put("review",autoPlan.optInt("reviewCount"))
+                    .put("auditOnly",autoPlan.optInt("auditOnlyCount"))
+                    .put("excluded",autoPlan.optInt("excludedCount")));
+        }catch(Exception e){
+            manifest.put("autoMod",new JSONObject().put("status","PARTIAL").put("error",String.valueOf(e.getMessage())));
+            progress("AutoMod-план частичен: "+e.getMessage()+" · основной Evidence Graph сохранён.");
+        }
         cache.callAttr("record_workspace",getFilesDir().getPath(),app.file("simple-cache.json").getPath(),plan.toString());
         app.result=readJson("analysis.summary.json");
-        progress("Готово. Найдено "+catalog.optInt("total")+", важных "+catalog.optInt("important")+", точных locator "+catalog.optInt("actionable")+", PATCH_READY "+catalog.optInt("buildable")+", server/trust audit "+catalog.optInt("serverAudit")+(unchanged?" · cache hit":" · fresh target")+".");
+        JSONObject autoPlan=readJson("automod-plan.json");
+        String autoText=autoPlan==null?"":" · AutoMod build "+autoPlan.optInt("readyToBuildCount")+" / preflight "+autoPlan.optInt("readyForPreflightCount");
+        progress("Готово. Найдено "+catalog.optInt("total")+", важных "+catalog.optInt("important")+", точных locator "+catalog.optInt("actionable")+", PATCH_READY "+catalog.optInt("buildable")+", server/trust audit "+catalog.optInt("serverAudit")+autoText+(unchanged?" · cache hit":" · fresh target")+".");
     }
 
     private JSONObject runIl2cpp(File reTarget)throws Exception{
