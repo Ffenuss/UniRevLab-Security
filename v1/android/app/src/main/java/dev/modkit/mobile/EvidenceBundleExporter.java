@@ -59,6 +59,9 @@ final class EvidenceBundleExporter {
 
                 String engineCatalog = engineCatalog(context);
                 writeText(zip, "toolchain/engine-catalog.json", engineCatalog);
+                JSONObject pipeline = readJson(new File(app.getFilesDir(), "automatic-evidence.json"));
+                JSONArray degradedReasons = pipeline == null ? new JSONArray() : pipeline.optJSONArray("degradedReasons");
+                if (degradedReasons == null) degradedReasons = new JSONArray();
                 JSONObject manifest = new JSONObject()
                         .put("schema", "modkit-evidence-bundle-1.0")
                         .put("createdAtMs", System.currentTimeMillis())
@@ -66,8 +69,13 @@ final class EvidenceBundleExporter {
                         .put("evidenceFiles", entries)
                         .put("evidenceFileCount", entries.length())
                         .put("evidenceBytes", total[0])
+                        .put("pipelineStatus", pipeline == null ? "UNKNOWN" : pipeline.optString("status", "UNKNOWN"))
+                        .put("pipelineComplete", pipeline != null && pipeline.optBoolean("complete", false))
+                        .put("pipelineDegraded", pipeline != null && pipeline.optBoolean("degraded", false))
+                        .put("pipelineDegradedReasons", degradedReasons)
                         .put("rawTargetBinariesIncluded", false)
                         .put("note", "Target APK/SO/metadata are intentionally not duplicated; hashes/locators remain in analysis evidence.");
+                if (pipeline != null && !pipeline.optString("error", "").isEmpty()) manifest.put("pipelineError", pipeline.optString("error"));
                 writeText(zip, "bundle-manifest.json", manifest.toString(2));
 
                 StringBuilder hashes = new StringBuilder();
@@ -78,6 +86,15 @@ final class EvidenceBundleExporter {
                 writeText(zip, "hashes.sha256", hashes.toString());
                 return manifest;
             }
+        }
+    }
+
+    private static JSONObject readJson(File file) {
+        try {
+            if (!file.isFile()) return null;
+            return new JSONObject(new String(java.nio.file.Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8));
+        } catch (Exception ignored) {
+            return null;
         }
     }
 
