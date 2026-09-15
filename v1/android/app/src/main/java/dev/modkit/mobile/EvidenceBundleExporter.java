@@ -85,6 +85,7 @@ final class EvidenceBundleExporter {
         JSONArray entries = new JSONArray();
         long[] total = {0L};
         int[] staleExcluded = {0};
+        int[] budgetExcluded = {0};
         try {
             try (OutputStream raw = context.getContentResolver().openOutputStream(output, "wt")) {
                 if (raw == null) throw new java.io.IOException("Не удалось открыть Evidence Bundle для записи");
@@ -92,10 +93,10 @@ final class EvidenceBundleExporter {
                     for (File file : candidates) {
                         checkInterrupted();
                         if (!file.isFile() || file.length() <= 0 || file.length() > MAX_SINGLE_FILE) continue;
-                        if (total[0] + file.length() > MAX_TEXT_TOTAL) break;
                         String relative = app.getFilesDir().toPath().relativize(file.toPath()).toString().replace(File.separatorChar, '/');
                         if (!isEvidenceFile(relative)) continue;
                         if (freshOnly && !belongsToFailureEpoch(file, initialPipeline)) { staleExcluded[0]++; continue; }
+                        if (total[0] + file.length() > MAX_TEXT_TOTAL) { budgetExcluded[0]++; continue; }
                         String hash = sha256(file);
                         ZipEntry ze = new ZipEntry("evidence/" + relative); ze.setTime(0L); zip.putNextEntry(ze);
                         try (BufferedInputStream in = new BufferedInputStream(new FileInputStream(file), BUFFER)) {
@@ -128,6 +129,7 @@ final class EvidenceBundleExporter {
                             .put("pipelineDegradedReasons", degradedReasons)
                             .put("diagnosticFreshOnly", freshOnly)
                             .put("staleEvidenceFilesExcluded", staleExcluded[0])
+                            .put("budgetEvidenceFilesExcluded", budgetExcluded[0])
                             .put("rawTargetBinariesIncluded", false)
                             .put("historicalProjectTreesIncluded", false)
                             .put("note", freshOnly
