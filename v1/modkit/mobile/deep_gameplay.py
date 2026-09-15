@@ -11,7 +11,7 @@ import json
 import re
 from collections import Counter
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 SCHEMA = "modkit-deep-gameplay-1.0"
 ENGINE_ID = "semantic.gameplay"
@@ -51,7 +51,7 @@ _RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
         "mana", "mp", "maxmana", "energy", "stamina", "maxstamina", "rage", "resource",
     )),
     ("movement", (
-        "movement", "move", "jump", "jumpheight", "gravity", "velocity", "teleport", "position",
+        "movement", "jump", "jumpheight", "gravity", "velocity", "teleport", "position",
         "coordinate", "coordinates", "noclip",
     )),
     ("camera", (
@@ -190,6 +190,16 @@ def _finding_from_artifact(row: dict[str, Any]) -> dict[str, Any] | None:
 def analyze(artifact_report: dict[str, Any], native_report: dict[str, Any]) -> dict[str, Any]:
     findings: list[dict[str, Any]] = []
     seen: set[str] = set()
+    existing_native: set[tuple[str, int]] = set()
+    artifacts = artifact_report.get("artifacts", []) if isinstance(artifact_report, dict) else []
+    for row in artifacts if isinstance(artifacts, list) else []:
+        if not isinstance(row, dict) or not row.get("gameplayDomain"):
+            continue
+        rva = row.get("rva")
+        if not isinstance(rva, int):
+            continue
+        entry = str(row.get("library") or row.get("entry") or "")
+        existing_native.add((entry, rva))
 
     def add(row: dict[str, Any] | None) -> None:
         if not row or len(findings) >= MAX_FINDINGS:
@@ -203,17 +213,22 @@ def analyze(artifact_report: dict[str, Any], native_report: dict[str, Any]) -> d
     for lib in native_report.get("libraries", []) if isinstance(native_report, dict) else []:
         if not isinstance(lib, dict):
             continue
+        entry = str(lib.get("entry") or "")
         for fn in lib.get("functions", []) if isinstance(lib.get("functions"), list) else []:
-            if isinstance(fn, dict):
-                add(_finding_from_native(lib, fn))
+            if not isinstance(fn, dict):
+                continue
+            rva = fn.get("rva")
+            if isinstance(rva, int) and (entry, rva) in existing_native:
+                continue
+            add(_finding_from_native(lib, fn))
 
-    for row in artifact_report.get("artifacts", []) if isinstance(artifact_report, dict) else []:
+    for row in artifacts if isinstance(artifacts, list) else []:
         if isinstance(row, dict):
             add(_finding_from_artifact(row))
 
     coverage = Counter(str(row.get("gameplayDomain") or "") for row in findings if row.get("gameplayDomain"))
     locator_count = sum(1 for row in findings if isinstance(row.get("rva"), int) or (row.get("entry") and row.get("function")))
-    out = {
+    return {
         "schema": SCHEMA,
         "engineId": ENGINE_ID,
         "bundled": True,
@@ -227,7 +242,6 @@ def analyze(artifact_report: dict[str, Any], native_report: dict[str, Any]) -> d
         "findings": findings,
         "truncated": len(findings) >= MAX_FINDINGS,
     }
-    return out
 
 
 def scan_workspace(workdir: str | Path, artifact_report: dict[str, Any] | None = None,
