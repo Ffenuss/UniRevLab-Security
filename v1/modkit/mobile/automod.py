@@ -293,22 +293,26 @@ def _native_recovery_indexes(rows: list[dict[str, Any]]):
         if mid not in (None,""): by_id[str(mid)]=safe
         method=_norm_name(row.get("methodName"));cls=_norm_class(row.get("class"))
         if method and cls:
-            by_pair.setdefault((cls,method),[]).append(safe);short=cls.rsplit(".",1)[-1]
-            if short!=cls: by_pair.setdefault((short,method),[]).append(safe)
+            by_pair.setdefault((cls,method),[]).append(safe)
     return by_id,by_pair
 
 
 def _native_for_card(card: dict[str, Any], indexes):
-    by_id,by_pair=indexes;mid=_card_method_id(card)
-    if mid and mid in by_id:return by_id[mid]
-    locator=card.get("locator") if isinstance(card.get("locator"),dict) else {};method=_norm_name(locator.get("method") or locator.get("methodName"));cls=_norm_class(locator.get("class") or locator.get("className"))
+    by_id,by_pair=indexes
+    locator=card.get("locator") if isinstance(card.get("locator"),dict) else {}
+    method=_norm_name(locator.get("method") or locator.get("methodName"))
+    cls=_norm_class(locator.get("class") or locator.get("className"))
+    mid=_card_method_id(card)
+    if mid:
+        recovered=by_id.get(mid)
+        if not isinstance(recovered,dict): return None
+        recovered_method=_norm_name(recovered.get("methodName"));recovered_class=_norm_class(recovered.get("class"))
+        if method and method!=recovered_method:return None
+        if cls and cls!=recovered_class:return None
+        return recovered
     if method and cls:
         matches=by_pair.get((cls,method),[])
         if len(matches)==1:return matches[0]
-        short=cls.rsplit(".",1)[-1]
-        if short!=cls:
-            matches=by_pair.get((short,method),[])
-            if len(matches)==1:return matches[0]
     return None
 
 
