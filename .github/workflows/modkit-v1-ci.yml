@@ -49,12 +49,18 @@ jobs:
           python -m pytest tests -q
           python -m modkit selftest
           python -m modkit runtime-check
-      - name: Android assemble and lint
+      - name: Android unit tests
         working-directory: v1/android
-        run: |
-          set -euo pipefail
-          gradle --no-daemon :app:assembleDebug
-          gradle --no-daemon :app:lintDebug
+        run: gradle --no-daemon :app:testDebugUnitTest
+      - name: Android Java compile
+        working-directory: v1/android
+        run: gradle --no-daemon :app:compileDebugJavaWithJavac
+      - name: Android lint
+        working-directory: v1/android
+        run: gradle --no-daemon :app:lintDebug
+      - name: Android assemble
+        working-directory: v1/android
+        run: gradle --no-daemon :app:assembleDebug
       - name: Verify APK container, alignment and signature
         working-directory: v1
         run: |
@@ -66,3 +72,14 @@ jobs:
           "${ANDROID_HOME}/build-tools/34.0.0/apksigner" verify --verbose --print-certs "$APK" | tee apk-signature.txt
           sha256sum "$APK" | tee ModKit-Android-1.1.0-dev1-debug.apk.sha256
           test "$(unzip -p "$APK" AndroidManifest.xml | wc -c)" -gt 0
+      - name: Upload validated APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ModKit-Android-1.1.0-dev1-debug
+          path: |
+            v1/android/app/build/outputs/apk/debug/app-debug.apk
+            v1/ModKit-Android-1.1.0-dev1-debug.apk.sha256
+            v1/apk-signature.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
