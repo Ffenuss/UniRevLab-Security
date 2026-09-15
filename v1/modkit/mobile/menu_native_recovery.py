@@ -8,6 +8,12 @@ that exact N and then invokes the unchanged Deep Resolver -> Menu -> ELF preflig
 pipeline. All existing ABI, semantic, instance-resolver and APK ELF gates remain in
 force; this adapter only removes a false module ambiguity.
 
+Phase 7 adds a second fail-closed boundary: immediately before prepare the current
+AutoMod plan is rebuilt from the Evidence Graph, and every executable MenuSpec control
+produced by the legacy autopilot must map to an RVA explicitly admitted by that plan.
+Runtime/read-only and review evidence therefore cannot become executable controls via
+a legacy prepare path.
+
 The patch of ``engine.Elf.modules`` exists only inside one locked call and is restored
 in ``finally``. No target bytes are modified here. Adapter decisions are persisted as
 provenance so a prepared menu can be audited without treating recovery as build proof.
@@ -23,6 +29,7 @@ from modkit.mobile import engine
 from modkit.mobile.il2cpp_no_rva_native import _metadata_token_domains, _resolve_modules_expected
 
 SCHEMA = "modkit-menu-native-recovery-adapter-1.0"
+PHASE7_GATE_SCHEMA = "modkit-automod-phase7-prepare-gate-1.0"
 _LOCK = threading.RLock()
 
 
@@ -53,6 +60,121 @@ def _write_audit(path: str | Path | None, audit: dict[str, Any]) -> None:
     temp = destination.with_name(destination.name + ".tmp")
     temp.write_text(json.dumps(audit, ensure_ascii=False, indent=2), encoding="utf-8")
     temp.replace(destination)
+
+
+def _load_json(path: str | Path) -> dict[str, Any]:
+    try:
+        value = json.loads(Path(path).read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except Exception:
+        return {}
+
+
+def _number(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if not text:
+            return None
+        try:
+            return int(text, 16 if text.startswith("0x") else 10)
+        except ValueError:
+            return None
+    return None
+
+
+def _phase7_allowed_rvas(plan: dict[str, Any]) -> set[int]:
+    policy = plan.get("phase7Policy") if isinstance(plan.get("phase7Policy"), dict) else {}
+    if not policy.get("refinedCatalogRequiresControlCandidate"):
+        raise ValueError("AutoMod Phase 7 policy missing: rebuild the Evidence Graph plan")
+    candidates = plan.get("candidates") if isinstance(plan.get("candidates"), list) else []
+    allowed: set[int] = set()
+    executable_rows = 0
+    for row in candidates:
+        if not isinstance(row, dict) or not bool(row.get("executableControl")):
+            continue
+        executable_rows += 1
+        for key in ("locator", "resolvedLocator", "nativeRvaRecovery"):
+            source = row.get(key) if isinstance(row.get(key), dict) else {}
+            rva = _number(source.get("rva"))
+            if rva is None:
+                rva = _number(source.get("rvaHex"))
+            if rva is not None and rva > 0:
+                allowed.add(rva)
+    declared = int(plan.get("executableControlCount") or 0)
+    if declared <= 0 or executable_rows <= 0:
+        raise ValueError("AutoMod Phase 7: no quality-gated executable controls")
+    if declared != executable_rows:
+        raise ValueError("AutoMod Phase 7: executable control count mismatch")
+    if not allowed:
+        raise ValueError("AutoMod Phase 7: executable controls have no exact native RVA")
+    return allowed
+
+
+def _validate_phase7_menu(root: str | Path, plan: dict[str, Any], allowed_rvas: set[int], cb=None) -> dict[str, Any]:
+    workspace = Path(root)
+    audit_path = workspace / "menu-native-recovery.json"
+    menu_path = workspace / "menu-spec.json"
+    audit = _load_json(audit_path)
+    menu = _load_json(menu_path)
+    controls = menu.get("controls") if isinstance(menu.get("controls"), list) else []
+    accepted: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+    for index, control in enumerate(controls):
+        engine.check(cb)
+        if not isinstance(control, dict):
+            continue
+        rva = _number(control.get("rva"))
+        binding = control.get("binding")
+        visual = str(control.get("type") or "").casefold()
+        probe = control.get("probe_kind") or control.get("probeKind")
+        executable = bool(binding) and rva is not None and rva > 0 and visual != "label" and not probe
+        if not executable:
+            continue
+        row = {
+            "index": index,
+            "id": control.get("id"),
+            "title": control.get("title"),
+            "rva": rva,
+            "rvaHex": f"0x{rva:x}",
+            "binding": binding,
+        }
+        if rva in allowed_rvas:
+            accepted.append(row)
+        else:
+            rejected.append(row)
+
+    gate = {
+        "schema": PHASE7_GATE_SCHEMA,
+        "validated": not rejected,
+        "planSchema": plan.get("schema"),
+        "policySchema": (plan.get("phase7Policy") or {}).get("schema") if isinstance(plan.get("phase7Policy"), dict) else None,
+        "executableControlCount": int(plan.get("executableControlCount") or 0),
+        "allowedRvaCount": len(allowed_rvas),
+        "validatedMenuControlCount": len(accepted),
+        "rejectedControlCount": len(rejected),
+        "allowedRvas": [f"0x{value:x}" for value in sorted(allowed_rvas)],
+        "accepted": accepted,
+        "rejected": rejected,
+        "runtimeEvidencePromotesBuildability": False,
+        "reviewEvidencePromotesBuildability": False,
+    }
+    audit["phase7PlanRequired"] = True
+    audit["phase7Gate"] = gate
+    if rejected:
+        audit["completed"] = False
+        audit["errorType"] = "Phase7ExecutableControlRejected"
+        audit["error"] = "Generated MenuSpec contains executable controls outside the current Evidence Graph allowlist"
+    _write_audit(audit_path, audit)
+    engine.check(cb)
+    if rejected:
+        raise ValueError("AutoMod Phase 7 blocked executable control outside current Evidence Graph allowlist")
+    return gate
 
 
 def _strict_modules_factory(original, expected_counts: dict[str, int], audit: dict[str, Any]):
@@ -122,6 +244,7 @@ def prepare(metadata_path: str | Path, library_path: str | Path, catalog_path: s
         "modifiesTarget": False,
         "addressRecoveryPromotesBuildability": False,
         "promotesBuildability": False,
+        "phase7PlanRequired": True,
         "inputs": {
             "metadata": Path(metadata_path).name,
             "library": Path(library_path).name,
@@ -159,7 +282,14 @@ def prepare_workspace(workspace: str | Path, source_apk: str | Path, cb=None):
     deep = root / "analysis-deep"
     deep.mkdir(parents=True, exist_ok=True)
     dump = root / "rodroid"
-    return prepare(
+
+    # Rebuild the plan immediately before prepare so a stale UI plan cannot authorize
+    # executable controls after the Evidence Graph or exact native evidence changed.
+    from modkit.mobile import automod_cancellable
+    plan = automod_cancellable.build_workspace_plan(root, root / "automod-plan.json", cb)
+    allowed_rvas = _phase7_allowed_rvas(plan)
+
+    result = prepare(
         root / "metadata.bin",
         root / "library.so",
         root / "analysis.methods.jsonl",
@@ -176,3 +306,5 @@ def prepare_workspace(workspace: str | Path, source_apk: str | Path, cb=None):
         cb=cb,
         audit_path=root / "menu-native-recovery.json",
     )
+    _validate_phase7_menu(root, plan, allowed_rvas, cb)
+    return result
