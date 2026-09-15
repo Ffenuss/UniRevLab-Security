@@ -19,6 +19,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.util.List;
 import java.util.Locale;
@@ -39,6 +40,15 @@ public class FullAnalysisService extends Service {
         }catch(Exception ignored){}
         progress("Реконструкция ["+index+"/"+total+"]: "+name);
     }
+    private void pipelineState(String status,String phase,boolean complete,boolean cancelled,String error){
+        try{
+            JSONObject state=new JSONObject().put("schema","modkit-automatic-evidence-1.1").put("status",status).put("phase",phase).put("complete",complete).put("cancelled",cancelled).put("startedAtMs",startedAt).put("updatedAtMs",System.currentTimeMillis());
+            if(error!=null&&!error.isEmpty())state.put("error",error);
+            File temp=app.file("automatic-evidence.json.part"),dest=app.file("automatic-evidence.json");
+            Files.write(temp.toPath(),state.toString(2).getBytes(StandardCharsets.UTF_8));
+            Files.move(temp.toPath(),dest.toPath(),StandardCopyOption.REPLACE_EXISTING);
+        }catch(Exception ignored){}
+    }
 
     /** Chaquopy callback shared with inventory and embedded backends. */
     public final class Progress {
@@ -52,7 +62,9 @@ public class FullAnalysisService extends Service {
         getSharedPreferences("state",0).edit().putBoolean("running",true).apply();
         new Thread(()->{
             boolean chain=true;
+            String handoffFailure=null;
             startedAt=System.currentTimeMillis();
+            pipelineState("RUNNING","RECONSTRUCTION",false,false,null);
             try{
                 List<File> inputs=DecompilerEngine.resolveTargetInputs(app);
                 if(inputs.isEmpty())throw new java.io.FileNotFoundException("Сначала выберите APK или установленный пакет.");
@@ -134,10 +146,13 @@ public class FullAnalysisService extends Service {
                         startForegroundService(new Intent(this,AutomaticEvidenceService.class));
                         handedOff=true;
                     }catch(Exception handoffError){
-                        progress("Не удалось запустить Evidence Graph: "+handoffError.getMessage());
+                        handoffFailure=String.valueOf(handoffError.getMessage());
+                        progress("Не удалось запустить Evidence Graph: "+handoffFailure);
                     }
                 }
                 if(!handedOff){
+                    if(app.cancelled.get())pipelineState("CANCELLED","RECONSTRUCTION",false,true,"USER_CANCELLED");
+                    else pipelineState("FAILED","HANDOFF",false,false,handoffFailure==null?"EVIDENCE_HANDOFF_NOT_STARTED":handoffFailure);
                     getSharedPreferences("state",0).edit().putBoolean("running",false).apply();
                     app.busy.set(false);app.revision++;
                 }
