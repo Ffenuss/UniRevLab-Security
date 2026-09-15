@@ -2,8 +2,10 @@
 
 The ranking/ownership/readiness semantics remain owned by ``simple_mode``.  This
 adapter temporarily wraps the high-volume row/card hooks and replaces engine detection
-with an equivalent cancellable implementation.  The final catalogue is only written
-after a last cancellation check, so user cancellation never publishes a partial file.
+with an equivalent cancellable implementation. The release catalogue is then passed
+through the evidence-quality layer which deduplicates normalized surfaces/candidates
+without promoting weak evidence. The final catalogue is only written after a last
+cancellation check, so user cancellation never publishes a partial file.
 """
 from __future__ import annotations
 
@@ -14,8 +16,9 @@ from typing import Any, Iterable
 import zipfile
 
 from modkit.mobile import simple_mode as _base
+from modkit.mobile import evidence_quality as _quality
 
-SCHEMA = _base.SCHEMA
+SCHEMA = "modkit-simple-mode-1.4"
 _LOCK = threading.RLock()
 
 
@@ -170,9 +173,20 @@ def build_catalog(workdir: str | Path, output_path: str | Path | None = None,
             _base._json = original_json
 
     gate.force()
+    report = _quality.refine_catalog(report)
+    gate.force()
     if isinstance(report, dict):
         report["cancelAware"] = cb is not None
     if output_path:
         gate.force()
-        Path(output_path).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        destination = Path(output_path)
+        temporary = destination.with_name(destination.name + ".part")
+        temporary.unlink(missing_ok=True)
+        try:
+            temporary.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+            gate.force()
+            temporary.replace(destination)
+        except Exception:
+            temporary.unlink(missing_ok=True)
+            raise
     return report
