@@ -71,10 +71,19 @@ public class FullAnalysisService extends Service {
             Files.deleteIfExists(app.file(name).toPath());
         }
     }
+    private void deleteRunTree(File file)throws Exception{
+        if(file==null||!file.exists())return;
+        if(app.cancelled.get())throw new java.io.InterruptedIOException("cancelled");
+        if(file.isDirectory()){
+            File[] children=file.listFiles();
+            if(children!=null)for(File child:children)deleteRunTree(child);
+        }
+        if(app.cancelled.get())throw new java.io.InterruptedIOException("cancelled");
+        if(!file.delete()&&file.exists())throw new java.io.IOException("Не удалось очистить старый embedded artifact: "+file.getName());
+    }
     private void invalidateEmbeddedRunOutputs()throws Exception{
-        for(String name:new String[]{"artifact-families.json","embedded-analysis.json","lua-deep.json","hermes-deep.json","native-deep.json","cocos-deep.json","flutter-deep.json","deep-gameplay.json"}){
-            if(app.cancelled.get())throw new java.io.InterruptedIOException("cancelled");
-            Files.deleteIfExists(app.file(name).toPath());
+        for(String name:new String[]{"artifact-families.json","embedded-analysis.json","lua-deep.json","hermes-deep","hermes-deep.json","native-deep.json","cocos-deep.json","flutter-deep.json","deep-gameplay.json"}){
+            deleteRunTree(app.file(name));
         }
     }
 
