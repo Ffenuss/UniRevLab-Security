@@ -107,7 +107,7 @@ public class AutomaticEvidenceService extends Service {
         File meta=app.file("metadata.bin"),lib=app.file("library.so"),methods=app.file("analysis.methods.jsonl");
         if(meta.isFile()&&lib.isFile()&&methods.isFile()){
             try{
-                PyObject recovery=Python.getInstance().getModule("modkit.mobile.il2cpp_no_rva_native");
+                PyObject recovery=Python.getInstance().getModule("modkit.mobile.il2cpp_no_rva_native_release");
                 JSONObject recovered=new JSONObject(recovery.callAttr("recover_workspace",getFilesDir().getPath(),app.file("il2cpp-no-rva-native.json").getPath(),new Progress()).toString());
                 JSONObject rc=recovered.optJSONObject("counts");
                 manifest.put("noRvaNative",new JSONObject().put("status","SUCCESS").put("schema",recovered.optString("schema")).put("resolvedModules",recovered.optInt("resolvedModuleCount")).put("recoveredExact",rc==null?0:rc.optInt("recoveredExact")).put("sharedPointers",rc==null?0:rc.optInt("sharedExecutablePointer")).put("identityMismatch",rc==null?0:rc.optInt("identityMismatch")));
