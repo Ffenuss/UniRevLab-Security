@@ -70,10 +70,10 @@ public class AutomaticEvidenceService extends Service {
         new Thread(()->{
             JSONObject manifest=new JSONObject();
             try{
-                startedAt=System.currentTimeMillis();manifest.put("schema","modkit-automatic-evidence-1.1").put("startedAtMs",startedAt).put("legacyWorkerUsed",false).put("executesTargetCode",false).put("status","RUNNING");
-                runPipeline(manifest);String status=manifest.optString("status","SUCCESS");if("RUNNING".equals(status))status="SUCCESS";manifest.put("status",status).put("complete",!app.cancelled.get()).put("cancelled",app.cancelled.get()).put("finishedAtMs",System.currentTimeMillis());writeJson("automatic-evidence.json",manifest);
+                startedAt=System.currentTimeMillis();manifest.put("schema","modkit-automatic-evidence-1.1").put("startedAtMs",startedAt).put("legacyWorkerUsed",false).put("executesTargetCode",false).put("status","RUNNING").put("phase","EVIDENCE").put("complete",false).put("cancelled",false);writeJson("automatic-evidence.json",manifest);
+                runPipeline(manifest);String status=manifest.optString("status","SUCCESS");if("RUNNING".equals(status))status="SUCCESS";manifest.put("status",status).put("phase","FINISHED").put("complete",!app.cancelled.get()).put("cancelled",app.cancelled.get()).put("finishedAtMs",System.currentTimeMillis());writeJson("automatic-evidence.json",manifest);
             }catch(Exception e){
-                try{manifest.put("status",app.cancelled.get()?"CANCELLED":"FAILED").put("complete",false).put("cancelled",app.cancelled.get()).put("error",String.valueOf(e.getMessage())).put("finishedAtMs",System.currentTimeMillis());writeJson("automatic-evidence.json",manifest);}catch(Exception ignored){}
+                try{manifest.put("status",app.cancelled.get()?"CANCELLED":"FAILED").put("phase","FINISHED").put("complete",false).put("cancelled",app.cancelled.get()).put("error",String.valueOf(e.getMessage())).put("finishedAtMs",System.currentTimeMillis());writeJson("automatic-evidence.json",manifest);}catch(Exception ignored){}
                 progress(app.cancelled.get()?"Автоанализ отменён.":"Evidence Graph: "+e.getMessage());
             }finally{
                 if(wake!=null&&wake.isHeld())wake.release();getSharedPreferences("state",0).edit().putBoolean("running",false).apply();app.busy.set(false);app.revision++;stopForeground(true);stopSelf();
