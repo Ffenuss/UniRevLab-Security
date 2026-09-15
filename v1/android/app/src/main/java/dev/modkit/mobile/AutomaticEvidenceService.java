@@ -62,6 +62,11 @@ public class AutomaticEvidenceService extends Service {
     }
     private void notifyProgress(String text){((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).notify(NOTE_ID,note(text));}
     private void progress(String text){app.progress(text);notifyProgress(text);}
+    private JSONObject initialManifest(){
+        JSONObject previous=readJson("automatic-evidence.json");
+        if(previous!=null&&"RUNNING".equals(previous.optString("status"))&&previous.optLong("startedAtMs",0L)>0L)return previous;
+        return new JSONObject();
+    }
 
     @Override public int onStartCommand(Intent intent,int flags,int startId){
         if(intent!=null&&"cancel".equals(intent.getAction())){app.cancelled.set(true);progress("Отмена запрошена — завершаю текущий безопасный шаг…");return START_NOT_STICKY;}
@@ -69,9 +74,9 @@ public class AutomaticEvidenceService extends Service {
         wake=((PowerManager)getSystemService(POWER_SERVICE)).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"ModKit:auto-evidence");wake.acquire(2L*60L*60L*1000L);
         getSharedPreferences("state",0).edit().putBoolean("running",true).apply();
         new Thread(()->{
-            JSONObject manifest=new JSONObject();
+            JSONObject manifest=initialManifest();
             try{
-                startedAt=System.currentTimeMillis();manifest.put("schema","modkit-automatic-evidence-1.1").put("startedAtMs",startedAt).put("legacyWorkerUsed",false).put("executesTargetCode",false).put("status","RUNNING").put("phase","EVIDENCE").put("complete",false).put("cancelled",false);writeJson("automatic-evidence.json",manifest);
+                long inheritedStartedAt=manifest.optLong("startedAtMs",0L);startedAt=inheritedStartedAt>0L?inheritedStartedAt:System.currentTimeMillis();manifest.put("schema","modkit-automatic-evidence-1.1").put("startedAtMs",startedAt).put("legacyWorkerUsed",false).put("executesTargetCode",false).put("status","RUNNING").put("phase","EVIDENCE").put("complete",false).put("cancelled",false).remove("finishedAtMs");manifest.remove("error");writeJson("automatic-evidence.json",manifest);
                 runPipeline(manifest);String status=manifest.optString("status","SUCCESS");if("RUNNING".equals(status))status="SUCCESS";manifest.put("status",status).put("phase","FINISHED").put("complete",!app.cancelled.get()).put("cancelled",app.cancelled.get()).put("finishedAtMs",System.currentTimeMillis());writeJson("automatic-evidence.json",manifest);
             }catch(Exception e){
                 try{manifest.put("status",app.cancelled.get()?"CANCELLED":"FAILED").put("phase","FINISHED").put("complete",false).put("cancelled",app.cancelled.get()).put("error",String.valueOf(e.getMessage())).put("finishedAtMs",System.currentTimeMillis());writeJson("automatic-evidence.json",manifest);}catch(Exception ignored){}
