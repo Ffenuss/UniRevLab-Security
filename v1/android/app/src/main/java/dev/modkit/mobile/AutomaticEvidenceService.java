@@ -16,19 +16,11 @@ import com.chaquo.python.android.AndroidPlatform;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.BufferedOutputStream;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipOutputStream;
 
 /** Final automatic evidence pass for the release UI. */
 public class AutomaticEvidenceService extends Service {
@@ -120,8 +112,10 @@ public class AutomaticEvidenceService extends Service {
     }
 
     private void runPipeline(JSONObject manifest)throws Exception{
-        if(!app.file("game.apk").isFile()&&!app.file("installed-target.json").isFile())throw new IOException("Target отсутствует");
-        check();invalidatePerRunDerivedOutputs();check();
+        TargetResolver.Target target=TargetResolver.resolve(app);JSONObject targetVerification=TargetResolver.requireVerified(target,app.cancelled);check();
+        JSONObject targetBinding=new JSONObject().put("schema","modkit-pipeline-target-1.0").put("targetId",target.targetId).put("fingerprintSha256",target.fingerprint).put("targetDigest",targetVerification.optString("currentTargetDigest")).put("apkSet",target.apkSet).put("memberCount",target.members.size());
+        manifest.put("target",targetBinding);AnalysisJournal.append(this,"TARGET_VERIFIED","Automatic Evidence canonical target verified",targetBinding);
+        invalidatePerRunDerivedOutputs();check();
         if(!Python.isStarted())Python.start(new AndroidPlatform(this));PyObject cache=Python.getInstance().getModule("modkit.mobile.simple_cache");
 
         stage(1,6,"target digest + APK/split cache plan");
@@ -134,7 +128,7 @@ public class AutomaticEvidenceService extends Service {
         boolean coreCacheHit=unchanged&&coreCacheReady;
         manifest.put("cachePlan",plan).put("cacheHit",coreCacheHit);
 
-        File reTarget=targetForReAnalysis();stage(2,6,coreCacheHit?"cache hit: IL2CPP/DEX/native correlation":"IL2CPP + DEX/native correlation");JSONObject engines=new JSONObject();manifest.put("engines",engines);
+        File reTarget=TargetResolver.prepareAnalysisContainer(target,app.cancelled,new Progress()::progress);stage(2,6,coreCacheHit?"cache hit: IL2CPP/DEX/native correlation":"IL2CPP + DEX/native correlation");JSONObject engines=new JSONObject();manifest.put("engines",engines);
         if(!coreCacheHit){
             invalidateFreshCoreOutputs();
             try{engines.put("il2cpp",runIl2cpp(reTarget));}catch(Throwable e){if(app.cancelled.get())check();recordBackendFailure("IL2CPP_FAILURE",e);engines.put("il2cpp",new JSONObject().put("status","PARTIAL").put("errorClass",e.getClass().getName()).put("error",errorText(e)));progress("IL2CPP частичен: "+e.getClass().getSimpleName()+" · продолжаю DEX/native correlation.");}
@@ -220,7 +214,7 @@ public class AutomaticEvidenceService extends Service {
         if(reportStatus!=null&&"PARTIAL".equals(reportStatus.optString("status")))degradedReasons.put("CONNECTED_REPORT_PARTIAL");
         boolean degraded=degradedReasons.length()>0;manifest.put("degraded",degraded).put("degradedReasons",degradedReasons).put("status",degraded?"PARTIAL":"SUCCESS");
 
-        check();app.result=readJson("analysis.summary.json");JSONObject autoPlan=readJson("automod-plan.json");JSONObject connected=readJson("connected-report.json");JSONObject nativeRecovery=readJson("il2cpp-no-rva-native.json");JSONObject recoveryCounts=nativeRecovery==null?null:nativeRecovery.optJSONObject("counts");
+        check();JSONObject finalTarget=TargetResolver.requireVerified(TargetResolver.resolve(app),app.cancelled);if(!targetVerification.optString("currentTargetDigest").equals(finalTarget.optString("currentTargetDigest")))throw new IOException("Canonical target изменился во время Evidence pipeline");app.result=readJson("analysis.summary.json");JSONObject autoPlan=readJson("automod-plan.json");JSONObject connected=readJson("connected-report.json");JSONObject nativeRecovery=readJson("il2cpp-no-rva-native.json");JSONObject recoveryCounts=nativeRecovery==null?null:nativeRecovery.optJSONObject("counts");
         String autoText=autoPlan==null?"":" · AutoMod build "+autoPlan.optInt("readyToBuildCount")+" / preflight "+autoPlan.optInt("readyForPreflightCount");String reportText=connected==null?"":" · report links "+connected.optInt("exactLinked")+" / recovered RVA "+connected.optInt("nativeRvaRecoveredFindings")+" / token-no-RVA "+connected.optInt("metadataTokenIdentityFindings")+" / conflicts "+connected.optInt("metadataTokenConflictFindings");String recoveryText=recoveryCounts==null?"":" · native recovery "+recoveryCounts.optInt("recoveredExact");
         progress((degraded?"Готово частично":"Готово")+". Найдено "+catalog.optInt("total")+", важных "+catalog.optInt("important")+", точных locator "+catalog.optInt("actionable")+", PATCH_READY "+catalog.optInt("buildable")+", server/trust audit "+catalog.optInt("serverAudit")+autoText+recoveryText+reportText+(coreCacheHit?" · cache hit":" · fresh core")+".");
     }
@@ -233,12 +227,8 @@ public class AutomaticEvidenceService extends Service {
 
     private JSONObject runReAnalysis(File reTarget)throws Exception{check();File meta=app.file("metadata.bin"),lib=app.file("library.so"),rod=app.file("rodroid"),analysis=app.file("analysis.json"),output=app.file("re-analysis.json");String inputMode=reTarget.getName().equals("installed-apk-set.zip")?"automatic-installed-apk-set":"automatic-single-apk";PyObject result=engine().callAttr("re_analyze_apk",reTarget.getPath(),output.getPath(),meta.isFile()?meta.getPath():null,lib.isFile()?lib.getPath():null,rod.isDirectory()?rod.getPath():null,null,analysis.isFile()?analysis.getPath():null,new Progress(),inputMode,true);JSONObject obj=new JSONObject(result.toString());return new JSONObject().put("status","SUCCESS").put("findingCount",obj.optInt("findingCount")).put("il2cppXrefs",obj.optInt("il2cppXrefs")).put("contextMethods",obj.optInt("contextMethods"));}
 
-    private File targetForReAnalysis()throws Exception{
-        File manifest=app.file("installed-target.json");if(!manifest.isFile()){File single=app.file("game.apk");if(!single.isFile())throw new IOException("APK target отсутствует");return single;}JSONObject target=new JSONObject(Io.readUtf8(manifest));JSONArray splits=target.optJSONArray("splits");if(splits==null||splits.length()<=1){File single=app.file("game.apk");if(!single.isFile())throw new IOException("base APK отсутствует");return single;}List<File> files=new ArrayList<>();List<String> names=new ArrayList<>();for(int i=0;i<splits.length();i++){JSONObject row=splits.optJSONObject(i);if(row==null)continue;File f=new File(row.optString("path",""));if(!f.isFile())throw new IOException("Split отсутствует: "+row.optString("name",f.getName()));files.add(f);names.add(row.optString("name",f.getName()));}if(files.isEmpty())throw new IOException("APK-set manifest не содержит читаемых splits");File zip=app.file("installed-apk-set.zip");writeApkSet(zip,files,names);return zip;
-    }
-    private void writeApkSet(File output,List<File> files,List<String> names)throws Exception{File temp=new File(output.getParentFile(),output.getName()+".tmp");temp.delete();try(ZipOutputStream z=new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(temp)))){z.setLevel(0);byte[] buf=new byte[1024*1024];for(int i=0;i<files.size();i++){check();ZipEntry entry=new ZipEntry(names.get(i));z.putNextEntry(entry);try(InputStream in=new FileInputStream(files.get(i))){int n;while((n=in.read(buf))!=-1){check();z.write(buf,0,n);}}z.closeEntry();}}Files.move(temp.toPath(),output.toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING);}
     private PyObject engine(){if(!Python.isStarted())Python.start(new AndroidPlatform(this));return Python.getInstance().getModule("modkit.mobile.engine");}
-    private void check()throws IOException{if(app.cancelled.get())throw new IOException("Автоанализ отменён пользователем");}
+    private void check()throws IOException{if(app.cancelled.get()||Thread.currentThread().isInterrupted())throw new java.io.InterruptedIOException("Автоанализ отменён пользователем");}
     private static boolean hasError(JSONObject value){return value!=null&&!value.optString("error","").isEmpty();}
     private void stage(int stage,int total,String name)throws Exception{check();currentStage=stage;currentStageName=name;heartbeat(name);progress("Автоанализ ["+stage+"/"+total+"]: "+name);}
     private JSONObject readJson(String name){try{File f=app.file(name);return f.isFile()?new JSONObject(Io.readUtf8(f)):null;}catch(Exception ignored){return null;}}
