@@ -85,7 +85,8 @@ final class TargetResolver {
         try(ZipOutputStream zip=new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(tmp)))){
             zip.setLevel(0);byte[] buffer=new byte[1024*1024];int pos=0;
             for(Member member:target.members){check(cancelled);if(progress!=null)progress.progress("APK-set container: "+(++pos)+"/"+target.members.size()+" · "+member.name);ZipEntry entry=new ZipEntry(member.name);entry.setTime(0L);zip.putNextEntry(entry);try(InputStream in=new BufferedInputStream(new FileInputStream(member.file))){int n;while((n=in.read(buffer))!=-1){check(cancelled);zip.write(buffer,0,n);}}zip.closeEntry();}
-        }catch(Throwable e){Files.deleteIfExists(tmp.toPath());throw e;}
+        }catch(Exception e){Files.deleteIfExists(tmp.toPath());throw e;}
+        catch(Error e){try{Files.deleteIfExists(tmp.toPath());}catch(Exception ignored){}throw e;}
         Files.move(tmp.toPath(),output.toPath(),StandardCopyOption.REPLACE_EXISTING);Files.write(sidecar.toPath(),expected.getBytes(java.nio.charset.StandardCharsets.UTF_8));return output;
     }
 
