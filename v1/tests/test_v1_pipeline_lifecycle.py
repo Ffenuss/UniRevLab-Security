@@ -29,7 +29,7 @@ def test_full_rerun_invalidates_prepared_automod_epoch_before_target_work():
         "menu-native-recovery.json",
         "menu-native-recovery.json.tmp",
     )
-    helper = source.split("private void invalidatePreparedAutoModState()", 1)[1].split("/** Chaquopy", 1)[0]
+    helper = source.split("private void invalidatePreparedAutoModState()", 1)[1].split("private void invalidateEmbeddedRunOutputs()", 1)[0]
     for name in required:
         assert f'"{name}"' in helper
 
@@ -37,6 +37,26 @@ def test_full_rerun_invalidates_prepared_automod_epoch_before_target_work():
     resolve = source.index("DecompilerEngine.resolveTargetInputs(app)")
     inventory = source.index('stage(1,4,"Inventory:')
     assert invalidate < resolve < inventory
+
+
+def test_embedded_outputs_are_invalidated_before_same_target_rerun_backend_executes():
+    source = _read("FullAnalysisService.java")
+    helper = source.split("private void invalidateEmbeddedRunOutputs()", 1)[1].split("/** Chaquopy", 1)[0]
+    for name in (
+        "artifact-families.json",
+        "embedded-analysis.json",
+        "lua-deep.json",
+        "hermes-deep.json",
+        "native-deep.json",
+        "cocos-deep.json",
+        "flutter-deep.json",
+        "deep-gameplay.json",
+    ):
+        assert f'"{name}"' in helper
+    stage = source.index('stage(4,4,"Lua/JS/Hermes deep')
+    invalidate = source.index("invalidateEmbeddedRunOutputs();", stage)
+    backend = source.index('getModule("modkit.mobile.embedded_pipeline")', invalidate)
+    assert stage < invalidate < backend
 
 
 def test_failed_epoch_invalidation_is_terminal_reconstruction_failure():
