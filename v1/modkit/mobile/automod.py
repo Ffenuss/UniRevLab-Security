@@ -60,6 +60,20 @@ def _load_jsonl(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def _fresh(outputs: list[Path], inputs: list[Path]) -> bool:
+    """Return True only when every output is at least as new as every source input."""
+    if not outputs or not inputs:
+        return False
+    try:
+        if any(not path.is_file() for path in outputs) or any(not path.is_file() for path in inputs):
+            return False
+        newest_input = max(path.stat().st_mtime_ns for path in inputs)
+        oldest_output = min(path.stat().st_mtime_ns for path in outputs)
+        return oldest_output >= newest_input
+    except OSError:
+        return False
+
+
 def _number(value: Any) -> int | None:
     if value is None or isinstance(value, bool):
         return None
@@ -161,12 +175,17 @@ def _ensure_il2cpp_crosscheck(root: Path) -> dict[str, Any]:
     methods = root / "analysis.methods.jsonl"
     output = root / "il2cpp-crosscheck.json"
     rows = root / "il2cpp-crosscheck.methods.jsonl"
-    if not (metadata.is_file() and library.is_file() and methods.is_file()):
+    inputs = [metadata, library, methods]
+    if not all(path.is_file() for path in inputs):
         return {}
     existing = _load(output)
-    if existing and rows.is_file():
+    if existing and not existing.get("error") and _fresh([output, rows], inputs):
+        return existing
+    if existing.get("error") and _fresh([output], inputs):
         return existing
     try:
+        output.unlink(missing_ok=True)
+        rows.unlink(missing_ok=True)
         from modkit.mobile.il2cpp_crosscheck import run_crosscheck
         return run_crosscheck(metadata, library, methods, output, rows)
     except Exception as exc:
@@ -189,12 +208,17 @@ def _ensure_metadata_identity(root: Path) -> dict[str, Any]:
     methods = root / "analysis.methods.jsonl"
     output = root / "il2cpp-metadata-identity.json"
     rows = root / "il2cpp-metadata-identity.methods.jsonl"
-    if not (metadata.is_file() and methods.is_file()):
+    inputs = [metadata, methods]
+    if not all(path.is_file() for path in inputs):
         return {}
     existing = _load(output)
-    if existing and rows.is_file():
+    if existing and not existing.get("error") and _fresh([output, rows], inputs):
+        return existing
+    if existing.get("error") and _fresh([output], inputs):
         return existing
     try:
+        output.unlink(missing_ok=True)
+        rows.unlink(missing_ok=True)
         from modkit.mobile.il2cpp_metadata_identity import build_workspace_identity
         return build_workspace_identity(root, output)
     except Exception as exc:
