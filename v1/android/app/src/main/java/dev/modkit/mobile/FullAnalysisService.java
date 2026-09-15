@@ -109,7 +109,7 @@ public class FullAnalysisService extends Service {
         startForeground(91,note("Подготовка полного анализа…"));
         if(wake==null||!wake.isHeld()){wake=((PowerManager)getSystemService(POWER_SERVICE)).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"ModKit:full-analysis");wake.acquire(2L*60L*60L*1000L);}
         startedAt=System.currentTimeMillis();
-        AnalysisJournal.append(this,"RUN_START","Full Analysis started",new JSONObject().put("startedAtMs",startedAt).put("memory",AnalysisJournal.memory()));
+        AnalysisJournal.append(this,"RUN_START","Full Analysis started",AnalysisJournal.data("startedAtMs",startedAt));
         try{
             writePipelineState("RUNNING","RECONSTRUCTION",false,false,null);
         }catch(Exception startError){
@@ -219,7 +219,7 @@ public class FullAnalysisService extends Service {
                     try{
                         startForegroundService(new Intent(this,AutomaticEvidenceService.class));
                         handedOff=true;
-                        AnalysisJournal.append(this,"HANDOFF","AutomaticEvidenceService started",new JSONObject().put("memory",AnalysisJournal.memory()));
+                        AnalysisJournal.append(this,"HANDOFF","AutomaticEvidenceService started",AnalysisJournal.data("memory",AnalysisJournal.memory()));
                     }catch(Throwable handoffError){
                         handoffFailure=String.valueOf(handoffError.getMessage());
                         AnalysisJournal.exception(this,"EVIDENCE_HANDOFF_FAILED",handoffError);
@@ -236,7 +236,7 @@ public class FullAnalysisService extends Service {
                     }
                     getSharedPreferences("state",0).edit().putBoolean("running",false).apply();
                     app.busy.set(false);app.revision++;
-                    AnalysisJournal.append(this,"RUN_FINISH",app.cancelled.get()?"Full Analysis cancelled":"Full Analysis stopped before evidence handoff",new JSONObject().put("memory",AnalysisJournal.memory()));
+                    AnalysisJournal.append(this,"RUN_FINISH",app.cancelled.get()?"Full Analysis cancelled":"Full Analysis stopped before evidence handoff",AnalysisJournal.data("memory",AnalysisJournal.memory()));
                 }
                 if(wake!=null&&wake.isHeld())wake.release();
                 stopForeground(true);stopSelf();
