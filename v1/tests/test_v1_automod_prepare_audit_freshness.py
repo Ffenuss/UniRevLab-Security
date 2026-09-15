@@ -57,6 +57,7 @@ def test_prepare_service_independently_verifies_python_audit_before_ready_messag
     ready = source.index("exact SHA verified", verify)
     assert prepare < verify < ready
     assert '()->app.cancelled.get()' in source
+    assert '"menu-native-recovery.json.tmp"' in source
 
 
 def test_patch_lab_requires_sha_bound_audit_for_build_gate():
@@ -66,6 +67,18 @@ def test_patch_lab_requires_sha_bound_audit_for_build_gate():
     assert "Exact SHA audit:" in source
     assert "не SHA-bound" in source
     assert 'build.setEnabled(idle&&prepareCount>0&&preflightReady&&exactPrepareAuditReady())' in source
+
+
+def test_patch_lab_plan_refresh_fails_closed_if_old_prepare_state_cannot_be_deleted():
+    source = (ANDROID / "AutoModActivity.java").read_text(encoding="utf-8")
+
+    assert "private boolean invalidatePreparedState()" in source
+    assert '"menu-native-recovery.json.tmp"' in source
+    assert "if(file.exists()&&!file.delete())return false;" in source
+    gate = source.index("if(!invalidatePreparedState())")
+    planning = source.index("planning=true", gate)
+    assert gate < planning
+    assert "refresh заблокирован fail-closed" in source
 
 
 def test_automod_build_routes_through_final_sha_guard_only_for_automod_path():
