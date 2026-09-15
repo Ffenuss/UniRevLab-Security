@@ -52,6 +52,17 @@ def test_bundle_streaming_loops_are_interruptible():
     assert "while ((n = in.read(buf)) != -1) { checkInterrupted(); digest.update(buf, 0, n); }" in source
 
 
+def test_failed_bundle_export_clears_partial_destination():
+    source = Path(
+        "android/app/src/main/java/dev/modkit/mobile/EvidenceBundleExporter.java"
+    ).read_text(encoding="utf-8")
+
+    assert "catch (Exception error)" in source
+    assert "clearFailedOutput(context, output);" in source
+    assert 'openOutputStream(output, "wt")' in source
+    assert "throw error;" in source
+
+
 def test_report_center_preflights_before_building_connected_report():
     source = Path(
         "android/app/src/main/java/dev/modkit/mobile/ReportCenterActivity.java"
