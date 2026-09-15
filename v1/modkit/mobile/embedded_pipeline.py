@@ -223,7 +223,7 @@ def run_workspace(
 
     _check(cb, "Embedded 7/7 · gameplay semantic correlation…")
     try:
-        gameplay_report = deep_gameplay.scan_workspace(root, static_report, native_report, root / "deep-gameplay.json")
+        gameplay_report = deep_gameplay.scan_workspace(root, static_report, native_report, root / "deep-gameplay.json", cb)
         runs.append({
             "engineId": deep_gameplay.ENGINE_ID,
             "status": "SUCCESS",
@@ -234,6 +234,8 @@ def run_workspace(
         _merge_findings(static_report, gameplay_report, summary_key="deepGameplay",
                         default_engine=deep_gameplay.ENGINE_ID, default_kind="SEMANTIC_GAMEPLAY_EVIDENCE",
                         default_category="Gameplay/Semantic")
+    except deep_gameplay.GameplayScanCancelled as exc:
+        raise Cancelled(str(exc)) from exc
     except Cancelled:
         raise
     except Exception as exc:
