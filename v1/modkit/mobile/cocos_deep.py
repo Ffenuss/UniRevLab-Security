@@ -19,7 +19,7 @@ MAX_CORRELATIONS = 1200
 MAX_BRIDGES = 800
 
 _GENERIC = {"init", "start", "update", "main", "load", "create", "destroy", "ctor", "awake", "enable", "disable"}
-_BRIDGE_MARKERS = ("jsb_", "js_", "register_all_", "scriptingcore", "tolua_", "luaopen_", "cocos2d", "_zn2se", "se::")
+_BRIDGE_MARKERS = ("jsb_", "register_all_", "scriptingcore", "tolua_", "luaopen_", "cocos2d", "_zn2se", "se::")
 _SCRIPT_MARKERS = ("project.js", "settings.js", "main.js", "jsb-adapter", "/src/", "/scripts/", "cocos")
 _SCRIPT_SUFFIXES = (".js", ".mjs", ".cjs", ".jsc", ".lua", ".luac", ".luae", ".json")
 
@@ -37,6 +37,8 @@ def _is_script(row: dict[str, Any], have_native_cocos: bool) -> bool:
     entry = "/" + str(row.get("entry") or "").casefold()
     if family == "cocos":
         # Native engine artifacts are Cocos evidence but are not script assets.
+        if entry.endswith(".so"):
+            return False
         return entry.endswith(_SCRIPT_SUFFIXES) or any(marker in entry for marker in _SCRIPT_MARKERS)
     if family == "javascript":
         return any(marker in entry for marker in _SCRIPT_MARKERS) or entry.endswith(("/project.js", "/settings.js", "/main.jsc"))
@@ -53,7 +55,7 @@ def _is_cocos_library(row: dict[str, Any]) -> bool:
 
 def _bridge_function(name: object) -> bool:
     low = str(name or "").casefold()
-    return any(marker in low for marker in _BRIDGE_MARKERS)
+    return low.startswith("js_") or any(marker in low for marker in _BRIDGE_MARKERS)
 
 
 def _name_match(script_name: str, native_name: str) -> tuple[str, float] | None:
