@@ -19,8 +19,15 @@ import android.widget.TextView;
 
 import androidx.appcompat.app.AppCompatActivity;
 
+import com.chaquo.python.PyObject;
+import com.chaquo.python.Python;
+import com.chaquo.python.android.AndroidPlatform;
+
+import org.json.JSONObject;
+
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -32,14 +39,16 @@ public class ProcessLabActivity extends AppCompatActivity {
     private static final int SAVE_SESSION = 701;
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
+    private App app;
     private LinearLayout root, processList, sessionBox;
     private TextView rootState, selectedState, sessionState, engineState;
     private EditText filter;
     private ProgressBar progress;
-    private Button refreshButton, attachButton, detachButton, saveButton;
+    private Button refreshButton, attachButton, detachButton, saveButton, correlateButton;
     private RootAccess.ProbeResult rootProbe;
     private RootProcessEngine.ProcessInfo selected;
     private RootProcessEngine.RuntimeSession session;
+    private JSONObject correlation;
     private List<RootProcessEngine.ProcessInfo> processes = new ArrayList<>();
 
     private int dp(int n) { return (int) (n * getResources().getDisplayMetrics().density); }
@@ -61,17 +70,17 @@ public class ProcessLabActivity extends AppCompatActivity {
     }
 
     @Override public void onCreate(Bundle state) {
-        super.onCreate(state);
+        super.onCreate(state); app = (App)getApplication();
         ScrollView scroll = new ScrollView(this); root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setPadding(dp(16), dp(16), dp(16), dp(28));
         scroll.addView(root); setContentView(scroll);
         TextView title = text("Process Lab", 30); title.setTypeface(null, android.graphics.Typeface.BOLD); root.addView(title);
-        root.addView(text("Root · процессы · модули · потоки · runtime-подтверждение", 14));
-        root.addView(text("Root не запрашивается автоматически. Подключение по умолчанию только читает procfs: память процесса не изменяется и код не внедряется.", 13));
+        root.addView(text("Root · процессы · load base · RVA→runtime VA · потоки", 14));
+        root.addView(text("Root не запрашивается автоматически. Подключение читает только procfs: память процесса не открывается, не изменяется и код не внедряется.", 13));
 
         LinearLayout access = section("1 · Root-доступ");
         rootState = text("Root ещё не проверялся.", 14); access.addView(rootState);
         button("Проверить root", access, v -> checkRoot());
-        engineState = text("Runtime backend: root-procfs · read-only. Frida/ptrace подготовлены как отдельные optional adapters.", 13); access.addView(engineState);
+        engineState = text("Runtime backend: root-procfs · read-only. Статические RVA связываются только с наблюдаемой раскладкой загруженных модулей.", 13); access.addView(engineState);
 
         LinearLayout inventory = section("2 · Процессы");
         filter = new EditText(this); filter.setSingleLine(true); filter.setHint("Фильтр: package, имя, PID…"); inventory.addView(filter);
@@ -87,9 +96,10 @@ public class ProcessLabActivity extends AppCompatActivity {
         LinearLayout attach = section("3 · Runtime session");
         progress = new ProgressBar(this); progress.setVisibility(View.GONE); attach.addView(progress);
         attachButton = button("Подключить read-only session", attach, v -> attach()); attachButton.setEnabled(false);
+        correlateButton = button("Пересчитать RVA → runtime VA", attach, v -> recomputeCorrelation()); correlateButton.setEnabled(false);
         detachButton = button("Отключить session", attach, v -> detach()); detachButton.setEnabled(false);
         saveButton = button("Сохранить snapshot JSON", attach, v -> saveSession()); saveButton.setEnabled(false);
-        sessionState = text("После подключения здесь появятся process status, memory-map модули и потоки.", 13); sessionState.setTextIsSelectable(true); attach.addView(sessionState);
+        sessionState = text("После подключения здесь появятся process status, load base модулей, точные file mappings и потоки.", 13); sessionState.setTextIsSelectable(true); attach.addView(sessionState);
         sessionBox = new LinearLayout(this); sessionBox.setOrientation(LinearLayout.VERTICAL); attach.addView(sessionBox);
     }
 
@@ -131,7 +141,7 @@ public class ProcessLabActivity extends AppCompatActivity {
         for (RootProcessEngine.ProcessInfo p : processes) {
             String hay = (p.pid + " " + p.uid + " " + p.name + " " + p.cmdline).toLowerCase(Locale.ROOT);
             if (!q.isEmpty() && !hay.contains(q)) continue;
-            if (q.isEmpty() && p.uid < 10_000) continue; // keep default view focused on app processes; search still reaches system processes.
+            if (q.isEmpty() && p.uid < 10_000) continue;
             Button row = button(p.label(), processList, v -> selectProcess(p));
             row.setGravity(android.view.Gravity.START | android.view.Gravity.CENTER_VERTICAL);
             if (++shown >= 100) break;
@@ -140,7 +150,7 @@ public class ProcessLabActivity extends AppCompatActivity {
     }
 
     private void selectProcess(RootProcessEngine.ProcessInfo p) {
-        selected = p; session = null; attachButton.setEnabled(true); detachButton.setEnabled(false); saveButton.setEnabled(false);
+        selected = p; session = null; correlation = null; attachButton.setEnabled(true); correlateButton.setEnabled(false); detachButton.setEnabled(false); saveButton.setEnabled(false);
         selectedState.setText("Выбран: " + p.label()); sessionState.setText("Готово к read-only подключению."); sessionBox.removeAllViews();
     }
 
@@ -151,30 +161,66 @@ public class ProcessLabActivity extends AppCompatActivity {
         worker.execute(() -> {
             try {
                 RootProcessEngine.RuntimeSession created = RootProcessEngine.attachReadOnly(target);
-                main.post(() -> { session = created; setBusy(false, null); renderSession(); });
+                JSONObject linked = persistAndCorrelate(created);
+                main.post(() -> { session = created; correlation = linked; setBusy(false, null); renderSession(); });
             } catch (Exception e) {
                 main.post(() -> { setBusy(false, null); showError("Подключение не удалось: " + e.getMessage()); });
             }
         });
     }
 
+    private JSONObject persistAndCorrelate(RootProcessEngine.RuntimeSession created) throws Exception {
+        JSONObject snapshot = created.toJson(rootProbe);
+        Files.write(app.file("runtime-session.json").toPath(), snapshot.toString(2).getBytes(StandardCharsets.UTF_8));
+        try {
+            if (!Python.isStarted()) Python.start(new AndroidPlatform(this));
+            PyObject module = Python.getInstance().getModule("modkit.mobile.runtime_correlate");
+            return new JSONObject(module.callAttr("build_workspace_correlation", getFilesDir().getPath(), app.file("runtime-session.json").getPath(), app.file("runtime-correlation.json").getPath()).toString());
+        } catch (Exception e) {
+            return new JSONObject().put("schema", "modkit-runtime-correlation-error-1.0").put("error", String.valueOf(e.getMessage())).put("correlationCount", 0).put("mappedRuntimeVaCount", 0);
+        }
+    }
+
+    private void recomputeCorrelation() {
+        if (session == null) return;
+        setBusy(true, "Связываем статические RVA с наблюдаемыми load base…");
+        final RootProcessEngine.RuntimeSession current = session;
+        worker.execute(() -> {
+            try {
+                JSONObject linked = persistAndCorrelate(current);
+                main.post(() -> { correlation = linked; setBusy(false, null); renderSession(); });
+            } catch (Exception e) {
+                main.post(() -> { setBusy(false, null); showError("Runtime correlation не построена: " + e.getMessage()); });
+            }
+        });
+    }
+
     private void renderSession() {
         if (session == null) return;
-        detachButton.setEnabled(true); saveButton.setEnabled(true); attachButton.setEnabled(true);
+        detachButton.setEnabled(true); saveButton.setEnabled(true); correlateButton.setEnabled(true); attachButton.setEnabled(true);
+        String linked = "";
+        if (correlation != null) {
+            if (correlation.has("error")) linked = "\nRuntime correlation: ошибка · " + correlation.optString("error");
+            else linked = "\nRVA correlation: " + correlation.optInt("correlationCount") + " · mapped VA: " + correlation.optInt("mappedRuntimeVaCount") + " · unresolved: " + correlation.optInt("unresolvedCount");
+        }
         sessionState.setText("CONNECTED · read-only · PID " + session.process.pid + " · uid " + session.process.uid +
-                "\nПотоков: " + session.threads.size() + " · mapped paths: " + session.modules.size() +
-                (session.mapsTruncated ? " · maps output truncated" : ""));
+                "\nПотоков: " + session.threads.size() + " · module images: " + session.moduleImages.size() + " · file mappings: " + session.mappings.size() +
+                (session.mapsTruncated ? " · maps output truncated" : "") + linked +
+                "\nRuntime evidence не делает finding buildable автоматически.");
         sessionBox.removeAllViews();
-        int limit = Math.min(30, session.modules.size());
+        int limit = Math.min(30, session.moduleImages.size());
         if (limit > 0) {
-            sessionBox.addView(text("Модули / mapped files:", 14));
-            for (int i = 0; i < limit; i++) sessionBox.addView(text("• " + session.modules.get(i), 12));
-            if (session.modules.size() > limit) sessionBox.addView(text("… ещё " + (session.modules.size() - limit) + " — в JSON snapshot", 12));
+            sessionBox.addView(text("Загруженные модули / load base:", 14));
+            for (int i = 0; i < limit; i++) {
+                RootProcessEngine.ModuleImage module = session.moduleImages.get(i);
+                sessionBox.addView(text("• " + module.basename() + " @ " + String.format(Locale.ROOT, "0x%x", module.loadBase) + " · maps " + module.mappingCount + " · " + module.path, 12));
+            }
+            if (session.moduleImages.size() > limit) sessionBox.addView(text("… ещё " + (session.moduleImages.size() - limit) + " — в runtime-session.json", 12));
         }
     }
 
     private void detach() {
-        session = null; detachButton.setEnabled(false); saveButton.setEnabled(false); sessionBox.removeAllViews();
+        session = null; correlation = null; detachButton.setEnabled(false); saveButton.setEnabled(false); correlateButton.setEnabled(false); sessionBox.removeAllViews();
         sessionState.setText("Session отключена. Процесс не изменялся.");
     }
 
@@ -191,9 +237,7 @@ public class ProcessLabActivity extends AppCompatActivity {
         try (OutputStream out = getContentResolver().openOutputStream(uri, "wt")) {
             if (out == null) throw new java.io.IOException("output stream unavailable");
             out.write(session.toJson(rootProbe).toString(2).getBytes(StandardCharsets.UTF_8)); out.flush();
-            ((App)getApplication()).file("runtime-session.json").toPath();
-            java.nio.file.Files.write(((App)getApplication()).file("runtime-session.json").toPath(), session.toJson(rootProbe).toString(2).getBytes(StandardCharsets.UTF_8));
-            sessionState.append("\nSnapshot сохранён и добавлен в Evidence Bundle.");
+            sessionState.append("\nSnapshot сохранён. Внутренние runtime-session.json и runtime-correlation.json уже доступны Evidence Bundle.");
         } catch (Exception e) { showError("Не удалось сохранить snapshot: " + e.getMessage()); }
     }
 
@@ -202,6 +246,7 @@ public class ProcessLabActivity extends AppCompatActivity {
         if (message != null) sessionState.setText(message);
         refreshButton.setEnabled(!busy && rootProbe != null && rootProbe.granted);
         attachButton.setEnabled(!busy && selected != null);
+        correlateButton.setEnabled(!busy && session != null);
     }
 
     private void showError(String message) {
