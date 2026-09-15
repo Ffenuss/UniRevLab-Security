@@ -23,6 +23,27 @@ SUPPORTED_VERSIONS = {59, 62, 74, 76, *range(83, 97)}
 MAX_ENTRY_BYTES = 96 * 1024 * 1024
 MAX_FUNCTIONS = 20000
 MAX_STRINGS = 5000
+READ_CHUNK_BYTES = 1024 * 1024
+
+
+class HermesScanCancelled(RuntimeError):
+    """Explicit cooperative cancellation; partial output is never published."""
+
+
+def _cancelled(cb: Any | None) -> bool:
+    if cb is None:
+        return False
+    checker = getattr(cb, "isCancelled", None)
+    if callable(checker):
+        return bool(checker())
+    if callable(cb):
+        return bool(cb())
+    return False
+
+
+def _check(cb: Any | None) -> None:
+    if _cancelled(cb):
+        raise HermesScanCancelled("Hermes deep scan cancelled")
 
 
 def _workspace_apks(root: Path) -> list[Path]:
@@ -73,7 +94,21 @@ def _is_candidate(name: str) -> bool:
     return low.endswith((".hbc", ".hermes", ".bundle")) or low.endswith("index.android.bundle") or "hermes" in low
 
 
-def scan_apk_paths(paths: Iterable[str | Path], workdir: str | Path, output_path: str | Path | None = None) -> dict[str, Any]:
+def _read_entry(zf: zipfile.ZipFile, info: zipfile.ZipInfo, cb: Any | None = None) -> bytes:
+    chunks: list[bytes] = []
+    with zf.open(info, "r") as source:
+        while True:
+            _check(cb)
+            chunk = source.read(READ_CHUNK_BYTES)
+            if not chunk:
+                break
+            chunks.append(chunk)
+    _check(cb)
+    return b"".join(chunks)
+
+
+def scan_apk_paths(paths: Iterable[str | Path], workdir: str | Path,
+                   output_path: str | Path | None = None, cb: Any | None = None) -> dict[str, Any]:
     root = Path(workdir)
     engine_root = root / "hermes-deep"
     input_root = engine_root / "inputs"
@@ -85,9 +120,11 @@ def scan_apk_paths(paths: Iterable[str | Path], workdir: str | Path, output_path
     findings: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
 
+    _check(cb)
     try:
         from hbctool import hbc, hasm  # type: ignore
     except Exception as exc:
+        _check(cb)
         out = {
             "schema": SCHEMA,
             "engineId": ENGINE_ID,
@@ -106,17 +143,23 @@ def scan_apk_paths(paths: Iterable[str | Path], workdir: str | Path, output_path
         return out
 
     for raw in paths:
+        _check(cb)
         apk = Path(raw)
         if not apk.is_file():
             continue
         try:
             with zipfile.ZipFile(apk) as z:
                 for info in z.infolist():
+                    _check(cb)
                     if info.is_dir() or info.file_size <= 0 or info.file_size > MAX_ENTRY_BYTES or not _is_candidate(info.filename):
                         continue
                     try:
-                        data = z.read(info)
+                        data = _read_entry(z, info, cb)
+                    except HermesScanCancelled:
+                        raise
                     except Exception as exc:
+                        if _cancelled(cb):
+                            raise HermesScanCancelled("Hermes deep scan cancelled") from exc
                         errors.append({"apk": apk.name, "entry": info.filename, "error": str(exc)})
                         continue
                     magic, version = _header(data)
@@ -144,12 +187,16 @@ def scan_apk_paths(paths: Iterable[str | Path], workdir: str | Path, output_path
                     input_path = input_root / f"{_slug(apk.stem)}-{bundle_id}.hbc"
                     disasm_dir = output_root / f"{_slug(apk.stem)}-{bundle_id}"
                     try:
+                        _check(cb)
                         input_path.write_bytes(data)
                         if disasm_dir.exists():
                             shutil.rmtree(disasm_dir, ignore_errors=True)
+                        _check(cb)
                         with input_path.open("rb") as handle:
                             obj = hbc.load(handle)
+                        _check(cb)
                         hasm.dump(obj, str(disasm_dir), force=True)
+                        _check(cb)
                         header = obj.getHeader()
                         function_count = int(obj.getFunctionCount())
                         string_count = int(obj.getStringCount())
@@ -165,6 +212,8 @@ def scan_apk_paths(paths: Iterable[str | Path], workdir: str | Path, output_path
                         })
 
                         for index in range(min(function_count, MAX_FUNCTIONS)):
+                            if (index & 0x7F) == 0:
+                                _check(cb)
                             try:
                                 fn = obj.getFunction(index)
                                 name = str(fn[0] or f"Function_{index}")
@@ -173,6 +222,8 @@ def scan_apk_paths(paths: Iterable[str | Path], workdir: str | Path, output_path
                                 symbols = int(fn[3])
                                 instructions = len(fn[4]) if isinstance(fn[4], (list, tuple)) else 0
                             except Exception as exc:
+                                if _cancelled(cb):
+                                    raise HermesScanCancelled("Hermes deep scan cancelled") from exc
                                 errors.append({"apk": apk.name, "entry": info.filename, "error": f"function {index}: {exc}"})
                                 continue
                             findings.append({
@@ -203,6 +254,8 @@ def scan_apk_paths(paths: Iterable[str | Path], workdir: str | Path, output_path
 
                         string_preview: list[dict[str, Any]] = []
                         for index in range(min(string_count, MAX_STRINGS)):
+                            if (index & 0x7F) == 0:
+                                _check(cb)
                             try:
                                 value, string_header = obj.getString(index)
                                 string_preview.append({
@@ -211,16 +264,27 @@ def scan_apk_paths(paths: Iterable[str | Path], workdir: str | Path, output_path
                                     "isUTF16": bool(string_header[0] == 1) if string_header else False,
                                 })
                             except Exception:
+                                if _cancelled(cb):
+                                    raise HermesScanCancelled("Hermes deep scan cancelled")
                                 break
                         record["stringsPreview"] = string_preview
+                    except HermesScanCancelled:
+                        raise
                     except Exception as exc:
+                        if _cancelled(cb):
+                            raise HermesScanCancelled("Hermes deep scan cancelled") from exc
                         record["status"] = "DEEP_DISASSEMBLY_FAILED"
                         record["error"] = str(exc)
                         errors.append({"apk": apk.name, "entry": info.filename, "error": str(exc)})
                     bundles.append(record)
+        except HermesScanCancelled:
+            raise
         except Exception as exc:
+            if _cancelled(cb):
+                raise HermesScanCancelled("Hermes deep scan cancelled") from exc
             errors.append({"apk": apk.name, "entry": "", "error": str(exc)})
 
+    _check(cb)
     out = {
         "schema": SCHEMA,
         "engineId": ENGINE_ID,
@@ -228,6 +292,7 @@ def scan_apk_paths(paths: Iterable[str | Path], workdir: str | Path, output_path
         "bundled": True,
         "available": True,
         "executesTargetCode": False,
+        "cancelAware": cb is not None,
         "supportedVersions": sorted(SUPPORTED_VERSIONS),
         "bundleCount": len(bundles),
         "findingCount": len(findings),
@@ -235,11 +300,13 @@ def scan_apk_paths(paths: Iterable[str | Path], workdir: str | Path, output_path
         "findings": findings,
         "errors": errors,
     }
+    _check(cb)
     if output_path:
         Path(output_path).write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
     return out
 
 
-def scan_workspace(workdir: str | Path, output_path: str | Path | None = None) -> dict[str, Any]:
+def scan_workspace(workdir: str | Path, output_path: str | Path | None = None,
+                   cb: Any | None = None) -> dict[str, Any]:
     root = Path(workdir)
-    return scan_apk_paths(_workspace_apks(root), root, output_path)
+    return scan_apk_paths(_workspace_apks(root), root, output_path, cb)
