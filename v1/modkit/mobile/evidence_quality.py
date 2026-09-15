@@ -62,8 +62,6 @@ def normalize_endpoint(value: Any) -> str:
             path = re.sub(r"/{2,}", "/", parsed.path or "/")
             if path != "/":
                 path = path.rstrip("/")
-            # Query values can be credentials/session material. Keep only key names in
-            # the dedup identity; the original evidence remains untouched.
             query_keys = sorted({part.split("=", 1)[0].casefold() for part in parsed.query.split("&") if part})
             query = "&".join(query_keys)
             return urlunsplit((scheme, netloc, path, query, ""))
@@ -190,7 +188,7 @@ def _refine_card(card: dict[str, Any]) -> dict[str, Any]:
     out["evidenceTier"] = tier
     out["methodBoundEvidence"] = _has_method_context(out)
     out["flowCorrelated"] = _has_flow(out)
-    out["controlCandidate"] = bool(out.get("buildable") or out.get("selectable")) and tier == "CORRELATED_EVIDENCE"
+    out["controlCandidate"] = bool(out.get("buildable") or out.get("selectable") or out["methodBoundEvidence"]) and tier == "CORRELATED_EVIDENCE"
     if tier == "DISCOVERED_SURFACE":
         out["buildable"] = False
         out["selectable"] = False
@@ -277,6 +275,7 @@ def refine_catalog(report: dict[str, Any]) -> dict[str, Any]:
         "schema": SCHEMA,
         "rawStringsBecomeControls": False,
         "methodBoundEvidenceSeparated": True,
+        "methodBoundCorrelatedMayEnterPreflight": True,
         "normalizedDedup": True,
         "frameworkCdnNoiseNormalized": True,
         "tiers": ["DISCOVERED_SURFACE", "POTENTIAL_TRUST_BOUNDARY", "CORRELATED_EVIDENCE", "CONFIRMED_ISSUE"],
