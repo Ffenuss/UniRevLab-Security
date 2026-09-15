@@ -1,10 +1,10 @@
 """Fail-closed AutoMod planner over the unified Evidence Graph catalog.
 
-The planner never modifies an APK and never upgrades a static keyword match into a
-validated executable patch. It groups existing ModKit evidence by readiness and may
-attach read-only procfs runtime observations plus the embedded IL2CPP metadata/ELF
-structural cross-check. Both are corroboration only: buildability still comes solely
-from a validated local executable binding already present in the catalog.
+The planner never modifies an APK and never upgrades a weak/static observation into a
+validated executable patch. Runtime procfs layout, IL2CPP metadata/ELF structural
+cross-checks, and IL2CPP metadata identity are corroboration only. Buildability comes
+solely from a validated local executable binding already present in the catalog plus
+successful preflight in the Android build flow.
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "modkit-automod-plan-1.2"
+SCHEMA = "modkit-automod-plan-1.3"
 
 _BUILD = "READY_TO_BUILD"
 _PREFLIGHT = "READY_FOR_PREFLIGHT"
@@ -78,6 +78,19 @@ def _number(value: Any) -> int | None:
     return None
 
 
+def _norm_name(value: Any) -> str:
+    text = str(value or "").strip()
+    if "::" in text:
+        text = text.rsplit("::", 1)[1]
+    if "(" in text:
+        text = text.split("(", 1)[0]
+    return text.strip().casefold()
+
+
+def _norm_class(value: Any) -> str:
+    return str(value or "").strip().replace("/", ".").casefold()
+
+
 def _audit_like(card: dict[str, Any]) -> bool:
     if card.get("serverAudit"):
         return True
@@ -95,7 +108,7 @@ def _locator_is_exact(card: dict[str, Any]) -> bool:
     locator = card.get("locator")
     if not isinstance(locator, dict) or not locator:
         return False
-    if locator.get("rva") not in (None, "", 0, "0"):
+    if locator.get("rva") not in (None, "", 0, "0", "0x0"):
         return True
     if locator.get("codeOffset") is not None and (locator.get("class") or locator.get("signature")):
         return True
@@ -105,7 +118,6 @@ def _locator_is_exact(card: dict[str, Any]) -> bool:
 
 
 def _runtime_index(runtime_correlation: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
-    """Index only observations emitted by the read-only procfs correlator."""
     if not isinstance(runtime_correlation, dict):
         return {}
     rows = runtime_correlation.get("correlations")
@@ -172,6 +184,35 @@ def _ensure_il2cpp_crosscheck(root: Path) -> dict[str, Any]:
         return error
 
 
+def _ensure_metadata_identity(root: Path) -> dict[str, Any]:
+    metadata = root / "metadata.bin"
+    methods = root / "analysis.methods.jsonl"
+    output = root / "il2cpp-metadata-identity.json"
+    rows = root / "il2cpp-metadata-identity.methods.jsonl"
+    if not (metadata.is_file() and methods.is_file()):
+        return {}
+    existing = _load(output)
+    if existing and rows.is_file():
+        return existing
+    try:
+        from modkit.mobile.il2cpp_metadata_identity import build_workspace_identity
+        return build_workspace_identity(root, output)
+    except Exception as exc:
+        error = {
+            "schema": "modkit-il2cpp-metadata-identity-error-1.0",
+            "engine": "il2cpp.metadata-identity-embedded",
+            "error": str(exc),
+            "addressResolver": False,
+            "actionable": False,
+            "promotesBuildability": False,
+        }
+        try:
+            output.write_text(json.dumps(error, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+        return error
+
+
 def _il2cpp_index(rows: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
     rank = {
         "STRUCTURAL_BOTH_PRESENT": 3,
@@ -211,6 +252,69 @@ def _il2cpp_view(row: dict[str, Any] | None) -> dict[str, Any] | None:
     }
 
 
+def _identity_indexes(rows: list[dict[str, Any]]) -> tuple[dict[str, dict[str, Any]], dict[tuple[str, str], list[dict[str, Any]]], dict[str, list[dict[str, Any]]]]:
+    by_id: dict[str, dict[str, Any]] = {}
+    by_pair: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    by_name: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        if not isinstance(row, dict) or bool(row.get("promotesBuildability")):
+            continue
+        if bool(row.get("addressConfirmed")) or bool(row.get("actionable")) or bool(row.get("buildable")):
+            continue
+        row_id = row.get("id")
+        if row_id not in (None, ""):
+            by_id[str(row_id)] = row
+        method = _norm_name(row.get("methodName"))
+        cls = _norm_class(row.get("class"))
+        if method:
+            by_name.setdefault(method, []).append(row)
+        if method and cls:
+            by_pair.setdefault((cls, method), []).append(row)
+            by_pair.setdefault((cls.rsplit(".", 1)[-1], method), []).append(row)
+    return by_id, by_pair, by_name
+
+
+def _identity_for_card(card: dict[str, Any], indexes: tuple[dict[str, dict[str, Any]], dict[tuple[str, str], list[dict[str, Any]]], dict[str, list[dict[str, Any]]]]) -> dict[str, Any] | None:
+    by_id, by_pair, by_name = indexes
+    locator = card.get("locator") if isinstance(card.get("locator"), dict) else {}
+    method_id = locator.get("methodId")
+    if method_id not in (None, "") and str(method_id) in by_id:
+        return by_id[str(method_id)]
+    method = _norm_name(locator.get("method") or locator.get("methodName") or card.get("title"))
+    cls = _norm_class(locator.get("class") or locator.get("className"))
+    if method and cls:
+        matches = by_pair.get((cls, method), [])
+        if len(matches) == 1:
+            return matches[0]
+        matches = by_pair.get((cls.rsplit(".", 1)[-1], method), [])
+        if len(matches) == 1:
+            return matches[0]
+    if method and len(by_name.get(method, [])) == 1:
+        return by_name[method][0]
+    return None
+
+
+def _identity_view(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(row, dict):
+        return None
+    status = str(row.get("status") or "UNRESOLVED_NO_RVA")
+    if status == "UNRESOLVED_NO_RVA":
+        return None
+    return {
+        "engine": "il2cpp.metadata-identity-embedded",
+        "status": status,
+        "class": row.get("class"),
+        "methodName": row.get("methodName"),
+        "metadataMethodNamePresent": bool(row.get("metadataMethodNamePresent")),
+        "metadataQualifiedMethodPresent": bool(row.get("metadataQualifiedMethodPresent")),
+        "addressConfirmed": False,
+        "rva": None,
+        "actionable": False,
+        "buildable": False,
+        "promotesBuildability": False,
+    }
+
+
 def _classify(card: dict[str, Any]) -> tuple[str, str]:
     ownership = str(card.get("ownership") or "UNKNOWN").upper()
     stage = str(card.get("verificationStage") or "FOUND_STATIC").upper()
@@ -240,16 +344,22 @@ def _classify(card: dict[str, Any]) -> tuple[str, str]:
 
 
 def _candidate(card: dict[str, Any], runtime_by_id: dict[str, dict[str, Any]],
-               il2cpp_by_rva: dict[int, dict[str, Any]]) -> dict[str, Any]:
+               il2cpp_by_rva: dict[int, dict[str, Any]], identity_indexes: tuple[dict[str, dict[str, Any]], dict[tuple[str, str], list[dict[str, Any]]], dict[str, list[dict[str, Any]]]]) -> dict[str, Any]:
     stage, reason = _classify(card)
     runtime = _runtime_view(runtime_by_id.get(str(card.get("id"))))
     locator = card.get("locator") if isinstance(card.get("locator"), dict) else None
     rva = _number(locator.get("rva")) if locator else None
     il2cpp = _il2cpp_view(il2cpp_by_rva.get(rva)) if rva is not None else None
+    identity = _identity_view(_identity_for_card(card, identity_indexes)) if rva is None else None
     if runtime and runtime.get("mapped"):
         reason += " Runtime VA наблюдался в procfs layout; это corroboration и не заменяет executable binding/preflight."
     if il2cpp and il2cpp.get("status") == "STRUCTURAL_BOTH_PRESENT":
-        reason += " IL2CPP cross-check отдельно подтвердил наличие metadata method name и executable ELF range; их ассоциация всё ещё не считается доказанной этим backend'ом."
+        reason += " IL2CPP cross-check отдельно подтвердил metadata method name и executable ELF range; их ассоциация этим backend'ом не считается доказанной."
+    if identity:
+        if identity.get("metadataQualifiedMethodPresent"):
+            reason += " Global metadata независимо подтверждает точный Class::Method, но native RVA отсутствует и остаётся unresolved."
+        else:
+            reason += " Global metadata подтверждает имя метода, но без уникального Class::Method и без native RVA."
     return {
         "id": card.get("id"),
         "title": card.get("title"),
@@ -271,17 +381,21 @@ def _candidate(card: dict[str, Any], runtime_by_id: dict[str, dict[str, Any]],
         "runtimeObservation": runtime,
         "il2cppStructuralObserved": bool(il2cpp and (il2cpp.get("metadataMethodNamePresent") or il2cpp.get("executableElfRangePresent"))),
         "il2cppStructural": il2cpp,
+        "metadataIdentityObserved": bool(identity),
+        "metadataIdentity": identity,
         "readyReason": card.get("readyReason"),
         "notReadyReason": card.get("notReadyReason"),
     }
 
 
 def build_plan(catalog: dict[str, Any], runtime_correlation: dict[str, Any] | None = None,
-               il2cpp_crosscheck_rows: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+               il2cpp_crosscheck_rows: list[dict[str, Any]] | None = None,
+               metadata_identity_rows: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     cards = catalog.get("cards") if isinstance(catalog.get("cards"), list) else []
     runtime_by_id = _runtime_index(runtime_correlation)
     il2cpp_by_rva = _il2cpp_index(il2cpp_crosscheck_rows or [])
-    candidates = [_candidate(card, runtime_by_id, il2cpp_by_rva) for card in cards if isinstance(card, dict)]
+    identity_indexes = _identity_indexes(metadata_identity_rows or [])
+    candidates = [_candidate(card, runtime_by_id, il2cpp_by_rva, identity_indexes) for card in cards if isinstance(card, dict)]
     order = {_BUILD: 0, _PREFLIGHT: 1, _RUNTIME: 2, _REVIEW: 3, _AUDIT: 4, _EXCLUDED: 5}
     candidates.sort(key=lambda row: (order.get(str(row.get("stage")), 99), -int(row.get("priority") or 0), str(row.get("title") or "").casefold()))
     counts = Counter(str(row.get("stage") or _REVIEW) for row in candidates)
@@ -290,15 +404,19 @@ def build_plan(catalog: dict[str, Any], runtime_correlation: dict[str, Any] | No
     runtime_observed = sum(1 for row in candidates if row.get("runtimeObserved"))
     il2cpp_observed = sum(1 for row in candidates if row.get("il2cppStructuralObserved"))
     il2cpp_both = sum(1 for row in candidates if isinstance(row.get("il2cppStructural"), dict) and row["il2cppStructural"].get("status") == "STRUCTURAL_BOTH_PRESENT")
+    metadata_observed = sum(1 for row in candidates if row.get("metadataIdentityObserved"))
+    metadata_qualified = sum(1 for row in candidates if isinstance(row.get("metadataIdentity"), dict) and row["metadataIdentity"].get("metadataQualifiedMethodPresent"))
     return {
         "schema": SCHEMA,
         "source": "simple-catalog.json",
         "runtimeSource": "runtime-correlation.json" if runtime_by_id else None,
         "il2cppCrosscheckSource": "il2cpp-crosscheck.methods.jsonl" if il2cpp_by_rva else None,
+        "il2cppMetadataIdentitySource": "il2cpp-metadata-identity.methods.jsonl" if metadata_observed else None,
         "failClosed": True,
         "modifiesTarget": False,
         "runtimeEvidencePromotesBuildability": False,
         "il2cppCrosscheckPromotesBuildability": False,
+        "metadataIdentityPromotesBuildability": False,
         "autoBuildRequiresValidatedExecutableBinding": True,
         "serverBypassGenerated": False,
         "counts": {stage: int(counts.get(stage, 0)) for stage in (_BUILD, _PREFLIGHT, _RUNTIME, _REVIEW, _AUDIT, _EXCLUDED)},
@@ -307,6 +425,8 @@ def build_plan(catalog: dict[str, Any], runtime_correlation: dict[str, Any] | No
         "runtimeObservedCount": runtime_observed,
         "il2cppStructuralObservedCount": il2cpp_observed,
         "il2cppStructuralBothCount": il2cpp_both,
+        "metadataIdentityObservedCount": metadata_observed,
+        "metadataQualifiedNoRvaCount": metadata_qualified,
         "readyToBuildCount": int(counts.get(_BUILD, 0)),
         "readyForPreflightCount": int(counts.get(_PREFLIGHT, 0)),
         "runtimeNeededCount": int(counts.get(_RUNTIME, 0)),
@@ -325,10 +445,19 @@ def build_workspace_plan(workdir: str | Path, output_path: str | Path | None = N
     if not catalog:
         from modkit.mobile.simple_mode import build_catalog
         catalog = build_catalog(root, catalog_path)
+
     runtime_correlation = _load(root / "runtime-correlation.json")
     il2cpp_summary = _ensure_il2cpp_crosscheck(root)
     il2cpp_rows = _load_jsonl(root / "il2cpp-crosscheck.methods.jsonl") if il2cpp_summary and not il2cpp_summary.get("error") else []
-    out = build_plan(catalog, runtime_correlation if runtime_correlation else None, il2cpp_rows)
+    identity_summary = _ensure_metadata_identity(root)
+    identity_rows = _load_jsonl(root / "il2cpp-metadata-identity.methods.jsonl") if identity_summary and not identity_summary.get("error") else []
+
+    out = build_plan(
+        catalog,
+        runtime_correlation if runtime_correlation else None,
+        il2cpp_rows,
+        identity_rows,
+    )
     if il2cpp_summary:
         out["il2cppCrosscheck"] = {
             "schema": il2cpp_summary.get("schema"),
@@ -336,6 +465,17 @@ def build_workspace_plan(workdir: str | Path, output_path: str | Path | None = N
             "error": il2cpp_summary.get("error"),
             "counts": il2cpp_summary.get("counts"),
             "confirmsMethodToRvaAssociation": bool(il2cpp_summary.get("confirmsMethodToRvaAssociation")),
+            "promotesBuildability": False,
+        }
+    if identity_summary:
+        out["il2cppMetadataIdentity"] = {
+            "schema": identity_summary.get("schema"),
+            "engine": identity_summary.get("engine"),
+            "error": identity_summary.get("error"),
+            "typeLayout": identity_summary.get("typeLayout"),
+            "counts": identity_summary.get("counts"),
+            "addressResolver": False,
+            "actionable": False,
             "promotesBuildability": False,
         }
     destination = Path(output_path) if output_path else root / "automod-plan.json"
