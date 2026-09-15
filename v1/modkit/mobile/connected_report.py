@@ -35,12 +35,30 @@ def _first(obj: dict[str, Any], *keys: str) -> Any:
     return None
 
 
-def _method_index(path: Path, limit: int = 250000) -> tuple[dict[int, dict[str, Any]], dict[str, list[dict[str, Any]]], dict[str, list[dict[str, Any]]]]:
+def _method_index(
+    path: Path,
+    wanted_ids: set[int] | None = None,
+    wanted_rvas: set[str] | None = None,
+    wanted_names: set[str] | None = None,
+    limit: int = 250000,
+) -> tuple[dict[int, dict[str, Any]], dict[str, list[dict[str, Any]]], dict[str, list[dict[str, Any]]], int]:
+    """Stream the method catalogue and retain only rows linkable to report findings.
+
+    The historical implementation retained every row in three dictionaries.  On a
+    large IL2CPP title that duplicated 100k-250k method dictionaries in RAM.  The
+    connected report only ever consumes exact method ids, exact RVAs, or exact method
+    names present in current findings, so unrelated rows are counted but not retained.
+    RVA/name buckets remain capped at the same 25 rows exposed by `_link_methods`.
+    """
     by_id: dict[int, dict[str, Any]] = {}
     by_rva: dict[str, list[dict[str, Any]]] = {}
     by_name: dict[str, list[dict[str, Any]]] = {}
+    catalog_rows = 0
+    ids = wanted_ids or set()
+    rvas = wanted_rvas or set()
+    names = wanted_names or set()
     if not path.is_file():
-        return by_id, by_rva, by_name
+        return by_id, by_rva, by_name, catalog_rows
     with path.open("r", encoding="utf-8", errors="replace") as stream:
         for no, line in enumerate(stream):
             if no >= limit:
@@ -53,14 +71,20 @@ def _method_index(path: Path, limit: int = 250000) -> tuple[dict[int, dict[str, 
                 continue
             mid = row.get("id")
             if isinstance(mid, int):
-                by_id[mid] = row
+                catalog_rows += 1
+                if mid in ids:
+                    by_id[mid] = row
             rva = _norm_hex(_first(row, "rva", "RVA", "address", "virtualAddress"))
-            if rva:
-                by_rva.setdefault(rva, []).append(row)
+            if rva and rva in rvas:
+                bucket = by_rva.setdefault(rva, [])
+                if len(bucket) < 25:
+                    bucket.append(row)
             name = str(_first(row, "name", "method", "methodName", "label") or "").strip().casefold()
-            if name:
-                by_name.setdefault(name, []).append(row)
-    return by_id, by_rva, by_name
+            if name and name in names:
+                bucket = by_name.setdefault(name, [])
+                if len(bucket) < 25:
+                    bucket.append(row)
+    return by_id, by_rva, by_name, catalog_rows
 
 
 def _locator(card: dict[str, Any]) -> dict[str, Any]:
@@ -83,6 +107,31 @@ def _locator(card: dict[str, Any]) -> dict[str, Any]:
     if "rva" in out:
         out["rva"] = _norm_hex(out["rva"])
     return out
+
+
+def _wanted_method_links(cards: list[Any]) -> tuple[set[int], set[str], set[str]]:
+    ids: set[int] = set()
+    rvas: set[str] = set()
+    names: set[str] = set()
+    for card in cards:
+        if not isinstance(card, dict):
+            continue
+        loc = _locator(card)
+        mid = loc.get("methodId")
+        if isinstance(mid, int):
+            ids.add(mid)
+        elif mid not in (None, ""):
+            try:
+                ids.add(int(str(mid)))
+            except Exception:
+                pass
+        rva = _norm_hex(loc.get("rva"))
+        if rva:
+            rvas.add(rva)
+        name = str(loc.get("method") or "").strip().casefold()
+        if name:
+            names.add(name)
+    return ids, rvas, names
 
 
 def _link_methods(locator: dict[str, Any], by_id: dict[int, dict[str, Any]], by_rva: dict[str, list[dict[str, Any]]], by_name: dict[str, list[dict[str, Any]]]) -> tuple[str, list[dict[str, Any]]]:
@@ -223,10 +272,13 @@ def build_connected_report(workdir: str | Path, output_json: str | Path | None =
     embedded = _json(root / "embedded-analysis.json")
     artifact_families = _json(root / "artifact-families.json")
     apktool = _json(root / "apktool-analysis.json")
-    by_id, by_rva, by_name = _method_index(root / "analysis.methods.jsonl")
+    cards = catalog.get("cards") if isinstance(catalog.get("cards"), list) else []
+    wanted_ids, wanted_rvas, wanted_names = _wanted_method_links(cards)
+    by_id, by_rva, by_name, method_catalog_rows = _method_index(
+        root / "analysis.methods.jsonl", wanted_ids, wanted_rvas, wanted_names
+    )
     rows: list[dict[str, Any]] = []
     exact = 0
-    cards = catalog.get("cards") if isinstance(catalog.get("cards"), list) else []
     for card in cards:
         if not isinstance(card, dict):
             continue
@@ -257,7 +309,15 @@ def build_connected_report(workdir: str | Path, output_json: str | Path | None =
         "findingCount": len(rows),
         "exactLinked": exact,
         "unresolvedLinks": len(rows) - exact,
-        "methodCatalogRows": len(by_id),
+        "methodCatalogRows": method_catalog_rows,
+        "methodIndexPolicy": {
+            "storage": "STREAMED_RELEVANT_ROWS_ONLY",
+            "retainedMethodIds": len(by_id),
+            "retainedRvaBuckets": len(by_rva),
+            "retainedNameBuckets": len(by_name),
+            "maxRowsPerRvaOrName": 25,
+            "loadsFullMethodCatalogIntoRam": False,
+        },
         "summary": {
             "targetProfile": analysis.get("targetProfile"),
             "total": catalog.get("total", 0),
