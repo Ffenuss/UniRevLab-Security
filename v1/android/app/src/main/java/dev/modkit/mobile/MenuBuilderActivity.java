@@ -62,7 +62,9 @@ public class MenuBuilderActivity extends Activity {
         if(!app.file("menu-spec.json").isFile()&&app.file("re-analysis.json").isFile())startWork(new Intent().putExtra("op","menu_smart_prepare"));
     }
     private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
-    private void startWork(Intent i){if(app.busy.get()){toast("Сейчас выполняется другая операция");return;}app.cancelled.set(false);app.busy.set(true);app.progress("Подготовка…");i.setClass(this,WorkerService.class);startForegroundService(i);}
+    private boolean createdOutputOp(String op){return "menu_export".equals(op)||"menu_payload_export".equals(op)||"menu_build_apk".equals(op)||"menu_auto_build_apk".equals(op)||"menu_auto_build_apk_deep".equals(op)||"menu_autopilot_build_apk".equals(op)||"menu_probe_build_apk".equals(op)||"menu_smart_build_apk".equals(op);}
+    private void deleteCreatedDocument(Intent i){String op=i.getStringExtra("op"),uriText=i.getStringExtra("uri");if(!createdOutputOp(op)||uriText==null||uriText.isEmpty())return;try{android.provider.DocumentsContract.deleteDocument(getContentResolver(),Uri.parse(uriText));}catch(Exception ignored){}}
+    private boolean startWork(Intent i){if(app.busy.get()){deleteCreatedDocument(i);toast("Сейчас выполняется другая операция");return false;}app.cancelled.set(false);app.busy.set(true);app.progress("Подготовка…");i.setClass(this,WorkerService.class);try{startForegroundService(i);return true;}catch(Exception e){app.busy.set(false);app.revision++;deleteCreatedDocument(i);app.progress("Menu Builder: не удалось запустить операцию: "+e.getMessage());toast("Не удалось запустить Menu Builder-операцию");return false;}}
     private JSONObject read(){try{return new JSONObject(Io.readUtf8(app.file("menu-spec.json")));}catch(Exception e){return null;}}
     private void write(JSONObject o){try{Io.writeUtf8(app.file("menu-spec.json"),o.toString(2));app.revision++;}catch(Exception e){toast(e.getMessage());}}
     private void validateVisualBinding(String visual,String call) throws Exception {
