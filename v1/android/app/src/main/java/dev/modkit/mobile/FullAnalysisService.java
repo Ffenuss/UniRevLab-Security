@@ -31,6 +31,12 @@ public class FullAnalysisService extends Service {
     private Notification note(String text){Intent stop=new Intent(this,FullAnalysisService.class).setAction("cancel");PendingIntent cancel=PendingIntent.getService(this,92,stop,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);PendingIntent open=PendingIntent.getActivity(this,91,new Intent(this,AutoAnalysisActivity.class),PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);return new Notification.Builder(this,"full-analysis").setSmallIcon(R.drawable.ic_modkit).setContentTitle("ModKit · полный анализ").setContentText(text).setContentIntent(open).setOngoing(true).addAction(0,"Отмена",cancel).build();}
     private void progress(String text){app.progress(text);((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).notify(91,note(text));}
 
+    /** Chaquopy callback shared with embedded backends. */
+    public final class Progress {
+        public boolean isCancelled(){return app.cancelled.get();}
+        public void progress(String text){FullAnalysisService.this.progress(text);}
+    }
+
     @Override public int onStartCommand(Intent intent,int flags,int startId){
         if(intent!=null&&"cancel".equals(intent.getAction())){app.cancelled.set(true);progress("Отмена запрошена — завершаю текущий безопасный шаг…");return START_NOT_STICKY;}
         startForeground(91,note("Подготовка полного анализа…"));
@@ -79,13 +85,21 @@ public class FullAnalysisService extends Service {
                 }catch(Throwable e){
                     JSONObject error=new JSONObject().put("schema","modkit-apktool-analysis-1.0").put("engineId",ApktoolEngine.ENGINE_ID).put("bundled",true).put("status","FAILED").put("error",String.valueOf(e.getMessage()));
                     Files.write(app.file("apktool-analysis.json").toPath(),error.toString(2).getBytes(StandardCharsets.UTF_8));
+                    if(app.cancelled.get()){chain=false;progress("Полный анализ отменён пользователем.");return;}
                     progress("Apktool частичен: "+e.getMessage()+" · остальные backend'ы продолжаются.");
                 }
 
                 if(app.cancelled.get()){chain=false;progress("Полный анализ отменён пользователем.");return;}
                 progress("4/4 · Lua/JS/Hermes deep + ARM64 deep + Flutter AOT + Cocos correlation…");
-                try{Python.getInstance().getModule("modkit.mobile.embedded_pipeline").callAttr("run_workspace",getFilesDir().getPath(),app.file("artifact-families.json").getPath(),app.file("embedded-analysis.json").getPath());}
-                catch(Throwable e){progress("Embedded pipeline частичен: "+e.getMessage()+" · Evidence Graph всё равно будет построен.");}
+                try{
+                    Python.getInstance().getModule("modkit.mobile.embedded_pipeline").callAttr(
+                            "run_workspace",getFilesDir().getPath(),
+                            app.file("artifact-families.json").getPath(),
+                            app.file("embedded-analysis.json").getPath(),new Progress());
+                }catch(Throwable e){
+                    if(app.cancelled.get()){chain=false;progress("Полный анализ отменён пользователем.");return;}
+                    progress("Embedded pipeline частичен: "+e.getMessage()+" · Evidence Graph всё равно будет построен.");
+                }
                 if(app.cancelled.get()){chain=false;progress("Полный анализ отменён пользователем.");}
             }catch(Exception e){
                 progress(app.cancelled.get()?"Полный анализ отменён.":"Полный анализ: "+e.getMessage()+" · продолжаю доступными анализаторами.");
