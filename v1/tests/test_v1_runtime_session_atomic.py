@@ -3,6 +3,7 @@ from pathlib import Path
 
 SOURCE = Path("android/app/src/main/java/dev/modkit/mobile/ProcessLabActivity.java")
 TARGET_PREP = Path("android/app/src/main/java/dev/modkit/mobile/TargetPreparationService.java")
+FULL = Path("android/app/src/main/java/dev/modkit/mobile/FullAnalysisService.java")
 
 
 def test_runtime_session_is_published_via_generic_part_then_replace_helper():
@@ -47,3 +48,21 @@ def test_target_switch_clears_runtime_session_and_correlation_orphans():
         "runtime-correlation.json.build",
     ):
         assert f'"{name}"' in cleanup
+
+
+def test_full_rerun_invalidates_ephemeral_runtime_session_before_static_backends():
+    source = FULL.read_text(encoding="utf-8")
+    helper = source.split("private void invalidatePerRunEvidenceState()", 1)[1].split("private void deleteRunTree", 1)[0]
+    for name in (
+        "runtime-session.json",
+        "runtime-session.json.part",
+        "runtime-correlation.json",
+        "runtime-correlation.json.part",
+        "runtime-correlation.json.build",
+    ):
+        assert f'"{name}"' in helper
+
+    invalidate = source.index("invalidatePerRunEvidenceState();")
+    resolve = source.index("DecompilerEngine.resolveTargetInputs(app)", invalidate)
+    inventory = source.index('stage(1,4,"Inventory:', resolve)
+    assert invalidate < resolve < inventory
