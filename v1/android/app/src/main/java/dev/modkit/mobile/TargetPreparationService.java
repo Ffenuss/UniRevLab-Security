@@ -52,13 +52,13 @@ public class TargetPreparationService extends Service {
         app.result=null;
         String[] names={
             "full-reconstruction.json","modkit-decompiled.zip","apktool-analysis.json","apktool-workspace",
-            "artifact-families.json","embedded-analysis.json","automatic-evidence.json","automod-plan.json",
+            "artifact-families.json","embedded-analysis.json","automatic-evidence.json","automod-plan.json","automod-plan.json.part",
             "runtime-session.json","runtime-correlation.json",
-            "il2cpp-crosscheck.json","il2cpp-crosscheck.methods.jsonl",
-            "il2cpp-metadata-identity.json","il2cpp-metadata-identity.methods.jsonl",
+            "il2cpp-crosscheck.json","il2cpp-crosscheck.json.part","il2cpp-crosscheck.methods.jsonl","il2cpp-crosscheck.methods.jsonl.part",
+            "il2cpp-metadata-identity.json","il2cpp-metadata-identity.json.part","il2cpp-metadata-identity.methods.jsonl","il2cpp-metadata-identity.methods.jsonl.part",
             "il2cpp-no-rva-native.json","il2cpp-no-rva-native.methods.jsonl","il2cpp-no-rva-native.failures.jsonl",
             "lua-deep.json","hermes-deep","hermes-deep.json","native-deep.json","native-deep-cache","cocos-deep.json","flutter-deep.json","deep-gameplay.json",
-            "installed-target.json","installed-apk-set.zip","installed-scan.json","installed-apks",
+            "installed-target.json","installed-apk-set.zip","installed-apk-set.zip.tmp","installed-scan.json","installed-apks",
             "metadata.bin","library.so","game.apk","game-native-split.apk","game.apk.part",
             "analysis.json","analysis.summary.json","analysis.ui.jsonl",
             "analysis.methods.jsonl","analysis.methods.jsonl.idx","analysis.methods.jsonl.rva.idx","analysis.methods.jsonl.pages.idx","analysis.methods.meta.json",
@@ -70,13 +70,13 @@ public class TargetPreparationService extends Service {
             "menu-spec.json","menu-result.json","menu-preflight.json","menu-validation.json","menu-auto-prepare.json","menu-auto-confirm.json","menu-autopilot.json","menu-native-recovery.json","menu-project",
             "menu-payload-report.json","menu-apk-report.json","menu-payload-build.zip","menu-unsigned.apk",
             "target-signed.apk","target-signed.apks","target-signed-set",
-            "connected-report.json","connected-report.md","evidence-bundle.zip"
+            "connected-report.json","connected-report.json.part","connected-report.md","connected-report.md.part","evidence-bundle.zip"
         };
         for(String name:names)deleteTree(app.file(name));
         getSharedPreferences("state",0).edit().remove("selections").remove("active.project").remove("metadata.bin").remove("library.so").remove("installed.package").remove("game.apk").apply();
     }
     private void cleanupFailedPreparation()throws IOException{
-        for(String name:new String[]{"installed-target.json","installed-apk-set.zip","installed-apks","game.apk","game.apk.part","game-native-split.apk"})deleteTree(app.file(name));
+        for(String name:new String[]{"installed-target.json","installed-apk-set.zip","installed-apk-set.zip.tmp","installed-apks","game.apk","game.apk.part","game-native-split.apk"})deleteTree(app.file(name));
         getSharedPreferences("state",0).edit().remove("installed.package").remove("game.apk").apply();
     }
     private void checkCancelled()throws java.io.InterruptedIOException{if(app.cancelled.get())throw new java.io.InterruptedIOException("cancelled");}
