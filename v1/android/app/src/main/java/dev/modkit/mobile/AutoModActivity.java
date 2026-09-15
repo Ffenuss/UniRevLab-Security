@@ -25,7 +25,6 @@ import com.google.android.material.card.MaterialCardView;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.File;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -58,7 +57,7 @@ public class AutoModActivity extends AppCompatActivity {
         super.onCreate(state);app=(App)getApplication();
         ScrollView scroll=new ScrollView(this);root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(dp(16),dp(18),dp(16),dp(30));root.setBackgroundColor(bg());scroll.addView(root);setContentView(scroll);
         TextView title=text("AutoMod / Patch Lab",29);title.setTypeface(null,Typeface.BOLD);root.addView(title);
-        TextView note=text("Evidence Graph сам раскладывает находки по готовности. Runtime load-base/RVA evidence усиливает доказательства, но не делает finding buildable. В сборку проходят только локальные app-owned controls с validated executable binding и успешным preflight. Server/payment/auth/trust findings остаются audit-only.",13);note.setTextColor(muted());root.addView(note);
+        TextView note=text("Evidence Graph сам раскладывает находки по готовности. Runtime load-base/RVA и IL2CPP metadata+ELF cross-check усиливают доказательства, но не делают finding buildable. В сборку проходят только локальные app-owned controls с validated executable binding и успешным preflight. Server/payment/auth/trust findings остаются audit-only.",13);note.setTextColor(muted());root.addView(note);
         summary=text("",14);root.addView(summary);preflight=text("",13);preflight.setTextColor(muted());root.addView(preflight);status=text("",13);root.addView(status);
         refresh=button("Обновить AutoMod-план",v->rebuildPlan());
         prepare=button("Подготовить подтверждённые controls",v->startWork("menu_smart_prepare",null));
@@ -78,7 +77,7 @@ public class AutoModActivity extends AppCompatActivity {
         if(planning){toast("AutoMod-план уже обновляется");return;}
         if(app.busy.get()){toast("Сейчас выполняется другая операция");return;}
         if(!app.file("simple-catalog.json").isFile()&&!app.file("game.apk").isFile()){toast("Сначала выполните полный анализ");return;}
-        planning=true;refresh.setEnabled(false);status.setText("AutoMod: строю fail-closed план из Evidence Graph и runtime evidence…");
+        planning=true;refresh.setEnabled(false);status.setText("AutoMod: Evidence Graph + runtime + IL2CPP structural cross-check…");
         executor.execute(()->{
             try{
                 if(!Python.isStarted())Python.start(new AndroidPlatform(this));
@@ -128,7 +127,7 @@ public class AutoModActivity extends AppCompatActivity {
     private void render(){
         JSONObject plan=read("automod-plan.json");JSONObject pf=read("menu-preflight.json");
         if(plan==null){summary.setText("План ещё не построен. Выполните полный анализ и нажмите «Обновить AutoMod-план».");candidates.removeAllViews();setButtons(null,pf);return;}
-        summary.setText("Готово к build: "+count(plan,"readyToBuildCount")+" · preflight: "+count(plan,"readyForPreflightCount")+" · runtime/binding: "+count(plan,"runtimeNeededCount")+" · review: "+count(plan,"reviewCount")+" · audit-only: "+count(plan,"auditOnlyCount")+" · исключено: "+count(plan,"excludedCount")+"\nExact locators: "+count(plan,"exactLocatorCount")+" · runtime VA observed: "+count(plan,"runtimeObservedCount")+" · всего: "+count(plan,"candidateCount"));
+        summary.setText("Готово к build: "+count(plan,"readyToBuildCount")+" · preflight: "+count(plan,"readyForPreflightCount")+" · runtime/binding: "+count(plan,"runtimeNeededCount")+" · review: "+count(plan,"reviewCount")+" · audit-only: "+count(plan,"auditOnlyCount")+" · исключено: "+count(plan,"excludedCount")+"\nExact locators: "+count(plan,"exactLocatorCount")+" · runtime VA observed: "+count(plan,"runtimeObservedCount")+" · IL2CPP structural: "+count(plan,"il2cppStructuralObservedCount")+" (both "+count(plan,"il2cppStructuralBothCount")+") · всего: "+count(plan,"candidateCount"));
         if(pf==null)preflight.setText("Preflight ещё не выполнен. Сборка заблокирована.");
         else preflight.setText("Preflight: "+(pf.optBoolean("readyForAutoBuild")?"READY":"BLOCK")+" · controls "+pf.optInt("controlCount",pf.optInt("controls"))+" · blockers "+pf.optInt("blockerCount",pf.optInt("blockers")));
         candidates.removeAllViews();JSONArray rows=plan.optJSONArray("candidates");int shown=0;if(rows!=null)for(int i=0;i<rows.length()&&shown<24;i++){JSONObject row=rows.optJSONObject(i);if(row==null)continue;String stage=row.optString("stage","REVIEW");if("EXCLUDED".equals(stage)&&shown>=18)continue;candidateCard(row);shown++;}
@@ -141,7 +140,8 @@ public class AutoModActivity extends AppCompatActivity {
         TextView h=text(row.optString("title","evidence"),16);h.setTypeface(null,Typeface.BOLD);box.addView(h);
         String domain=row.optString("gameplayDomain","");String locator="";JSONObject loc=row.optJSONObject("locator");if(loc!=null){Object rva=loc.opt("rva");if(rva!=null&&rva!=JSONObject.NULL)locator=" · RVA "+String.valueOf(rva);else if(loc.has("entry"))locator=" · "+loc.optString("entry");}
         JSONObject runtime=row.optJSONObject("runtimeObservation");String runtimeText="";if(runtime!=null&&runtime.optBoolean("mapped")){runtimeText=" · runtime VA "+runtime.optString("runtimeVaHex","?")+" @ "+runtime.optString("moduleBasename",runtime.optString("modulePath","module"));}
-        TextView meta=text(row.optString("stage")+" · "+row.optString("verificationStage","FOUND_STATIC")+(domain.isEmpty()?"":" · "+domain)+locator+runtimeText,12);meta.setTextColor(muted());box.addView(meta);
+        JSONObject il2cpp=row.optJSONObject("il2cppStructural");String il2cppText="";if(il2cpp!=null){il2cppText=" · IL2CPP "+il2cpp.optString("status","cross-check");}
+        TextView meta=text(row.optString("stage")+" · "+row.optString("verificationStage","FOUND_STATIC")+(domain.isEmpty()?"":" · "+domain)+locator+runtimeText+il2cppText,12);meta.setTextColor(muted());box.addView(meta);
         box.addView(text(row.optString("reason",""),13));
         LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.setMargins(0,dp(5),0,dp(5));candidates.addView(card,lp);
     }
