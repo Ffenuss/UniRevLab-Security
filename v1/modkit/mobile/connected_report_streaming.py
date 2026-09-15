@@ -8,7 +8,9 @@ fallback, or exact RVA.
 
 Cancellation is cooperative and fail-closed: heavy JSONL/catalogue scans check the
 Android callback and final JSON/Markdown outputs are written through sibling ``.part``
-files, then promoted only after one shared final cancellation gate.
+files, then promoted only after one shared final cancellation gate. Standalone report
+generation also verifies secondary IL2CPP evidence against exact input SHA-256 values
+before any report correlation, so it never relies on mtime freshness alone.
 """
 from __future__ import annotations
 
@@ -19,6 +21,7 @@ from typing import Any, Callable, Iterator
 
 from modkit.mobile import connected_report as _base
 from modkit.mobile import connected_report_v12 as _v12
+from modkit.mobile import secondary_il2cpp_release as _secondary
 from modkit.mobile.connected_report import _locator as _base_locator
 
 SCHEMA = _v12.SCHEMA
@@ -260,8 +263,15 @@ def build_connected_report(
     output_md: str | Path | None = None,
     cb: Any | None = None,
 ) -> dict[str, Any]:
-    """Build Connected Report 1.2 with finding-scoped streamed evidence and cooperative cancel."""
+    """Build Connected Report 1.2 with exact-fresh streamed evidence and cooperative cancel."""
     gate = _Gate(cb)
+    gate.force()
+    try:
+        secondary = _secondary.ensure_workspace(workdir, cb)
+    except Exception as exc:
+        if _cancelled(cb):
+            raise ReportCancelled("Connected Report cancelled while refreshing IL2CPP evidence") from exc
+        raise
     gate.force()
     reader, retained = _filtered_reader(workdir, gate)
     json_part = _part(output_json)
@@ -329,6 +339,11 @@ def build_connected_report(
                 "coordinatedFinalCancelGate": True,
                 "multiFileTransactionAtomic": False,
             })
+        report["freshnessPolicy"] = {
+            "secondaryIl2cppEvidence": secondary.get("freshnessPolicy"),
+            "mtimeTrustedAsIdentity": False,
+            "standaloneReportRefreshesEvidence": True,
+        }
         if json_part is not None:
             gate.force()
             json_part.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
