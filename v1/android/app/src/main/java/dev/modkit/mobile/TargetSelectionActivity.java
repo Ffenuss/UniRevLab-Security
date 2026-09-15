@@ -100,7 +100,7 @@ public class TargetSelectionActivity extends AppCompatActivity {
         if(selectionAccepted&&waiting)return;
         if(!app.busy.compareAndSet(false,true)){toast("Сейчас выполняется другая операция");return;}
         selectionAccepted=true;waiting=true;waitingKind=kind;waitStarted=System.currentTimeMillis();app.cancelled.set(false);app.progress("Подготовка target без анализа…");i.setClass(this,TargetPreparationService.class);
-        AnalysisJournal.append(this,"TARGET_SELECTION","Target preparation requested",new org.json.JSONObject().put("kind",kind));
+        AnalysisJournal.append(this,"TARGET_SELECTION","Target preparation requested",AnalysisJournal.data("kind",kind));
         try{startForegroundService(i);}catch(Exception e){app.busy.set(false);waiting=false;selectionAccepted=false;setButtons(true);status.setText("Не удалось запустить подготовку target: "+e.getMessage());AnalysisJournal.exception(this,"TARGET_SERVICE_START_FAILED",e);}
     }
 
