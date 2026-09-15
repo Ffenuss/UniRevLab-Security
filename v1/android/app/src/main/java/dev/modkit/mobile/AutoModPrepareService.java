@@ -77,20 +77,11 @@ public class AutoModPrepareService extends Service {
         if(!Python.isStarted())Python.start(new AndroidPlatform(this));
         PyObject result=Python.getInstance().getModule("modkit.mobile.menu_native_recovery").callAttr("prepare_workspace",getFilesDir().getPath(),source.getPath(),new Progress());
         check();
-        JSONObject audit=readRequiredAudit();
+        progress("AutoMod: проверяю exact SHA-256 всех prepare-входов…");
+        JSONObject audit=AutoModAuditVerifier.verifyCurrent(app,source,()->app.cancelled.get());
         JSONObject obj=new JSONObject(result.toString());JSONObject confirm=obj.optJSONObject("confirm"),pre=obj.optJSONObject("preflight");JSONArray promoted=confirm==null?null:confirm.optJSONArray("promoted"),rejected=confirm==null?null:confirm.optJSONArray("rejected");
         int promotedCount=promoted==null?0:promoted.length(),rejectedCount=rejected==null?0:rejected.length();boolean ready=pre!=null&&pre.optBoolean("readyForAutoBuild");
-        progress("AutoMod prepare: exact audit calls "+audit.optInt("calls")+", подтверждено bindings "+promotedCount+", отклонено "+rejectedCount+", auto-build "+(ready?"READY":"BLOCK/REVIEW")+". Recovered RVA не обходит preflight.");
-    }
-
-    private JSONObject readRequiredAudit()throws Exception{
-        File file=app.file("menu-native-recovery.json");
-        if(!file.isFile())throw new IOException("Exact recovery audit отсутствует; prepare заблокирован");
-        JSONObject audit=new JSONObject(Io.readUtf8(file));
-        if(!audit.optBoolean("completed"))throw new IOException("Exact recovery audit не завершён; prepare заблокирован");
-        if(!audit.optBoolean("normalBindingRequired")||!audit.optBoolean("preflightRequired"))throw new IOException("Exact recovery audit нарушает обязательные binding/preflight gates");
-        if(audit.optBoolean("promotesBuildability")||audit.optBoolean("addressRecoveryPromotesBuildability"))throw new IOException("Exact recovery audit попытался повысить buildability без preflight");
-        return audit;
+        progress("AutoMod prepare: exact SHA verified · audit calls "+audit.optInt("calls")+", подтверждено bindings "+promotedCount+", отклонено "+rejectedCount+", auto-build "+(ready?"READY":"BLOCK/REVIEW")+". Recovered RVA не обходит preflight.");
     }
 
     private void invalidatePreparedState()throws IOException{
