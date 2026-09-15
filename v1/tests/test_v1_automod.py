@@ -63,6 +63,46 @@ def test_workspace_plan_writes_schema_and_uses_existing_catalog(tmp_path):
     catalog={"cards":[card("x","MaxHP","LOCATOR_CONFIRMED",actionable=True,locator={"rva":4096})]};(tmp_path/"simple-catalog.json").write_text(json.dumps(catalog),encoding="utf-8");(tmp_path/"runtime-correlation.json").write_text(json.dumps({"correlations":[{"id":"x","runtimeEvidence":"PROCFS_MODULE_LAYOUT","mapped":True,"loadBaseHex":"0x50000000","rvaHex":"0x1000","runtimeVaHex":"0x50001000","promotesBuildability":False}]}),encoding="utf-8");output=tmp_path/"automod-plan.json";plan=build_workspace_plan(tmp_path,output);stored=json.loads(output.read_text(encoding="utf-8"));assert plan["schema"]=="modkit-automod-plan-1.4";assert stored["readyForPreflightCount"]==1;assert stored["readyToBuildCount"]==0;assert stored["runtimeObservedCount"]==1;assert stored["runtimeSource"]=="runtime-correlation.json"
 
 
-def test_automod_android_surface_uses_existing_fail_closed_build_pipeline():
-    manifest=(ROOT/"android/app/src/main/AndroidManifest.xml").read_text(encoding="utf-8");activity=(ROOT/"android/app/src/main/java/dev/modkit/mobile/AutoModActivity.java").read_text(encoding="utf-8");auto=(ROOT/"android/app/src/main/java/dev/modkit/mobile/AutoAnalysisActivity.java").read_text(encoding="utf-8");full=(ROOT/"android/app/src/main/java/dev/modkit/mobile/FullModeActivity.java").read_text(encoding="utf-8");storage=(ROOT/"android/app/src/main/java/dev/modkit/mobile/AnalysisStorageActivity.java").read_text(encoding="utf-8");prep=(ROOT/"android/app/src/main/java/dev/modkit/mobile/TargetPreparationService.java").read_text(encoding="utf-8");evidence=(ROOT/"android/app/src/main/java/dev/modkit/mobile/AutomaticEvidenceService.java").read_text(encoding="utf-8")
-    assert '.AutoModActivity" android:exported="false"' in manifest;assert 'getModule("modkit.mobile.automod")' in activity;assert '"menu_smart_prepare"' in activity;assert '"menu_preflight"' in activity;assert '"menu_smart_build_apk"' in activity;assert 'pf==null||!pf.optBoolean("readyForAutoBuild")' in activity;assert 'build.setEnabled(idle&&prepareCount>0&&preflightReady)' in activity;assert 'runtime VA observed' in activity;assert 'runtimeVaHex' in activity;assert 'metadata identity/no-RVA' in activity;assert 'metadataIdentityObservedCount' in activity;assert 'metadataQualifiedNoRvaCount' in activity;assert 'metadataIdentity' in activity;assert 'RVA unresolved' in activity;assert "ProcessLabActivity.class" in activity;assert "AutoModActivity.class" in auto;assert "AutoModActivity.class" in full;assert "AutoModActivity.class" in storage;assert 'getModule("modkit.mobile.automod")' in evidence;assert 'getModule("modkit.mobile.il2cpp_no_rva_native")' in evidence;assert '"automod-plan.json"' in evidence;assert '"automod-plan.json"' in prep;assert '"automod-plan.json"' in storage;assert '"runtime-correlation.json"' in prep;assert '"runtime-correlation.json"' in storage;assert '"il2cpp-metadata-identity.json"' in prep;assert '"il2cpp-metadata-identity.json"' in storage;assert '"il2cpp-no-rva-native.json"' in prep;assert '"il2cpp-no-rva-native.json"' in storage;assert '"deep-gameplay.json"' in storage
+def test_automod_android_surface_uses_exact_recovery_prepare_and_fail_closed_build_pipeline():
+    manifest=(ROOT/"android/app/src/main/AndroidManifest.xml").read_text(encoding="utf-8")
+    activity=(ROOT/"android/app/src/main/java/dev/modkit/mobile/AutoModActivity.java").read_text(encoding="utf-8")
+    prepare_service=(ROOT/"android/app/src/main/java/dev/modkit/mobile/AutoModPrepareService.java").read_text(encoding="utf-8")
+    auto=(ROOT/"android/app/src/main/java/dev/modkit/mobile/AutoAnalysisActivity.java").read_text(encoding="utf-8")
+    full=(ROOT/"android/app/src/main/java/dev/modkit/mobile/FullModeActivity.java").read_text(encoding="utf-8")
+    storage=(ROOT/"android/app/src/main/java/dev/modkit/mobile/AnalysisStorageActivity.java").read_text(encoding="utf-8")
+    prep=(ROOT/"android/app/src/main/java/dev/modkit/mobile/TargetPreparationService.java").read_text(encoding="utf-8")
+    evidence=(ROOT/"android/app/src/main/java/dev/modkit/mobile/AutomaticEvidenceService.java").read_text(encoding="utf-8")
+    assert '.AutoModActivity" android:exported="false"' in manifest
+    assert '.AutoModPrepareService" android:exported="false"' in manifest
+    assert 'getModule("modkit.mobile.automod")' in activity
+    assert "AutoModPrepareService.class" in activity
+    assert '"menu_smart_prepare"' not in activity
+    assert '"menu_preflight"' in activity
+    assert '"menu_build_apk"' in activity
+    assert '"menu_smart_build_apk"' not in activity
+    assert 'getModule("modkit.mobile.menu_native_recovery")' in prepare_service
+    assert 'prepare_workspace' in prepare_service
+    assert 'Deep/binding/preflight' in activity
+    assert 'pf==null||!pf.optBoolean("readyForAutoBuild")' in activity
+    assert 'build.setEnabled(idle&&prepareCount>0&&preflightReady)' in activity
+    assert 'runtime VA observed' in activity
+    assert 'runtimeVaHex' in activity
+    assert 'metadata identity/no-RVA' in activity
+    assert 'nativeRecoveredLocatorCount' in activity
+    assert 'nativeRvaRecovery' in activity
+    assert "ProcessLabActivity.class" in activity
+    assert "AutoModActivity.class" in auto
+    assert "AutoModActivity.class" in full
+    assert "AutoModActivity.class" in storage
+    assert 'getModule("modkit.mobile.automod")' in evidence
+    assert 'getModule("modkit.mobile.il2cpp_no_rva_native")' in evidence
+    assert '"automod-plan.json"' in evidence
+    assert '"automod-plan.json"' in prep
+    assert '"automod-plan.json"' in storage
+    assert '"runtime-correlation.json"' in prep
+    assert '"runtime-correlation.json"' in storage
+    assert '"il2cpp-metadata-identity.json"' in prep
+    assert '"il2cpp-metadata-identity.json"' in storage
+    assert '"il2cpp-no-rva-native.json"' in prep
+    assert '"il2cpp-no-rva-native.json"' in storage
+    assert '"deep-gameplay.json"' in storage
