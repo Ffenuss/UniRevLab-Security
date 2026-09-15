@@ -143,6 +143,62 @@ def test_connected_report_runtime_rva_fallback_requires_unique_observation(tmp_p
     assert report["runtimeObservedFindings"] == 0
 
 
+def test_connected_report_attaches_exact_no_rva_metadata_identity_without_address_promotion(tmp_path: Path):
+    (tmp_path / "analysis.methods.jsonl").write_text(
+        json.dumps({"id": 42, "class": "Game.Player", "name": "SetHealth", "rva": None}) + "\n",
+        encoding="utf-8",
+    )
+    _write_json(tmp_path / "simple-catalog.json", {
+        "cards": [{
+            "id": "health-no-rva",
+            "title": "SetHealth",
+            "buildable": False,
+            "actionable": False,
+            "locator": {"methodId": 42, "class": "Game.Player", "method": "SetHealth"},
+        }]
+    })
+    _write_json(tmp_path / "il2cpp-metadata-identity.json", {
+        "schema": "modkit-il2cpp-metadata-identity-1.0",
+        "engine": "il2cpp.metadata-identity-embedded",
+        "typeLayout": "COMPACT_TYPEDEF_88",
+        "counts": {"qualifiedMethodConfirmedNoRva": 1},
+        "addressResolver": False,
+        "promotesBuildability": False,
+    })
+    (tmp_path / "il2cpp-metadata-identity.methods.jsonl").write_text(
+        json.dumps({
+            "id": 42,
+            "class": "Game.Player",
+            "methodName": "SetHealth",
+            "status": "METADATA_QUALIFIED_METHOD_CONFIRMED_NO_RVA",
+            "metadataMethodNamePresent": True,
+            "metadataQualifiedMethodPresent": True,
+            "addressConfirmed": False,
+            "rva": None,
+            "actionable": False,
+            "buildable": False,
+            "promotesBuildability": False,
+        }) + "\n",
+        encoding="utf-8",
+    )
+    out_md = tmp_path / "connected-report.md"
+    report = build_connected_report(tmp_path, tmp_path / "connected-report.json", out_md)
+    finding = report["findings"][0]
+    assert finding["buildable"] is False
+    assert finding["metadataIdentityConfirmed"] is True
+    assert finding["metadataIdentity"]["status"] == "METADATA_QUALIFIED_METHOD_CONFIRMED_NO_RVA"
+    assert finding["metadataIdentity"]["addressConfirmed"] is False
+    assert finding["metadataIdentity"]["rva"] is None
+    assert finding["metadataIdentity"]["actionable"] is False
+    assert finding["metadataIdentity"]["buildable"] is False
+    assert finding["metadataIdentity"]["promotesBuildability"] is False
+    assert report["metadataIdentityConfirmedFindings"] == 1
+    assert report["metadataQualifiedIdentityFindings"] == 1
+    assert report["corroboration"]["il2cppMetadataIdentity"]["addressResolver"] is False
+    assert report["corroboration"]["il2cppMetadataIdentity"]["promotesBuildability"] is False
+    assert "No-RVA metadata identity confirmed: 1" in out_md.read_text(encoding="utf-8")
+
+
 def test_android_report_center_uses_enriched_connected_report_and_evidence_bundle():
     activity = (ROOT / "android/app/src/main/java/dev/modkit/mobile/ReportCenterActivity.java").read_text(encoding="utf-8")
     exporter = (ROOT / "android/app/src/main/java/dev/modkit/mobile/EvidenceBundleExporter.java").read_text(encoding="utf-8")
