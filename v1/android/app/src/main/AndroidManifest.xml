@@ -19,6 +19,7 @@
 <activity android:name=".ReWorkspaceActivity" android:exported="false"/>
 <activity android:name=".DecompilerActivity" android:exported="false"/>
 <activity android:name=".FileWorkspaceActivity" android:exported="false"/>
+<activity android:name=".StructuredFilePreviewActivity" android:exported="false"/>
 <activity android:name=".NativeWorkspaceActivity" android:exported="false"/>
 <activity android:name=".PatchPackActivity" android:exported="false"/>
 <activity android:name=".MenuBuilderActivity" android:exported="false"/>
