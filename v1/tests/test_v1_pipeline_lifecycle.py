@@ -143,11 +143,13 @@ def test_evidence_wakelock_covers_long_release_pipeline():
     assert "if(wake!=null&&wake.isHeld())wake.release();" in source
 
 
-def test_core_cache_hit_requires_re_analysis_and_il2cpp_artifacts_when_pair_exists():
+def test_core_cache_hit_requires_re_analysis_and_complete_il2cpp_artifacts_when_pair_exists():
     source = _read("AutomaticEvidenceService.java")
     assert 'boolean hasIl2cppPair=app.file("metadata.bin").isFile()&&app.file("library.so").isFile();' in source
     assert 'boolean haveReAnalysis=app.file("re-analysis.json").isFile();' in source
-    assert 'boolean haveIl2cppAnalysis=!hasIl2cppPair||app.file("analysis.json").isFile()||app.file("analysis.methods.jsonl").isFile();' in source
+    assert 'boolean haveIl2cppAnalysis=!hasIl2cppPair||(app.file("analysis.json").isFile()&&app.file("analysis.summary.json").isFile()&&app.file("analysis.methods.jsonl").isFile()&&app.file("analysis.gameplay-coverage.json").isFile());' in source
+    for required in ("analysis.json", "analysis.summary.json", "analysis.methods.jsonl", "analysis.gameplay-coverage.json"):
+        assert f'app.file("{required}").isFile()' in source
     assert 'boolean coreCacheReady=haveReAnalysis&&haveIl2cppAnalysis;' in source
     assert 'boolean coreCacheHit=unchanged&&coreCacheReady;' in source
     assert '.put("cacheHit",coreCacheHit)' in source
