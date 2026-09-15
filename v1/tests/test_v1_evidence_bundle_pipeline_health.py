@@ -15,6 +15,7 @@ def test_bundle_manifest_surfaces_pipeline_health():
         "pipelineError",
         "diagnosticFreshOnly",
         "staleEvidenceFilesExcluded",
+        "budgetEvidenceFilesExcluded",
     ):
         assert f'"{field}"' in source
 
@@ -41,6 +42,21 @@ def test_bundle_excludes_historical_project_trees_and_generated_menu_project():
     assert 'rel.equals("menu-project")' in collect
     assert 'rel.startsWith("menu-project/")' in collect
     assert '.put("historicalProjectTreesIncluded", false)' in source
+
+
+def test_bundle_budget_skips_one_file_without_truncating_later_evidence():
+    source = Path(
+        "android/app/src/main/java/dev/modkit/mobile/EvidenceBundleExporter.java"
+    ).read_text(encoding="utf-8")
+
+    loop = source.split("for (File file : candidates)", 1)[1].split("checkInterrupted();\n                    String finalEpoch", 1)[0]
+    evidence_gate = loop.index("if (!isEvidenceFile(relative)) continue;")
+    stale_gate = loop.index("if (freshOnly && !belongsToFailureEpoch(file, initialPipeline))")
+    budget_gate = loop.index("if (total[0] + file.length() > MAX_TEXT_TOTAL)")
+    assert evidence_gate < stale_gate < budget_gate
+    assert "{ budgetExcluded[0]++; continue; }" in loop
+    assert "MAX_TEXT_TOTAL) break" not in loop
+    assert '.put("budgetEvidenceFilesExcluded", budgetExcluded[0])' in source
 
 
 def test_bundle_export_requires_terminal_pipeline_state_and_blocks_running_or_missing_manifest():
