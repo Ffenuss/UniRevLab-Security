@@ -5,12 +5,12 @@ from modkit.mobile.simple_cache import plan_workspace, record_workspace
 from modkit.mobile.simple_mode import build_catalog
 
 
-def test_simple_cache_reuses_hash_only_with_fresh_core_outputs_and_invalidates_changed_target(tmp_path):
+def test_simple_cache_reuses_analysis_only_after_exact_target_rehash_and_fresh_core_outputs(tmp_path):
     apk = tmp_path / "game.apk"
     apk.write_bytes(b"APK-one")
-    # The release cache may skip heavy analyzers only when both the target and the
-    # core derived evidence from the completed pass are still exactly the files
-    # recorded by the cache. This intentionally replaces the old target-only rule.
+    # Analyzer reuse requires exact target bytes plus exact core evidence. Target
+    # hashes are intentionally recomputed every run: size+mtime is metadata, not
+    # a byte-identity proof.
     (tmp_path / "re-analysis.json").write_text('{"findingCount":0}', encoding="utf-8")
     (tmp_path / "security-surfaces.json").write_text('{"total":0}', encoding="utf-8")
     manifest = tmp_path / "simple-cache.json"
@@ -23,7 +23,10 @@ def test_simple_cache_reuses_hash_only_with_fresh_core_outputs_and_invalidates_c
     assert second["targetUnchanged"] is True
     assert second["analysisOutputsUnchanged"] is True
     assert second["securityOutputsUnchanged"] is True
-    assert second["unchanged"] is True and second["reusedHashCount"] == 1
+    assert second["unchanged"] is True
+    assert second["reusedHashCount"] == 0
+    assert second["targetHashesComputed"] == 1
+    assert second["targetHashPolicy"] == "SHA256_EVERY_RUN"
 
     apk.write_bytes(b"APK-two-changed")
     third = json.loads(plan_workspace(tmp_path, manifest))
