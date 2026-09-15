@@ -12,6 +12,7 @@ import hashlib
 from pathlib import Path
 import re
 import struct
+from typing import Any
 
 from modkit.arch import arm64
 from modkit.elf.reader import ElfFile
@@ -29,10 +30,22 @@ class NativeChange:
     note: str = ""
 
 
-def direct_bl_calls(elf: ElfFile, target_rvas: list[int] | set[int] | None = None, *, limit: int = 4000, max_scan_bytes: int = 256 * 1024 * 1024) -> list[dict]:
+def _check_cancel(cb: Any | None) -> None:
+    if cb is None:
+        return
+    checker = getattr(cb, "isCancelled", None)
+    if callable(checker) and checker():
+        raise RuntimeError("native scan cancelled")
+    if checker is None and callable(cb) and cb():
+        raise RuntimeError("native scan cancelled")
+
+
+def direct_bl_calls(elf: ElfFile, target_rvas: list[int] | set[int] | None = None, *, limit: int = 4000,
+                    max_scan_bytes: int = 256 * 1024 * 1024, cb: Any | None = None) -> list[dict]:
     """Bounded static ARM64 direct-call references for an already parsed ELF."""
     if not elf.is_arm64():
         return []
+    _check_cancel(cb)
     wanted = {int(x) for x in (target_rvas or []) if int(x) > 0}
     funcs = [s for s in elf.all_symbols(functions_only=True) if s.name and s.value > 0 and s.shndx != 0]
     funcs.sort(key=lambda x: (x.value, x.name))
@@ -66,6 +79,7 @@ def direct_bl_calls(elf: ElfFile, target_rvas: list[int] | set[int] | None = Non
         scan_regions = [(seg.vaddr, seg.offset, seg.filesz) for seg in elf.segments
                         if seg.is_exec and seg.filesz]
     for region_addr, region_offset, region_size in scan_regions:
+        _check_cancel(cb)
         if scanned >= max_scan_bytes:
             break
         take = min(region_size, max_scan_bytes - scanned) & ~3
@@ -75,7 +89,9 @@ def direct_bl_calls(elf: ElfFile, target_rvas: list[int] | set[int] | None = Non
             # BL has bits[31:26] == 0b100101, so in little-endian encoding
             # the fourth byte is in 0x94..0x97.  A memoryview avoids copying a
             # 100+ MiB executable region when the ELF itself is mmap-backed.
-            for hit in _BL_HIGH_BYTE.finditer(raw):
+            for hit_no, hit in enumerate(_BL_HIGH_BYTE.finditer(raw)):
+                if (hit_no & 0x3FF) == 0:
+                    _check_cancel(cb)
                 rel = hit.start() - 3
                 if rel < 0 or (rel & 3):
                     continue
@@ -107,10 +123,12 @@ def direct_bl_calls(elf: ElfFile, target_rvas: list[int] | set[int] | None = Non
                     return out
         finally:
             raw.release()
+    _check_cancel(cb)
     return out
 
 
-def arm64_address_xrefs(elf: ElfFile, target_rvas: list[int] | set[int], *, limit: int = 2000, max_scan_bytes: int = 64 * 1024 * 1024) -> list[dict]:
+def arm64_address_xrefs(elf: ElfFile, target_rvas: list[int] | set[int], *, limit: int = 2000,
+                        max_scan_bytes: int = 64 * 1024 * 1024, cb: Any | None = None) -> list[dict]:
     """Find conservative ADRP+ADD address materializations for exact target RVAs.
 
     This recognizes the common compiler sequence used to take the address of a
@@ -119,6 +137,7 @@ def arm64_address_xrefs(elf: ElfFile, target_rvas: list[int] | set[int], *, limi
     """
     if not elf.is_arm64():
         return []
+    _check_cancel(cb)
     wanted = {int(x) for x in target_rvas if int(x) > 0}
     if not wanted:
         return []
@@ -142,6 +161,7 @@ def arm64_address_xrefs(elf: ElfFile, target_rvas: list[int] | set[int], *, limi
     out = []
     scanned = 0
     for sec in elf.sections:
+        _check_cancel(cb)
         if not sec.is_exec or sec.type != 1 or not sec.size:
             continue
         if scanned >= max_scan_bytes:
@@ -154,6 +174,8 @@ def arm64_address_xrefs(elf: ElfFile, target_rvas: list[int] | set[int], *, limi
             # a large text section. Decode the ADRP candidate and its tiny ADD
             # look-ahead window directly from the mmap/bytes view.
             for rel in range(0, len(raw), 4):
+                if (rel & 0x3FFF) == 0:
+                    _check_cancel(cb)
                 word = struct.unpack_from('<I', raw, rel)[0]
                 if word & 0x9F000000 != 0x90000000:  # ADRP
                     continue
@@ -195,6 +217,7 @@ def arm64_address_xrefs(elf: ElfFile, target_rvas: list[int] | set[int], *, limi
                     break
         finally:
             raw.release()
+    _check_cancel(cb)
     return out
 
 
