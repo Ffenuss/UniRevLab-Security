@@ -66,7 +66,7 @@ public class TargetPreparationService extends Service {
             "analysis.evidence-graph.jsonl","analysis.evidence-graph.jsonl.idx","analysis.evidence-graph.meta.json",
             "analysis.resolver-index.json","analysis.autopilot-index.jsonl","analysis.gameplay-coverage.json",
             "analysis-deep","re-analysis.json","re-analysis.ui.json","re-analysis.menu.json","security-surfaces.json",
-            "simple-catalog.json","simple-cache.json","simple-progress.json","rodroid",
+            "simple-catalog.json","simple-cache.json","simple-progress.json","simple-progress.json.part","rodroid",
             "menu-spec.json","menu-result.json","menu-preflight.json","menu-validation.json","menu-auto-prepare.json","menu-auto-confirm.json","menu-autopilot.json","menu-native-recovery.json","menu-project",
             "menu-payload-report.json","menu-apk-report.json","menu-payload-build.zip","menu-unsigned.apk",
             "target-signed.apk","target-signed.apks","target-signed-set",
