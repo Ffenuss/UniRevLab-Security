@@ -57,3 +57,13 @@ def test_candidate_cards_are_compact_but_full_details_remain_accessible():
     assert "new AlertDialog.Builder(this)" in source
     assert ".setMessage(row.toString())" in source
     assert 'row.optString("reason","")' in source
+
+
+def test_planning_serializes_prepare_preflight_and_build_actions():
+    source = _source()
+
+    assert 'if(planning){toast("Дождитесь обновления AutoMod-плана")' in source
+    assert 'planning=true;refresh.setEnabled(false);prepare.setEnabled(false);check.setEnabled(false);build.setEnabled(false)' in source
+    assert 'finally{planning=false;runOnUiThread(this::render);}' in source
+    assert 'boolean idle=!app.busy.get()&&!planning' in source
+    assert 'if(!planning)status.setText(app.status==null?"":app.status)' in source
