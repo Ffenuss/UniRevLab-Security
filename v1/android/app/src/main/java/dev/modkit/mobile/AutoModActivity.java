@@ -94,7 +94,8 @@ public class AutoModActivity extends AppCompatActivity {
 
     private void startWorker(String op,Uri uri){
         if(!canStart())return;app.cancelled.set(false);app.busy.set(true);app.progress("AutoMod: "+op+"…");
-        Intent intent=new Intent(this,WorkerService.class).putExtra("op",op);if(uri!=null)intent.putExtra("uri",uri.toString());startForegroundService(intent);
+        Class<?> service="menu_build_apk".equals(op)?AutoModBuildGuardService.class:WorkerService.class;
+        Intent intent=new Intent(this,service).putExtra("op",op);if(uri!=null)intent.putExtra("uri",uri.toString());startForegroundService(intent);
     }
 
     private void chooseBuildDestination(){
