@@ -129,9 +129,10 @@ final class EvidenceBundleExporter {
                             .put("diagnosticFreshOnly", freshOnly)
                             .put("staleEvidenceFilesExcluded", staleExcluded[0])
                             .put("rawTargetBinariesIncluded", false)
+                            .put("historicalProjectTreesIncluded", false)
                             .put("note", freshOnly
-                                    ? "FAILED/CANCELLED diagnostic bundle contains only evidence modified in the current pipeline epoch; older cache evidence is excluded."
-                                    : "Target APK/SO/metadata are intentionally not duplicated; hashes/locators remain in analysis evidence.");
+                                    ? "FAILED/CANCELLED diagnostic bundle contains only evidence modified in the current pipeline epoch; older cache evidence is excluded. Historical projects and generated Menu Builder source trees are never traversed."
+                                    : "Target APK/SO/metadata are intentionally not duplicated; hashes/locators remain in analysis evidence. Historical projects and generated Menu Builder source trees are never traversed.");
                     if (!pipeline.optString("error", "").isEmpty()) manifest.put("pipelineError", pipeline.optString("error"));
                     writeText(zip, "bundle-manifest.json", manifest.toString(2));
 
@@ -191,7 +192,10 @@ final class EvidenceBundleExporter {
         if (depth > 8 || node == null || !node.exists()) return;
         if (node.isFile()) { out.add(node); return; }
         String rel = root.toPath().relativize(node.toPath()).toString().replace(File.separatorChar, '/');
-        if (rel.startsWith("installed-apks") || rel.startsWith("target-signed-set") || rel.startsWith("decompiler/cache") || rel.startsWith("decompiler/tmp")) return;
+        if (rel.equals("projects") || rel.startsWith("projects/") ||
+                rel.equals("menu-project") || rel.startsWith("menu-project/") ||
+                rel.startsWith("installed-apks") || rel.startsWith("target-signed-set") ||
+                rel.startsWith("decompiler/cache") || rel.startsWith("decompiler/tmp")) return;
         File[] children = node.listFiles(); if (children == null) return;
         Arrays.sort(children, Comparator.comparing(File::getName));
         for (File child : children) collectInto(root, child, out, depth + 1);
