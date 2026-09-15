@@ -34,6 +34,7 @@ public class AnalysisStorageActivity extends AppCompatActivity {
         if("il2cpp-no-rva-native.json".equals(name))return "IL2CPP exact no-RVA → native RVA recovery summary · "+name;
         if("il2cpp-no-rva-native.methods.jsonl".equals(name))return "IL2CPP exact recovered RVA evidence · "+name;
         if("il2cpp-no-rva-native.failures.jsonl".equals(name))return "IL2CPP unresolved native recovery blockers · "+name;
+        if("menu-native-recovery.json".equals(name))return "AutoMod exact CodeGenModule prepare provenance · "+name;
         if("deep-gameplay.json".equals(name))return "Gameplay semantic evidence · "+name;
         if("lua-deep.json".equals(name))return "Lua bytecode · "+name;
         if("hermes-deep.json".equals(name))return "Hermes HBC · "+name;
@@ -52,6 +53,6 @@ public class AnalysisStorageActivity extends AppCompatActivity {
             "deep-gameplay.json","lua-deep.json","hermes-deep.json","native-deep.json","cocos-deep.json","flutter-deep.json",
             "analysis.summary.json","analysis.methods.jsonl","analysis.fields.jsonl","analysis.evidence-graph.jsonl",
             "analysis.gameplay-coverage.json","re-analysis.json","security-surfaces.json","simple-catalog.json",
-            "rodroid","analysis-deep","menu-spec.json","menu-preflight.json","connected-report.json","connected-report.md"
+            "rodroid","analysis-deep","menu-native-recovery.json","menu-spec.json","menu-preflight.json","connected-report.json","connected-report.md"
         };int found=0;for(String n:names){File f=app.file(n);if(!f.exists())continue;TextView t=text("✓ "+label(n)+" · "+human(size(f)),13);t.setTextColor(fg());files.addView(t);found++;}if(found==0){TextView t=text("Пока пусто. Сначала выполните полный анализ.",14);t.setTextColor(muted());files.addView(t);}}
 }
