@@ -9,10 +9,12 @@ pipeline. All existing ABI, semantic, instance-resolver and APK ELF gates remain
 force; this adapter only removes a false module ambiguity.
 
 The patch of ``engine.Elf.modules`` exists only inside one locked call and is restored
-in ``finally``. No target bytes are modified here.
+in ``finally``. No target bytes are modified here. Adapter decisions are persisted as
+provenance so a prepared menu can be audited without treating recovery as build proof.
 """
 from __future__ import annotations
 
+import json
 import threading
 from pathlib import Path
 from typing import Any
@@ -32,6 +34,16 @@ def _expected_counts(metadata_path: str | Path, cb=None) -> tuple[dict[str, int]
         meta.close()
 
 
+def _write_audit(path: str | Path | None, audit: dict[str, Any]) -> None:
+    if path is None:
+        return
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temp = destination.with_name(destination.name + ".tmp")
+    temp.write_text(json.dumps(audit, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp.replace(destination)
+
+
 def _strict_modules_factory(original, expected_counts: dict[str, int], audit: dict[str, Any]):
     def strict_modules(self, image_names):
         wanted = {str(name) for name in image_names if str(name)}
@@ -44,19 +56,27 @@ def _strict_modules_factory(original, expected_counts: dict[str, int], audit: di
         # fall back to the original conservative resolver. We never let an original
         # ambiguous result override exact-count evidence.
         fallback_names = wanted - set(expected)
+        fallback: dict[str, tuple[int, int]] = {}
         if fallback_names:
             fallback = original(self, fallback_names)
             for name, table in fallback.items():
                 resolved.setdefault(name, table)
-        audit["calls"] = int(audit.get("calls") or 0) + 1
-        audit["last"] = {
-            "requestedImages": len(wanted),
-            "exactCountImages": len(expected),
+        call = {
+            "requestedImages": sorted(wanted),
+            "exactCountImages": sorted(expected),
             "exactCountResolved": int(stats.get("resolved") or 0),
             "exactCountAmbiguous": int(stats.get("ambiguous") or 0),
-            "fallbackImages": len(fallback_names),
-            "returnedModules": len(resolved),
+            "exactCountNoCandidate": int(stats.get("noCandidate") or 0),
+            "fallbackImages": sorted(fallback_names),
+            "fallbackResolvedImages": sorted(fallback),
+            "returnedModules": sorted(resolved),
+            "moduleResolution": stats.get("modules") if isinstance(stats.get("modules"), dict) else {},
         }
+        audit["calls"] = int(audit.get("calls") or 0) + 1
+        history = audit.setdefault("history", [])
+        if isinstance(history, list):
+            history.append(call)
+        audit["last"] = call
         return resolved
     return strict_modules
 
@@ -66,16 +86,28 @@ def prepare(metadata_path: str | Path, library_path: str | Path, catalog_path: s
             project_dir: str | Path, output_report: str | Path | None = None,
             output_preflight: str | Path | None = None, dump_dir: str | Path | None = None,
             title: str = "ModKit Autopilot Menu", max_deep: int = 24,
-            target_controls: int = 12, cb=None):
+            target_controls: int = 12, cb=None, audit_path: str | Path | None = None):
     """Run the normal autopilot with stronger, fail-closed module disambiguation."""
     expected, non_contiguous = _expected_counts(metadata_path, cb)
     audit: dict[str, Any] = {
         "schema": SCHEMA,
+        "mode": "EXACT_METADATA_TOKEN_DOMAIN_CODEGENMODULE_ADAPTER",
         "contiguousTokenDomains": len(expected),
         "nonContiguousTokenDomains": len(non_contiguous),
         "calls": 0,
+        "history": [],
+        "completed": False,
+        "normalBindingRequired": True,
+        "preflightRequired": True,
         "modifiesTarget": False,
+        "addressRecoveryPromotesBuildability": False,
         "promotesBuildability": False,
+        "inputs": {
+            "metadata": Path(metadata_path).name,
+            "library": Path(library_path).name,
+            "catalog": Path(catalog_path).name,
+            "sourceApk": Path(source_apk).name,
+        },
     }
     original = engine.Elf.modules
     strict = _strict_modules_factory(original, expected, audit)
@@ -90,9 +122,15 @@ def prepare(metadata_path: str | Path, library_path: str | Path, catalog_path: s
                 str(dump_dir) if dump_dir else None,
                 str(title), int(max_deep), int(target_controls), cb,
             )
+            audit["completed"] = True
+            return result
+        except Exception as exc:
+            audit["errorType"] = type(exc).__name__
+            audit["error"] = str(exc)
+            raise
         finally:
             engine.Elf.modules = original
-    return result
+            _write_audit(audit_path, audit)
 
 
 def prepare_workspace(workspace: str | Path, source_apk: str | Path, cb=None):
@@ -114,5 +152,6 @@ def prepare_workspace(workspace: str | Path, source_apk: str | Path, cb=None):
         "ModKit Autopilot Menu",
         24,
         12,
-        cb,
+        cb=cb,
+        audit_path=root / "menu-native-recovery.json",
     )
