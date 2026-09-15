@@ -70,6 +70,7 @@ public class FullAnalysisService extends Service {
             boolean chain=true;
             boolean preparedStateInvalidated=false;
             String handoffFailure=null;
+            String reconstructionFailure=null;
             startedAt=System.currentTimeMillis();
             pipelineState("RUNNING","RECONSTRUCTION",false,false,null);
             try{
@@ -144,9 +145,10 @@ public class FullAnalysisService extends Service {
                 }
                 if(app.cancelled.get()){chain=false;progress("Полный анализ отменён пользователем.");}
             }catch(Exception e){
-                if(!preparedStateInvalidated){chain=false;handoffFailure="AUTOMOD_PREPARED_STATE_INVALIDATION_FAILED: "+String.valueOf(e.getMessage());}
-                progress(app.cancelled.get()?"Полный анализ отменён.":"Полный анализ: "+e.getMessage()+" · продолжаю доступными анализаторами.");
-                if(app.cancelled.get())chain=false;
+                chain=false;
+                if(!preparedStateInvalidated)reconstructionFailure="AUTOMOD_PREPARED_STATE_INVALIDATION_FAILED: "+String.valueOf(e.getMessage());
+                else if(!app.cancelled.get())reconstructionFailure="RECONSTRUCTION_FAILED: "+String.valueOf(e.getMessage());
+                progress(app.cancelled.get()?"Полный анализ отменён.":"Полный анализ остановлен: "+e.getMessage()+" · Evidence Graph не будет запущен на неполной реконструкции.");
             }finally{
                 boolean handedOff=false;
                 if(chain&&!app.cancelled.get()){
@@ -161,7 +163,8 @@ public class FullAnalysisService extends Service {
                 }
                 if(!handedOff){
                     if(app.cancelled.get())pipelineState("CANCELLED","RECONSTRUCTION",false,true,"USER_CANCELLED");
-                    else pipelineState("FAILED",preparedStateInvalidated?"HANDOFF":"RECONSTRUCTION",false,false,handoffFailure==null?"EVIDENCE_HANDOFF_NOT_STARTED":handoffFailure);
+                    else if(reconstructionFailure!=null)pipelineState("FAILED","RECONSTRUCTION",false,false,reconstructionFailure);
+                    else pipelineState("FAILED","HANDOFF",false,false,handoffFailure==null?"EVIDENCE_HANDOFF_NOT_STARTED":handoffFailure);
                     getSharedPreferences("state",0).edit().putBoolean("running",false).apply();
                     app.busy.set(false);app.revision++;
                 }
