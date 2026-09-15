@@ -38,19 +38,26 @@ def test_deep_evidence_screen_is_private_and_keeps_static_runtime_distinction():
     assert "original Dart source не заявляется" in activity
 
 
-def test_report_center_exposes_deep_coverage_in_export_status():
+def test_report_center_exposes_connected_1_2_deep_coverage_and_streaming_export():
     center = read("android/app/src/main/java/dev/modkit/mobile/ReportCenterActivity.java")
-    assert "connected-report 1.1" in center
+    assert "connected-report 1.2" in center
+    assert 'getModule("modkit.mobile.connected_report_streaming")' in center
     assert 'optInt("deepEnginesAvailable",0)' in center
-    assert "deep backend'ов с evidence" in center
+    assert "deep backend'ов" in center
+    assert "потоково" in center
     assert "EvidenceBundleExporter.export" in center
 
 
-def test_connected_report_has_structured_engine_coverage_and_artifact_guide():
-    report = read("modkit/mobile/connected_report.py")
-    assert 'SCHEMA = "modkit-connected-report-1.1"' in report
-    assert '"engineCoverage": coverage' in report
-    assert '"artifactGuide": evidence_guide' in report
-    assert '"runtimeTruth"' in report
-    assert '"lua-deep.json"' in report
-    assert '"cocos-deep.json"' in report
+def test_connected_report_keeps_base_coverage_and_v12_corroboration_schema():
+    base = read("modkit/mobile/connected_report.py")
+    v12 = read("modkit/mobile/connected_report_v12.py")
+    streaming = read("modkit/mobile/connected_report_streaming.py")
+    assert 'SCHEMA = "modkit-connected-report-1.1"' in base
+    assert 'SCHEMA = "modkit-connected-report-1.2"' in v12
+    assert '"engineCoverage": coverage' in base
+    assert '"artifactGuide": evidence_guide' in base
+    assert '"runtimeTruth"' in base
+    assert '"lua-deep.json"' in base
+    assert '"cocos-deep.json"' in base
+    assert "_iter_jsonl" in streaming
+    assert '"loadsFullMethodEvidenceIntoRam": False' in streaming
