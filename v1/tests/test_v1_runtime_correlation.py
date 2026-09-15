@@ -85,7 +85,7 @@ def test_android_runtime_backend_exports_module_load_bias_and_never_writes_memor
     lab = (ROOT / "android/app/src/main/java/dev/modkit/mobile/ProcessLabActivity.java").read_text(encoding="utf-8")
     assert '"moduleImages"' in engine
     assert '"loadBaseHex"' in engine
-    assert 'start-fileOffset' in engine or 'start - fileOffset' in engine
+    assert 'map.start-map.fileOffset' in engine
     assert '"mappings"' in engine
     assert 'writesTargetMemory",false' in engine
     assert 'getModule("modkit.mobile.runtime_correlate")' in lab
