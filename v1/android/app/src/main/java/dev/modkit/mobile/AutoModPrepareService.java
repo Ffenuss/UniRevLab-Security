@@ -85,7 +85,7 @@ public class AutoModPrepareService extends Service {
     }
 
     private void invalidatePreparedState()throws IOException{
-        for(String name:new String[]{"menu-spec.json","menu-preflight.json","menu-validation.json","menu-auto-confirm.json","menu-autopilot.json","menu-native-recovery.json"}){
+        for(String name:new String[]{"menu-spec.json","menu-preflight.json","menu-validation.json","menu-auto-confirm.json","menu-autopilot.json","menu-native-recovery.json","menu-native-recovery.json.tmp"}){
             File file=app.file(name);if(file.exists()&&!file.delete())throw new IOException("Не удалось инвалидировать старый AutoMod artifact: "+name);
         }
     }
