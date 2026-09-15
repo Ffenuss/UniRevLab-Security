@@ -28,6 +28,7 @@ import org.json.JSONObject;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -169,9 +170,16 @@ public class ProcessLabActivity extends AppCompatActivity {
         });
     }
 
+    private void writeRuntimeSession(JSONObject snapshot) throws Exception {
+        java.io.File destination=app.file("runtime-session.json"),part=app.file("runtime-session.json.part");
+        Files.deleteIfExists(part.toPath());
+        try{Files.write(part.toPath(),snapshot.toString(2).getBytes(StandardCharsets.UTF_8));Files.move(part.toPath(),destination.toPath(),StandardCopyOption.REPLACE_EXISTING);}
+        catch(Exception e){Files.deleteIfExists(part.toPath());throw e;}
+    }
+
     private JSONObject persistAndCorrelate(RootProcessEngine.RuntimeSession created) throws Exception {
         JSONObject snapshot = created.toJson(rootProbe);
-        Files.write(app.file("runtime-session.json").toPath(), snapshot.toString(2).getBytes(StandardCharsets.UTF_8));
+        writeRuntimeSession(snapshot);
         try {
             if (!Python.isStarted()) Python.start(new AndroidPlatform(this));
             PyObject module = Python.getInstance().getModule("modkit.mobile.runtime_correlate");
@@ -230,6 +238,7 @@ public class ProcessLabActivity extends AppCompatActivity {
                 .addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE, "modkit-runtime-session-" + session.process.pid + ".json"), SAVE_SESSION);
     }
 
+    private void deleteCreatedDocument(Uri uri){if(uri==null)return;try{android.provider.DocumentsContract.deleteDocument(getContentResolver(),uri);}catch(Exception ignored){}}
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode != SAVE_SESSION || resultCode != RESULT_OK || data == null || data.getData() == null || session == null) return;
@@ -238,7 +247,7 @@ public class ProcessLabActivity extends AppCompatActivity {
             if (out == null) throw new java.io.IOException("output stream unavailable");
             out.write(session.toJson(rootProbe).toString(2).getBytes(StandardCharsets.UTF_8)); out.flush();
             sessionState.append("\nSnapshot сохранён. Внутренние runtime-session.json и runtime-correlation.json уже доступны Evidence Bundle.");
-        } catch (Exception e) { showError("Не удалось сохранить snapshot: " + e.getMessage()); }
+        } catch (Exception e) { deleteCreatedDocument(uri); showError("Не удалось сохранить snapshot: " + e.getMessage()); }
     }
 
     private void setBusy(boolean busy, String message) {
