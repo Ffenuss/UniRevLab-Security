@@ -118,19 +118,20 @@ def _row_id(row: dict[str, Any], index: int) -> Any:
     return index
 
 
-def _type_layout_candidates(version: int) -> tuple[tuple[int, int, int, str], ...]:
-    # Layout tuple: (record size, methodStart offset, method_count offset, name).
-    # Metadata header version 24 covers multiple Unity subversions but does not
-    # encode the decimal subtype directly. Model the three layouts described by
-    # Il2CppTypeDefinition's Version attributes and score them against the file.
+def _type_layout_candidates(version: int) -> tuple[tuple[int, int, int, int, str], ...]:
+    # Layout tuple: (type record size, methodStart offset, method_count offset,
+    # expected method record size, name). The sizes include bitfield + token.
+    # Header version 24 does not encode the decimal subtype directly, so pair the
+    # TypeDefinition layout with the independently inferred MethodDefinition size.
     if version == 24:
         return (
-            (100, 52, 80, "LEGACY24_0_TYPEDEF_100"),  # 24.0: customAttribute + byref + RGCTX
-            (96, 48, 76, "LEGACY24_1_TYPEDEF_96"),    # 24.1: byref + RGCTX
-            (88, 40, 68, "LEGACY24_2_5_TYPEDEF_88"),  # 24.2-24.5: byref, no RGCTX
+            (104, 52, 80, 56, "LEGACY24_0_TYPEDEF_104"),  # customAttribute + byref + RGCTX
+            (100, 48, 76, 52, "LEGACY24_1_TYPEDEF_100"),  # byref + RGCTX
+            (92, 40, 68, 32, "LEGACY24_2_5_TYPEDEF_92"),  # byref, no RGCTX
         )
     if version >= 25:
-        return ((88, 36, 64, "COMPACT_TYPEDEF_88"),)
+        expected_method = 36 if version >= 31 else 32
+        return ((88, 36, 64, expected_method, "COMPACT_TYPEDEF_88"),)
     return ()
 
 
@@ -138,7 +139,9 @@ def _choose_type_layout(blob: bytes, version: int, type_offset: int, type_size: 
                         string_offset: int, string_size: int, methods_offset: int,
                         method_record_size: int, method_count: int) -> tuple[int | None, int, int, str, float]:
     best: tuple[int | None, int, int, str, float] = (None, 0, 0, "TYPE_LAYOUT_UNRESOLVED", 0.0)
-    for record_size, method_start_offset, method_count_offset, layout in _type_layout_candidates(version):
+    for record_size, method_start_offset, method_count_offset, expected_method_size, layout in _type_layout_candidates(version):
+        if method_record_size != expected_method_size:
+            continue
         if type_size <= 0 or type_size % record_size:
             continue
         type_count = type_size // record_size
@@ -171,9 +174,6 @@ def _choose_type_layout(blob: bytes, version: int, type_offset: int, type_size: 
             if range_ok:
                 score += 0.45
 
-            # The strongest discriminator is the method definition's declaringType.
-            # Sample the first owned method when present; wrong 24.x offsets usually
-            # fail this immediately even if type_size is divisible by several layouts.
             if method_len > 0 and 0 <= method_start < method_count:
                 mpos = methods_offset + method_start * method_record_size
                 if mpos + 8 <= len(blob):
@@ -186,8 +186,6 @@ def _choose_type_layout(blob: bytes, version: int, type_offset: int, type_size: 
         if normalized > best[4]:
             best = (record_size, method_start_offset, method_count_offset, layout, normalized)
 
-    # A valid row with name + sane range already scores >=1.45. Require a
-    # conservative threshold so random divisibility never becomes class identity.
     if best[4] < 1.20:
         return None, 0, 0, "TYPE_LAYOUT_UNRESOLVED", best[4]
     return best
