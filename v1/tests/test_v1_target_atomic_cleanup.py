@@ -8,6 +8,8 @@ def test_target_reset_clears_atomic_output_orphans_and_progress():
     source = (ANDROID / "TargetPreparationService.java").read_text(encoding="utf-8")
 
     required = (
+        '"full-reconstruction.json.part"',
+        '"apktool-analysis.json.part"',
         '"automod-plan.json.part"',
         '"connected-report.json.part"',
         '"connected-report.md.part"',
@@ -42,7 +44,7 @@ def test_target_preparation_publishes_installed_manifest_atomically():
     assert 'writeAtomicJson("installed-target.json",target)' in source
 
 
-def test_full_reconstruction_status_and_normalized_target_use_atomic_json():
+def test_full_reconstruction_status_target_and_backend_manifests_use_atomic_json():
     source = (ANDROID / "FullAnalysisService.java").read_text(encoding="utf-8")
 
     helper = source.split("private void writeAtomicJson", 1)[1].split("private void stage", 1)[0]
@@ -52,6 +54,9 @@ def test_full_reconstruction_status_and_normalized_target_use_atomic_json():
     assert 'writeAtomicJson("simple-progress.json",row)' in source
     assert 'writeAtomicJson("automatic-evidence.json",state)' in source
     assert 'writeAtomicJson("installed-target.json",normalized)' in source
+    assert source.count('writeAtomicJson("full-reconstruction.json",state)') == 2
+    assert 'writeAtomicJson("apktool-analysis.json",apktool)' in source
+    assert 'writeAtomicJson("apktool-analysis.json",error)' in source
 
 
 def test_evidence_service_json_promotion_uses_sibling_part_file():
