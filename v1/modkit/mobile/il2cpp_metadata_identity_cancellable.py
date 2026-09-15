@@ -189,6 +189,8 @@ def build_identity_evidence(metadata_path: str | Path, methods_path: str | Path,
 
 def build_workspace_identity(workspace: str | Path, output_path: str | Path | None = None,
                              cb: Any | None = None) -> dict[str, Any]:
+    if _cancelled(cb):
+        raise MetadataIdentityCancelled("IL2CPP metadata identity cancelled")
     root = Path(workspace)
     metadata = root / "metadata.bin"
     methods = root / "analysis.methods.jsonl"
