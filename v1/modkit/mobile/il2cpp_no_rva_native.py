@@ -2,20 +2,14 @@
 
 This backend targets one specific ambiguity in the primary resolver: multiple
 structurally plausible Il2CppCodeGenModule records may reference the same image-name
-string.  The global metadata already tells us the exact MethodDef token domain for
-that image.  We therefore reject every candidate whose methodPointerCount does not
-match that domain *before* deciding whether the module is ambiguous.
+string. The global metadata already tells us the exact MethodDef token domain for
+that image. We therefore reject every candidate whose methodPointerCount does not
+match that domain before deciding whether the module is ambiguous.
 
-A recovered RVA is emitted only when all of the following independently agree:
-- metadata MethodDef id exists;
-- catalogue token/name/class/image match that MethodDef and its declaring type;
-- exactly one CodeGenModule candidate has the exact metadata token-domain size;
-- the token RID selects a non-zero pointer in that module;
-- the pointer lands in a file-backed executable ELF segment;
-- that executable pointer is unique among all metadata methods resolved by this pass.
-
-Recovery is address evidence only.  It never marks a patch buildable and never writes
-the target.
+Every no-RVA catalogue row gets a streamed provenance row. Successful recovery is
+emitted only when metadata identity, exact CodeGenModule selection, executable
+pointer validation, and global pointer uniqueness all agree. Failure rows retain the
+precise blocker but remain non-actionable/non-buildable.
 """
 from __future__ import annotations
 
@@ -30,6 +24,7 @@ from typing import Any
 from modkit.mobile.engine import Elf, Metadata, check
 
 SCHEMA = "modkit-il2cpp-no-rva-native-1.0"
+_SUCCESS = "NATIVE_RVA_RECOVERED_EXACT_CODEGENMODULE"
 
 
 def _number(value: Any) -> int | None:
@@ -132,7 +127,7 @@ def _metadata_token_domains(meta: Metadata, cb=None) -> tuple[dict[str, int], di
         counts[image] += 1
         max_rid[image] = max(max_rid[image], rid)
     # Require a contiguous 1..N MethodDef token domain. If metadata itself has a
-    # hole, we refuse to use count as a CodeGenModule discriminator.
+    # hole, count cannot safely discriminate a CodeGenModule.
     exact = {name: max_rid[name] for name in max_rid if counts.get(name) == max_rid[name]}
     rejected = {name: max_rid[name] for name in max_rid if counts.get(name) != max_rid[name]}
     return exact, rejected
@@ -142,7 +137,7 @@ def _resolve_modules_expected(elf: Elf, expected_counts: dict[str, int], cb=None
     """Resolve CodeGenModule tables after exact MethodDef-count filtering."""
     names = sorted(name for name, count in expected_counts.items() if name and int(count) > 0)
     if not names:
-        return {}, {"requested": 0, "resolved": 0, "ambiguous": 0, "noString": 0, "noCandidate": 0}
+        return {}, {"requested": 0, "resolved": 0, "ambiguous": 0, "noString": 0, "noCandidate": 0, "modules": {}}
 
     name_vas: dict[str, list[int]] = collections.defaultdict(list)
     wanted_vas: set[int] = set()
@@ -240,6 +235,41 @@ def _method_pointer(elf: Elf, module: tuple[int, int] | None, token: int) -> tup
     return raw, "EXECUTABLE_METHOD_POINTER"
 
 
+def _unresolved_status(pointer_status: str) -> str:
+    return {
+        "MODULE_UNRESOLVED": "NATIVE_RVA_MODULE_UNRESOLVED",
+        "TOKEN_OUT_OF_MODULE_RANGE": "NATIVE_RVA_TOKEN_OUT_OF_MODULE_RANGE",
+        "NULL_METHOD_POINTER": "NATIVE_RVA_POINTER_ABSENT",
+        "NON_EXECUTABLE_METHOD_POINTER": "NATIVE_RVA_NON_EXECUTABLE_POINTER",
+    }.get(str(pointer_status or ""), "NATIVE_RVA_UNRESOLVED")
+
+
+def _evidence(mid: int | None, token: int | None, image: str, cls: str, method: str,
+              status: str, blockers: list[str] | None = None, **extra: Any) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "id": mid,
+        "metadataMethodId": mid,
+        "metadataToken": f"0x{int(token):08x}" if token is not None else None,
+        "image": image or None,
+        "class": cls or None,
+        "methodName": method or None,
+        "status": status,
+        "blockers": list(blockers or []),
+        "rva": None,
+        "rvaHex": None,
+        "addressConfirmed": False,
+        "associationConfirmed": False,
+        "uniqueExecutablePointer": False,
+        "executesTargetCode": False,
+        "writesTarget": False,
+        "actionable": False,
+        "buildable": False,
+        "promotesBuildability": False,
+    }
+    row.update(extra)
+    return row
+
+
 def recover_no_rva(metadata_path: str | Path, library_path: str | Path, catalog_path: str | Path,
                    output_path: str | Path, rows_path: str | Path | None = None, cb=None) -> dict[str, Any]:
     metadata_path = Path(metadata_path)
@@ -268,9 +298,20 @@ def recover_no_rva(metadata_path: str | Path, library_path: str | Path, catalog_
                 pointer_counts[int(pointer)] += 1
 
         counts = collections.Counter()
+        status_counts = collections.Counter()
         samples: list[dict[str, Any]] = []
+        failure_samples: list[dict[str, Any]] = []
         rows_path.parent.mkdir(parents=True, exist_ok=True)
         with catalog_path.open("r", encoding="utf-8", errors="replace") as source, rows_path.open("w", encoding="utf-8") as sink:
+            def emit(row: dict[str, Any]) -> None:
+                sink.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
+                status_counts[str(row.get("status") or "NATIVE_RVA_UNRESOLVED")] += 1
+                if row.get("status") == _SUCCESS:
+                    if len(samples) < 64:
+                        samples.append(row)
+                elif len(failure_samples) < 64:
+                    failure_samples.append(row)
+
             for line_no, line in enumerate(source):
                 if line_no % 4096 == 0:
                     check(cb)
@@ -291,57 +332,123 @@ def recover_no_rva(metadata_path: str | Path, library_path: str | Path, catalog_
                 mid, token, image, cls, method = _catalog_identity(catalog)
                 if mid is None or token is None or mid < 0 or mid >= meta.method_count:
                     counts["identityUnavailable"] += 1
+                    blockers = []
+                    if mid is None or mid < 0 or mid >= meta.method_count:
+                        blockers.append("metadata-method-id-unavailable")
+                    if token is None:
+                        blockers.append("metadata-token-unavailable")
+                    emit(_evidence(mid, token, image, cls, method, "NATIVE_RVA_IDENTITY_UNAVAILABLE", blockers))
                     continue
+
                 md = meta.method_definition(mid)
                 metadata_class = meta.type_definition(int(md["declaringTypeIndex"]))["label"]
                 metadata_image = _image_for_type(int(md["declaringTypeIndex"]), starts, image_ranges)
-                token_match = int(md.get("token") or 0) == int(token)
+                metadata_method = str(md.get("name") or "")
+                metadata_token = int(md.get("token") or 0)
+                token_match = metadata_token == int(token)
                 image_match = bool(image and metadata_image and image == metadata_image)
                 class_match = _class_identity_match(cls, metadata_class)
-                method_match = bool(method and str(md.get("name") or "") == method)
+                method_match = bool(method and metadata_method == method)
                 if not (token_match and image_match and class_match and method_match):
                     counts["identityMismatch"] += 1
+                    blockers = []
+                    if not token_match:
+                        blockers.append("metadata-token-mismatch")
+                    if not image_match:
+                        blockers.append("image-mismatch")
+                    if not class_match:
+                        blockers.append("declaring-type-mismatch")
+                    if not method_match:
+                        blockers.append("method-name-mismatch")
+                    status = "NATIVE_RVA_TOKEN_MISMATCH" if not token_match else "NATIVE_RVA_IDENTITY_CONFLICT"
+                    emit(_evidence(
+                        mid, token, image, cls, method, status, blockers,
+                        metadataResolvedToken=f"0x{metadata_token:08x}",
+                        metadataResolvedImage=metadata_image,
+                        metadataResolvedClass=metadata_class,
+                        metadataResolvedMethodName=metadata_method,
+                        identityConfirmed=False,
+                    ))
+                    continue
+
+                if metadata_image in non_contiguous:
+                    counts["nonContiguousTokenDomain"] += 1
+                    emit(_evidence(
+                        mid, token, metadata_image, metadata_class, metadata_method,
+                        "NATIVE_RVA_NONCONTIGUOUS_TOKEN_DOMAIN",
+                        ["metadata-method-token-domain-not-contiguous"],
+                        identityConfirmed=True,
+                        expectedMaxTokenRid=int(non_contiguous[metadata_image]),
+                    ))
                     continue
 
                 module = modules.get(metadata_image)
                 if module is None:
                     counts["moduleUnresolved"] += 1
-                    continue
-                counts["rowsInResolvedModule"] += 1
-                pointer, status = _method_pointer(elf, module, int(token))
-                if pointer is None:
-                    counts[status] += 1
-                    continue
-                if pointer_counts.get(int(pointer), 0) != 1:
-                    counts["sharedExecutablePointer"] += 1
+                    detail = (module_stats.get("modules") or {}).get(metadata_image) or {}
+                    module_status = str(detail.get("status") or "NO_EXACT_COUNT_CANDIDATE")
+                    if module_status == "AMBIGUOUS_AFTER_EXPECTED_COUNT":
+                        status = "NATIVE_RVA_AMBIGUOUS_MODULE"
+                        blocker = "multiple-codegenmodule-candidates-after-exact-method-count"
+                    else:
+                        status = "NATIVE_RVA_MODULE_UNRESOLVED"
+                        blocker = "exact-codegenmodule-candidate-not-found"
+                    emit(_evidence(
+                        mid, token, metadata_image, metadata_class, metadata_method,
+                        status, [blocker],
+                        identityConfirmed=True,
+                        moduleResolution=module_status,
+                        codeGenModuleCandidateCount=int(detail.get("candidateCount") or 0),
+                        expectedMethodCount=detail.get("expectedMethodCount"),
+                    ))
                     continue
 
-                evidence = {
-                    "id": mid,
-                    "metadataMethodId": mid,
-                    "metadataToken": f"0x{int(token):08x}",
-                    "image": metadata_image,
-                    "class": metadata_class,
-                    "methodName": str(md.get("name") or ""),
-                    "status": "NATIVE_RVA_RECOVERED_EXACT_CODEGENMODULE",
-                    "rva": int(pointer),
-                    "rvaHex": f"0x{int(pointer):x}",
-                    "addressConfirmed": True,
-                    "associationConfirmed": True,
-                    "uniqueExecutablePointer": True,
-                    "codeGenModuleMethodCount": int(module[0]),
-                    "moduleResolution": "EXACT_EXPECTED_METHOD_COUNT",
-                    "identityProof": "metadataMethodId+token+image+declaringType+methodName",
-                    "executesTargetCode": False,
-                    "writesTarget": False,
-                    "actionable": False,
-                    "buildable": False,
-                    "promotesBuildability": False,
-                }
-                sink.write(json.dumps(evidence, ensure_ascii=False, separators=(",", ":")) + "\n")
+                counts["rowsInResolvedModule"] += 1
+                pointer, pointer_status = _method_pointer(elf, module, int(token))
+                if pointer is None:
+                    counts[pointer_status] += 1
+                    status = _unresolved_status(pointer_status)
+                    emit(_evidence(
+                        mid, token, metadata_image, metadata_class, metadata_method,
+                        status, [pointer_status.lower().replace("_", "-")],
+                        identityConfirmed=True,
+                        moduleResolution="EXACT_EXPECTED_METHOD_COUNT",
+                        codeGenModuleMethodCount=int(module[0]),
+                        pointerStatus=pointer_status,
+                    ))
+                    continue
+
+                pointer_uses = int(pointer_counts.get(int(pointer), 0))
+                if pointer_uses != 1:
+                    counts["sharedExecutablePointer"] += 1
+                    emit(_evidence(
+                        mid, token, metadata_image, metadata_class, metadata_method,
+                        "NATIVE_RVA_SHARED_EXECUTABLE_POINTER",
+                        ["executable-method-pointer-not-unique"],
+                        identityConfirmed=True,
+                        moduleResolution="EXACT_EXPECTED_METHOD_COUNT",
+                        codeGenModuleMethodCount=int(module[0]),
+                        candidatePointer=int(pointer),
+                        candidatePointerHex=f"0x{int(pointer):x}",
+                        executablePointerUseCount=pointer_uses,
+                    ))
+                    continue
+
+                evidence = _evidence(
+                    mid, token, metadata_image, metadata_class, metadata_method,
+                    _SUCCESS, [],
+                    identityConfirmed=True,
+                    rva=int(pointer),
+                    rvaHex=f"0x{int(pointer):x}",
+                    addressConfirmed=True,
+                    associationConfirmed=True,
+                    uniqueExecutablePointer=True,
+                    codeGenModuleMethodCount=int(module[0]),
+                    moduleResolution="EXACT_EXPECTED_METHOD_COUNT",
+                    identityProof="metadataMethodId+token+image+declaringType+methodName",
+                )
+                emit(evidence)
                 counts["recoveredExact"] += 1
-                if len(samples) < 64:
-                    samples.append(evidence)
 
         result = {
             "schema": SCHEMA,
@@ -352,7 +459,10 @@ def recover_no_rva(metadata_path: str | Path, library_path: str | Path, catalog_
             "nonContiguousMetadataTokenDomains": len(non_contiguous),
             "resolvedModuleCount": len(modules),
             "counts": dict(counts),
+            "statusCounts": dict(sorted(status_counts.items())),
             "rowsFile": rows_path.name,
+            "rowsAreFileBacked": True,
+            "rowsIncludeUnresolvedProvenance": True,
             "addressResolver": True,
             "requiresUniqueExecutablePointer": True,
             "executesTargetCode": False,
@@ -360,8 +470,9 @@ def recover_no_rva(metadata_path: str | Path, library_path: str | Path, catalog_
             "actionable": False,
             "buildable": False,
             "promotesBuildability": False,
-            "note": "Recovered RVA is accepted only after exact metadata identity, exact CodeGenModule method count and unique executable method pointer proof. It remains non-buildable until the normal binding/preflight chain validates a patch.",
+            "note": "Every no-RVA row records its exact blocker. Only exact metadata identity + unique exact-count CodeGenModule + unique executable pointer yields a recovered RVA; normal binding/preflight is still mandatory.",
             "samples": samples,
+            "failureSamples": failure_samples,
         }
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
