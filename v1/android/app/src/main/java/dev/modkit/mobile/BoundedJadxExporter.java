@@ -44,9 +44,7 @@ import jadx.core.plugins.files.IJadxFilesGetter;
 final class BoundedJadxExporter {
     static final String BACKEND="JADX 1.5.6 bounded";
 
-    interface Progress {
-        void progress(String text);
-    }
+    interface Progress { void progress(String text); }
 
     static final class Result {
         final File output;
@@ -134,7 +132,8 @@ final class BoundedJadxExporter {
             byte[] buffer=new byte[128*1024];
             for(File item:completedDirs){check(cancelled);zipTree(root,item,out,buffer,cancelled);}
             ZipEntry meta=new ZipEntry("modkit-jadx-bounded.json");meta.setTime(0L);out.putNextEntry(meta);out.write(manifest.toString(2).getBytes(StandardCharsets.UTF_8));out.closeEntry();
-        }catch(Throwable t){Files.deleteIfExists(tmp.toPath());throw t;}
+        }catch(Exception e){Files.deleteIfExists(tmp.toPath());throw e;}
+        catch(Error e){try{Files.deleteIfExists(tmp.toPath());}catch(Exception ignored){}throw e;}
         Files.move(tmp.toPath(),zip.toPath(),StandardCopyOption.REPLACE_EXISTING);
         return new Result(zip,classes,resources,errors,warns,failed,failed==0,rows,degraded);
     }
