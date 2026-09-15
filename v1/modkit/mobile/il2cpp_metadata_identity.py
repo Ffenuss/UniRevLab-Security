@@ -1,8 +1,8 @@
 """Resolve IL2CPP method identity from global-metadata.dat without inventing an RVA.
 
-This backend is deliberately narrower than a native address resolver.  It can confirm
-that a method name (and, for supported metadata layouts, declaring type) exists in
-metadata even when the method catalogue has no native RVA.  Such evidence remains
+This backend is deliberately narrower than a native address resolver. It can confirm
+that a method name and, for structurally recognized metadata layouts, its declaring
+type exist even when the method catalogue has no native RVA. Such evidence remains
 non-actionable and never becomes a patch binding.
 """
 from __future__ import annotations
@@ -118,13 +118,78 @@ def _row_id(row: dict[str, Any], index: int) -> Any:
     return index
 
 
-def _type_layout(version: int, type_size: int) -> tuple[int | None, str]:
-    # Versions >=25 use the compact Il2CppTypeDefinition layout in which
-    # methodStart is at +36, method_count at +64 and the record is 88 bytes.
-    # For older 24.x sub-layouts we deliberately fall back to name-only evidence.
-    if version >= 25 and type_size > 0 and type_size % 88 == 0:
-        return 88, "COMPACT_TYPEDEF_88"
-    return None, "TYPE_LAYOUT_UNRESOLVED"
+def _type_layout_candidates(version: int) -> tuple[tuple[int, int, int, str], ...]:
+    # Layout tuple: (record size, methodStart offset, method_count offset, name).
+    # Header version 24 covers several Unity metadata sub-layouts, so we do not
+    # guess a decimal subversion. Instead both common layouts are scored against
+    # the actual string table, method ranges, and declaringType indices.
+    if version == 24:
+        return (
+            (100, 52, 80, "LEGACY24_TYPEDEF_100"),  # <=24.1 with RGCTX fields
+            (92, 44, 72, "LEGACY24_TYPEDEF_92"),    # 24.2-24.5 compacted legacy layout
+        )
+    if version >= 25:
+        return ((88, 36, 64, "COMPACT_TYPEDEF_88"),)
+    return ()
+
+
+def _choose_type_layout(blob: bytes, version: int, type_offset: int, type_size: int,
+                        string_offset: int, string_size: int, methods_offset: int,
+                        method_record_size: int, method_count: int) -> tuple[int | None, int, int, str, float]:
+    best: tuple[int | None, int, int, str, float] = (None, 0, 0, "TYPE_LAYOUT_UNRESOLVED", 0.0)
+    for record_size, method_start_offset, method_count_offset, layout in _type_layout_candidates(version):
+        if type_size <= 0 or type_size % record_size:
+            continue
+        type_count = type_size // record_size
+        if type_count <= 0:
+            continue
+        sample = min(type_count, 256)
+        score = 0.0
+        checked = 0
+        for type_index in range(sample):
+            pos = type_offset + type_index * record_size
+            if pos < 0 or pos + record_size > len(blob):
+                break
+            checked += 1
+            name_index = _u32(blob, pos)
+            namespace_index = _u32(blob, pos + 4)
+            name = _string(blob, string_offset, string_size, name_index)
+            namespace = _string(blob, string_offset, string_size, namespace_index)
+            if name:
+                score += 1.0
+            if namespace_index < string_size and (namespace or namespace_index == 0):
+                score += 0.15
+
+            method_start = _i32(blob, pos + method_start_offset)
+            method_len = _u16(blob, pos + method_count_offset)
+            range_ok = False
+            if method_len == 0:
+                range_ok = -1 <= method_start <= method_count
+            elif 0 <= method_start < method_count and method_start + method_len <= method_count:
+                range_ok = True
+            if range_ok:
+                score += 0.45
+
+            # The strongest discriminator is the method definition's declaringType.
+            # Sample the first owned method when present; wrong 24.x offsets usually
+            # fail this immediately even if the table size is divisible by both layouts.
+            if method_len > 0 and 0 <= method_start < method_count:
+                mpos = methods_offset + method_start * method_record_size
+                if mpos + 8 <= len(blob):
+                    declaring_type = _i32(blob, mpos + 4)
+                    if declaring_type == type_index:
+                        score += 0.9
+        if not checked:
+            continue
+        normalized = score / checked
+        if normalized > best[4]:
+            best = (record_size, method_start_offset, method_count_offset, layout, normalized)
+
+    # A valid row with name + sane range already scores >=1.45. Require a
+    # conservative threshold so random divisibility never becomes class identity.
+    if best[4] < 1.20:
+        return None, 0, 0, "TYPE_LAYOUT_UNRESOLVED", best[4]
+    return best
 
 
 def parse_metadata_identities(metadata_path: str | Path) -> dict[str, Any]:
@@ -137,6 +202,7 @@ def parse_metadata_identities(metadata_path: str | Path) -> dict[str, Any]:
             "methodNames": method_names,
             "qualifiedMethods": set(),
             "typeLayout": "TYPE_TABLE_UNAVAILABLE",
+            "typeLayoutScore": 0.0,
             "typeDefinitionCount": 0,
         }
 
@@ -154,36 +220,52 @@ def parse_metadata_identities(metadata_path: str | Path) -> dict[str, Any]:
             "methodNames": method_names,
             "qualifiedMethods": set(),
             "typeLayout": "TYPE_TABLE_OUT_OF_BOUNDS",
+            "typeLayoutScore": 0.0,
             "typeDefinitionCount": 0,
         }
 
-    type_record_size, layout = _type_layout(version, type_size)
     qualified: set[tuple[str, str]] = set()
-    if type_record_size is None or not isinstance(method_record_size, int) or method_record_size <= 0:
+    if not isinstance(method_record_size, int) or method_record_size <= 0:
+        return {
+            "metadata": info,
+            "methodNames": method_names,
+            "qualifiedMethods": qualified,
+            "typeLayout": "TYPE_LAYOUT_UNRESOLVED",
+            "typeLayoutScore": 0.0,
+            "typeDefinitionCount": 0,
+        }
+
+    type_record_size, method_start_offset, method_count_offset, layout, layout_score = _choose_type_layout(
+        blob, version, type_offset, type_size, string_offset, string_size,
+        methods_offset, method_record_size, method_count,
+    )
+    if type_record_size is None:
         return {
             "metadata": info,
             "methodNames": method_names,
             "qualifiedMethods": qualified,
             "typeLayout": layout,
-            "typeDefinitionCount": 0 if type_record_size is None else type_size // type_record_size,
+            "typeLayoutScore": round(layout_score, 4),
+            "typeDefinitionCount": 0,
         }
 
     type_count = type_size // type_record_size
     for type_index in range(type_count):
         pos = type_offset + type_index * type_record_size
-        if pos + 88 > len(blob):
+        if pos + type_record_size > len(blob):
             break
         name = _string(blob, string_offset, string_size, _u32(blob, pos))
         namespace = _string(blob, string_offset, string_size, _u32(blob, pos + 4))
         if not name:
             continue
         full = f"{namespace}.{name}" if namespace else name
-        method_start = _i32(blob, pos + 36)
-        method_len = _u16(blob, pos + 64)
-        if method_start < 0 or method_start >= method_count:
+        method_start = _i32(blob, pos + method_start_offset)
+        method_len = _u16(blob, pos + method_count_offset)
+        if method_len == 0:
             continue
-        end = min(method_count, method_start + method_len)
-        for method_index in range(method_start, end):
+        if method_start < 0 or method_start >= method_count or method_start + method_len > method_count:
+            continue
+        for method_index in range(method_start, method_start + method_len):
             mpos = methods_offset + method_index * method_record_size
             if mpos + 8 > len(blob):
                 break
@@ -198,6 +280,7 @@ def parse_metadata_identities(metadata_path: str | Path) -> dict[str, Any]:
         "methodNames": method_names,
         "qualifiedMethods": qualified,
         "typeLayout": layout,
+        "typeLayoutScore": round(layout_score, 4),
         "typeDefinitionCount": type_count,
     }
 
@@ -270,6 +353,7 @@ def build_identity_evidence(metadata_path: str | Path, methods_path: str | Path,
         "mode": "STATIC_METADATA_IDENTITY_ONLY",
         "metadataVersion": parsed["metadata"].get("version"),
         "typeLayout": parsed["typeLayout"],
+        "typeLayoutScore": parsed.get("typeLayoutScore", 0.0),
         "typeDefinitionCount": parsed["typeDefinitionCount"],
         "uniqueMethodNameCount": len(method_names),
         "qualifiedMethodPairCount": len(qualified),
