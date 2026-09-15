@@ -32,10 +32,10 @@ final class AutoModAuditVerifier {
         if(!"EXACT_INPUT_SHA256".equals(audit.optString("freshnessPolicy"))) return false;
         JSONArray rows=audit.optJSONArray("inputFingerprints");
         if(rows==null||rows.length()<4) return false;
-        return fingerprint(rows,"metadata")!=null
-                &&fingerprint(rows,"library")!=null
-                &&fingerprint(rows,"catalog")!=null
-                &&fingerprint(rows,"sourceApk")!=null;
+        return validFingerprint(fingerprint(rows,"metadata"))
+                &&validFingerprint(fingerprint(rows,"library"))
+                &&validFingerprint(fingerprint(rows,"catalog"))
+                &&validFingerprint(fingerprint(rows,"sourceApk"));
     }
 
     static JSONObject verifyCurrent(App app,File sourceApk,CancelGate gate)throws Exception {
@@ -57,14 +57,20 @@ final class AutoModAuditVerifier {
         return null;
     }
 
+    private static boolean validFingerprint(JSONObject row) {
+        if(row==null)return false;
+        if(row.optLong("size",-1L)<0L)return false;
+        String sha=row.optString("sha256","");
+        return sha.matches("(?i)[0-9a-f]{64}");
+    }
+
     private static void verify(JSONArray rows,String role,File file,CancelGate gate)throws Exception {
         check(gate);
         JSONObject expected=fingerprint(rows,role);
-        if(expected==null)throw new IOException("Exact recovery audit: отсутствует fingerprint "+role);
+        if(!validFingerprint(expected))throw new IOException("Exact recovery audit: повреждён fingerprint "+role);
         if(file==null||!file.isFile())throw new IOException("Exact recovery audit stale: вход "+role+" отсутствует");
         long expectedSize=expected.optLong("size",-1L);
         String expectedSha=expected.optString("sha256","");
-        if(expectedSize<0L||expectedSha.length()!=64)throw new IOException("Exact recovery audit: повреждён fingerprint "+role);
         if(expectedSize!=file.length())throw new IOException("Exact recovery audit stale: размер "+role+" изменился");
         String actual=sha256(file,gate);
         if(!expectedSha.equalsIgnoreCase(actual))throw new IOException("Exact recovery audit stale: SHA-256 "+role+" изменился");
