@@ -1,9 +1,9 @@
 """Incremental target fingerprint cache for ModKit Simple Mode.
 
-This cache never changes analyzer semantics.  It only proves that the selected
-APK/split set is byte-for-byte unchanged and therefore permits reuse of already
-validated derived reports.  A changed or missing target always fails closed to a
-fresh analysis path.
+This cache never changes analyzer semantics. It only proves that the selected
+APK/split set is byte-for-byte unchanged and that the core derived artifacts which
+would be reused are still the exact files recorded by the previous completed pass.
+A changed/missing target or changed core output fails closed to a fresh analysis.
 """
 from __future__ import annotations
 
@@ -25,6 +25,9 @@ _OUTPUTS = (
     "security-surfaces.json",
     "simple-catalog.json",
 )
+_ANALYSIS_CORE = ("re-analysis.json",)
+_IL2CPP_CORE = ("analysis.json", "analysis.methods.jsonl")
+_SECURITY_CORE = ("security-surfaces.json",)
 
 
 def _json(path: Path) -> Any:
@@ -77,6 +80,37 @@ def _target_digest(rows: list[dict]) -> str:
     return hashlib.sha256(material).hexdigest()
 
 
+def _previous_outputs(previous: Any) -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    if not isinstance(previous, dict):
+        return out
+    for row in previous.get("outputs", []) or []:
+        if isinstance(row, dict) and row.get("name"):
+            out[str(row["name"])] = row
+    return out
+
+
+def _verify_outputs(root: Path, previous: Any, names: tuple[str, ...]) -> tuple[bool, list[str], list[dict[str, Any]]]:
+    recorded = _previous_outputs(previous)
+    changed: list[str] = []
+    rows: list[dict[str, Any]] = []
+    for name in names:
+        path = root / name
+        prior = recorded.get(name)
+        if not path.is_file():
+            changed.append(name + ":missing")
+            rows.append({"name": name, "present": False})
+            continue
+        digest = _sha256(path)
+        row = {"name": name, "present": True, "size": path.stat().st_size, "sha256": digest}
+        rows.append(row)
+        if not prior or not prior.get("sha256"):
+            changed.append(name + ":unrecorded")
+        elif str(prior.get("sha256")) != digest:
+            changed.append(name + ":sha256-changed")
+    return not changed, changed, rows
+
+
 def plan_workspace(workdir: str | Path, manifest_path: str | Path | None = None) -> str:
     root = Path(workdir)
     manifest = Path(manifest_path) if manifest_path else root / "simple-cache.json"
@@ -116,6 +150,13 @@ def plan_workspace(workdir: str | Path, manifest_path: str | Path | None = None)
     digest = _target_digest(rows) if rows else ""
     previous_digest = str(previous.get("targetDigest", "")) if isinstance(previous, dict) else ""
     unchanged = bool(rows and previous_digest and digest == previous_digest)
+
+    analysis_names = list(_ANALYSIS_CORE)
+    if (root / "metadata.bin").is_file() and (root / "library.so").is_file():
+        analysis_names.extend(_IL2CPP_CORE)
+    analysis_ok, analysis_changed, analysis_rows = _verify_outputs(root, previous, tuple(analysis_names))
+    security_ok, security_changed, security_rows = _verify_outputs(root, previous, _SECURITY_CORE)
+
     return json.dumps({
         "schema": SCHEMA,
         "targetDigest": digest,
@@ -125,6 +166,12 @@ def plan_workspace(workdir: str | Path, manifest_path: str | Path | None = None)
         "targetCount": len(rows),
         "changedFiles": changed,
         "reusedHashCount": reused_hashes,
+        "analysisOutputsUnchanged": bool(unchanged and analysis_ok),
+        "securityOutputsUnchanged": bool(unchanged and security_ok),
+        "changedAnalysisOutputs": analysis_changed,
+        "changedSecurityOutputs": security_changed,
+        "analysisOutputs": analysis_rows,
+        "securityOutputs": security_rows,
     }, ensure_ascii=False)
 
 
@@ -132,12 +179,16 @@ def record_workspace(workdir: str | Path, manifest_path: str | Path, plan_json: 
     root = Path(workdir)
     manifest = Path(manifest_path)
     plan = json.loads(plan_json)
+    fingerprinted = set(_ANALYSIS_CORE + _IL2CPP_CORE + _SECURITY_CORE)
     outputs = []
     for name in _OUTPUTS:
         path = root / name
         if path.is_file():
             st = path.stat()
-            outputs.append({"name": name, "size": st.st_size, "mtimeNs": st.st_mtime_ns})
+            row = {"name": name, "size": st.st_size, "mtimeNs": st.st_mtime_ns}
+            if name in fingerprinted:
+                row["sha256"] = _sha256(path)
+            outputs.append(row)
     saved = {
         "schema": SCHEMA,
         "targetDigest": plan.get("targetDigest", ""),
@@ -146,6 +197,8 @@ def record_workspace(workdir: str | Path, manifest_path: str | Path, plan_json: 
         "policy": {
             "reuseOnlyWhenTargetDigestMatches": True,
             "changedTargetForcesFreshPipeline": True,
+            "changedCoreOutputForcesFreshPipeline": True,
+            "analysisMethodsFingerprintRequiredForIl2cppReuse": True,
             "cacheDoesNotRelaxValidation": True,
         },
     }
