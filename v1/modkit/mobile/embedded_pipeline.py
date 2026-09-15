@@ -9,9 +9,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from modkit.mobile import artifact_families, cocos_deep, flutter_deep, hermes_deep, lua_deep, native_deep
+from modkit.mobile import artifact_families, cocos_deep, deep_gameplay, flutter_deep, hermes_deep, lua_deep, native_deep
 
-SCHEMA = "modkit-embedded-analysis-1.3"
+SCHEMA = "modkit-embedded-analysis-1.4"
 
 
 def _artifacts(report: dict[str, Any]) -> list[dict[str, Any]]:
@@ -48,7 +48,7 @@ def _merge_findings(static_report: dict[str, Any], deep_report: dict[str, Any], 
 
     static_report[summary_key] = {
         "engineId": deep_report.get("engineId", default_engine) if isinstance(deep_report, dict) else default_engine,
-        "available": bool(deep_report.get("available", deep_report.get("detected", deep_report.get("analyzedLibraryCount", 0)))) if isinstance(deep_report, dict) else False,
+        "available": bool(deep_report.get("available", deep_report.get("detected", deep_report.get("analyzedLibraryCount", deep_report.get("findingCount", 0))))) if isinstance(deep_report, dict) else False,
         "findingCount": int(deep_report.get("findingCount") or 0) if isinstance(deep_report, dict) else 0,
         "mergedFindingCount": added,
         "manualImportRequired": bool(deep_report.get("manualImportRequired", False)) if isinstance(deep_report, dict) else False,
@@ -170,6 +170,21 @@ def run_workspace(
     except Exception as exc:
         runs.append({"engineId": flutter_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
 
+    try:
+        gameplay_report = deep_gameplay.scan_workspace(root, static_report, native_report, root / "deep-gameplay.json")
+        runs.append({
+            "engineId": deep_gameplay.ENGINE_ID,
+            "status": "SUCCESS",
+            "findingCount": int(gameplay_report.get("findingCount") or 0),
+            "locatorCount": int(gameplay_report.get("locatorCount") or 0),
+            "coverage": gameplay_report.get("coverage") or {},
+        })
+        _merge_findings(static_report, gameplay_report, summary_key="deepGameplay",
+                        default_engine=deep_gameplay.ENGINE_ID, default_kind="SEMANTIC_GAMEPLAY_EVIDENCE",
+                        default_category="Gameplay/Semantic")
+    except Exception as exc:
+        runs.append({"engineId": deep_gameplay.ENGINE_ID, "status": "FAILED", "error": str(exc)})
+
     static_report["embeddedEnriched"] = True
     static_report["embeddedPipelineSchema"] = SCHEMA
     static_report["total"] = len(_artifacts(static_report))
@@ -185,6 +200,7 @@ def run_workspace(
         "nativeReport": "native-deep.json",
         "cocosReport": "cocos-deep.json",
         "flutterReport": "flutter-deep.json",
+        "deepGameplayReport": "deep-gameplay.json",
         "successful": sum(1 for run in runs if run.get("status") == "SUCCESS"),
         "unavailable": sum(1 for run in runs if run.get("status") == "UNAVAILABLE"),
         "failed": sum(1 for run in runs if run.get("status") == "FAILED"),
