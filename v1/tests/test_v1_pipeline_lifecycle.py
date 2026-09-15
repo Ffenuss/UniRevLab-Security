@@ -27,6 +27,7 @@ def test_full_rerun_invalidates_prepared_automod_epoch_before_target_work():
         "menu-auto-confirm.json",
         "menu-autopilot.json",
         "menu-native-recovery.json",
+        "menu-native-recovery.json.tmp",
     )
     helper = source.split("private void invalidatePreparedAutoModState()", 1)[1].split("/** Chaquopy", 1)[0]
     for name in required:
