@@ -15,10 +15,11 @@ def test_rerun_invalidates_old_final_manifest_before_reconstruction():
     assert 'writeAtomicJson("automatic-evidence.json",state)' in source
 
 
-def test_full_rerun_invalidates_prepared_automod_epoch_before_target_work():
+def test_full_rerun_invalidates_prepared_automod_and_per_run_evidence_before_target_work():
     source = _read("FullAnalysisService.java")
 
-    required = (
+    prepared_helper = source.split("private void invalidatePreparedAutoModState()", 1)[1].split("private void invalidatePerRunEvidenceState()", 1)[0]
+    for name in (
         "automod-plan.json",
         "automod-plan.json.part",
         "menu-spec.json",
@@ -28,15 +29,34 @@ def test_full_rerun_invalidates_prepared_automod_epoch_before_target_work():
         "menu-autopilot.json",
         "menu-native-recovery.json",
         "menu-native-recovery.json.tmp",
-    )
-    helper = source.split("private void invalidatePreparedAutoModState()", 1)[1].split("private void invalidateEmbeddedRunOutputs()", 1)[0]
-    for name in required:
-        assert f'"{name}"' in helper
+    ):
+        assert f'"{name}"' in prepared_helper
 
-    invalidate = source.index("invalidatePreparedAutoModState();preparedStateInvalidated=true;")
-    resolve = source.index("DecompilerEngine.resolveTargetInputs(app)")
+    run_helper = source.split("private void invalidatePerRunEvidenceState()", 1)[1].split("private void invalidateEmbeddedRunOutputs()", 1)[0]
+    for name in (
+        "simple-catalog.json",
+        "simple-catalog.json.part",
+        "simple-progress.json",
+        "simple-progress.json.part",
+        "il2cpp-no-rva-native.json",
+        "il2cpp-no-rva-native.json.part",
+        "il2cpp-no-rva-native.methods.jsonl",
+        "il2cpp-no-rva-native.methods.jsonl.part",
+        "il2cpp-no-rva-native.failures.jsonl",
+        "il2cpp-no-rva-native.failures.jsonl.part",
+        "connected-report.json",
+        "connected-report.json.part",
+        "connected-report.md",
+        "connected-report.md.part",
+    ):
+        assert f'"{name}"' in run_helper
+
+    prepared = source.index("invalidatePreparedAutoModState();")
+    per_run = source.index("invalidatePerRunEvidenceState();", prepared)
+    invalidated = source.index("runStateInvalidated=true;", per_run)
+    resolve = source.index("DecompilerEngine.resolveTargetInputs(app)", invalidated)
     inventory = source.index('stage(1,4,"Inventory:')
-    assert invalidate < resolve < inventory
+    assert prepared < per_run < invalidated < resolve < inventory
 
 
 def test_embedded_outputs_are_invalidated_before_same_target_rerun_backend_executes():
@@ -141,18 +161,19 @@ def test_non_il2cpp_cache_hit_remains_not_applicable_not_fake_il2cpp_cache_hit()
     assert 'engines.put("re",new JSONObject().put("status","CACHE_HIT"));' in source
 
 
-def test_failed_epoch_invalidation_is_terminal_reconstruction_failure():
+def test_failed_run_epoch_invalidation_is_terminal_reconstruction_failure():
     source = _read("FullAnalysisService.java")
 
-    assert "boolean preparedStateInvalidated=false;" in source
-    assert 'reconstructionFailure="AUTOMOD_PREPARED_STATE_INVALIDATION_FAILED:' in source
+    assert "boolean runStateInvalidated=false;" in source
+    assert 'reconstructionFailure="RUN_EPOCH_INVALIDATION_FAILED:' in source
     assert 'pipelineState("FAILED","RECONSTRUCTION",false,false,reconstructionFailure)' in source
 
 
 def test_unexpected_reconstruction_error_never_hands_off_evidence_graph():
     source = _read("FullAnalysisService.java")
 
-    outer_catch = source.index("}catch(Exception e){", source.index("invalidatePreparedAutoModState();preparedStateInvalidated=true;"))
+    invalidated = source.index("runStateInvalidated=true;")
+    outer_catch = source.index("}catch(Exception e){", invalidated)
     outer_finally = source.index("}finally{", outer_catch)
     catch_block = source[outer_catch:outer_finally]
     assert "chain=false;" in catch_block
