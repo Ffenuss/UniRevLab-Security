@@ -121,12 +121,19 @@ def test_full_analysis_runs_embedded_apktool_and_script_backends_without_import(
     assert '"hermes.deep-embedded"' in hermes
 
 
-def test_connected_report_links_findings_to_methods():
-    report = read("modkit/mobile/connected_report.py")
+def test_connected_report_links_findings_to_methods_via_streaming_1_2():
+    base = read("modkit/mobile/connected_report.py")
+    v12 = read("modkit/mobile/connected_report_v12.py")
+    streaming = read("modkit/mobile/connected_report_streaming.py")
     center = read("android/app/src/main/java/dev/modkit/mobile/ReportCenterActivity.java")
-    assert "EXACT_METHOD_ID" in report and "EXACT_RVA" in report and "EXACT_NAME" in report
-    assert '"manualImportRequired": False' in report
-    assert 'getModule("modkit.mobile.connected_report")' in center
+    evidence = read("android/app/src/main/java/dev/modkit/mobile/AutomaticEvidenceService.java")
+    assert "EXACT_METHOD_ID" in base and "EXACT_RVA" in base and "EXACT_NAME" in base
+    assert 'SCHEMA = "modkit-connected-report-1.2"' in v12
+    assert '"manualImportRequired": False' in base
+    assert "_iter_jsonl" in streaming
+    assert '"loadsFullMethodEvidenceIntoRam": False' in streaming
+    assert 'getModule("modkit.mobile.connected_report_streaming")' in center
+    assert 'getModule("modkit.mobile.connected_report_streaming")' in evidence
     assert "EvidenceBundleExporter.export" in center
 
 
