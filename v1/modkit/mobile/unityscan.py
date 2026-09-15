@@ -42,8 +42,6 @@ def _read_keys(encoded: str) -> list:
             if kind in (0, 1, 6, 7):
                 size = struct.unpack_from("<I", data, pos)[0]; pos += 4
                 raw = data[pos:pos + size]; pos += size
-                # Addressables uses UTF-16 for one of its string-key variants and
-                # UTF-8 for the others. Decode defensively and preserve evidence.
                 if kind == 1 and len(raw) % 2 == 0:
                     values.append(raw.decode("utf-16-le", "replace").rstrip("\x00"))
                 else:
@@ -109,8 +107,6 @@ def decode_catalog(raw: bytes, terms=DEFAULT_TERMS) -> dict:
 
         matched = sorted({t for t in wanted if t in (str(asset) + " " + str(primary_key) + " " + str(resource_type)).casefold()})
         bundles = []
-        # Buckets are key->entry adjacency lists. Resolve direct dependency entry
-        # indexes conservatively and keep only bundle-looking internal IDs.
         if 0 <= dependency_key < len(buckets):
             for dependency_entry_index in buckets[dependency_key][1][:64]:
                 if 0 <= dependency_entry_index < len(entries):
@@ -183,15 +179,12 @@ def scan_unityfs(raw: bytes, terms=DEFAULT_TERMS) -> dict:
     unity_version, pos = _cstring(raw, pos)
     revision, pos = _cstring(raw, pos)
     bundle_size, compressed_info, uncompressed_info, flags = struct.unpack_from(">QIII", raw, pos); pos += 20
-    # UnityFS v7+ aligns the blocks/directory-info stream to 16 bytes.  Newer
-    # writers may additionally request 16-byte padding before the data blocks
-    # with ArchiveFlags.BlockInfoNeedPaddingAtStart (0x200).
     header_data_pos = (pos + 15) & ~15 if version >= 7 else pos
     info_at_end = bool(flags & 0x80)
     info_pos = len(raw) - compressed_info if info_at_end else header_data_pos
     packed_info = raw[info_pos:info_pos + compressed_info]
     info = _decompress(packed_info, flags, uncompressed_info)
-    ip = 16  # 16-byte hash
+    ip = 16
     block_count = struct.unpack_from(">I", info, ip)[0]; ip += 4
     blocks = []
     for _ in range(block_count):
@@ -295,3 +288,43 @@ def inspect_apk(apk_path, metadata_out=None, library_out=None, report_out=None, 
     if report_out:
         Path(report_out).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     return result
+
+
+def inspect_apk_paths(paths_json, report_out=None, cb=None) -> dict:
+    """Scan every APK member of one target and merge Unity/Addressables evidence.
+
+    This intentionally does not extract IL2CPP files. Exact metadata/library pair
+    ownership is handled by ``apkset.inspect_apk_paths`` so manual and automatic
+    workspaces share one pair-selection policy.
+    """
+    paths = json.loads(paths_json) if isinstance(paths_json, str) else list(paths_json or [])
+    paths = [str(Path(str(p))) for p in paths if p and Path(str(p)).is_file()]
+    if not paths:
+        raise ValueError("APK set пуст")
+    merged = {"schema": "modkit-unity-apkset-1.0", "apkCount": len(paths), "members": [], "catalogs": [], "bundles": [], "warnings": []}
+    for index, path in enumerate(paths):
+        _check(cb, "Unity/Addressables: APK %d/%d · %s" % (index + 1, len(paths), Path(path).name))
+        try:
+            item = inspect_apk(path, None, None, None, cb)
+            merged["members"].append({"index": index, "apk": path, "summary": item.get("summary") or {}, "warnings": item.get("warnings") or []})
+            for row in item.get("catalogs") or []:
+                row = dict(row); row["splitIndex"] = index; row["split"] = Path(path).name; merged["catalogs"].append(row)
+            for row in item.get("bundles") or []:
+                row = dict(row); row["splitIndex"] = index; row["split"] = Path(path).name; merged["bundles"].append(row)
+            merged["warnings"].extend(["%s: %s" % (Path(path).name, w) for w in item.get("warnings") or []])
+        except Exception as exc:
+            merged["warnings"].append("%s: %s" % (Path(path).name, exc))
+            merged["members"].append({"index": index, "apk": path, "error": str(exc)})
+    merged["summary"] = {
+        "catalogs": len(merged["catalogs"]),
+        "addressable_findings": sum(len(x.get("findings", [])) for x in merged["catalogs"]),
+        "owner_bundles_scanned": len(merged["bundles"]),
+        "bundle_string_hits": sum(len(x.get("matched_strings", [])) for x in merged["bundles"]),
+        "scenes": sum(len(x.get("typed_assets", {}).get("scenes", [])) for x in merged["catalogs"]),
+        "prefabs": sum(len(x.get("typed_assets", {}).get("prefabs", [])) for x in merged["catalogs"]),
+        "scriptable_assets": sum(len(x.get("typed_assets", {}).get("scriptable_assets", [])) for x in merged["catalogs"]),
+        "serialized_files": sum(len(x.get("serialized_files", [])) for x in merged["bundles"]),
+    }
+    if report_out:
+        Path(report_out).write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
+    return merged
