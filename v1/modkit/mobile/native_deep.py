@@ -12,7 +12,6 @@ import hashlib
 import json
 from pathlib import Path
 import re
-import shutil
 import struct
 from typing import Any, Iterable
 import zipfile
@@ -29,6 +28,7 @@ MAX_FINDINGS = 1200
 MAX_STRING_SCAN_BYTES = 32 * 1024 * 1024
 MAX_STRING_TARGETS = 160
 MAX_CONTROL_FLOW = 5000
+COPY_CHUNK_BYTES = 1024 * 1024
 PRINTABLE = re.compile(rb"[\x20-\x7e]{5,}")
 
 _DOMAINS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -43,6 +43,26 @@ _DOMAINS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("mana_energy", ("mana", "stamina", "energy")),
     ("security", ("certificate", "pinning", "keystore", "encrypt", "decrypt", "oauth", "token", "session")),
 )
+
+
+class NativeScanCancelled(RuntimeError):
+    """Explicit cooperative cancellation; never converted into a backend error row."""
+
+
+def _cancelled(cb: Any | None) -> bool:
+    if cb is None:
+        return False
+    checker = getattr(cb, "isCancelled", None)
+    if callable(checker):
+        return bool(checker())
+    if callable(cb):
+        return bool(cb())
+    return False
+
+
+def _check(cb: Any | None) -> None:
+    if _cancelled(cb):
+        raise NativeScanCancelled("native deep scan cancelled")
 
 
 def _workspace_apks(root: Path) -> list[Path]:
@@ -94,27 +114,39 @@ def _cache_file(cache: Path, apk: Path, info: zipfile.ZipInfo) -> Path:
     return cache / f"{key}-{name}"
 
 
-def _extract(zf: zipfile.ZipFile, info: zipfile.ZipInfo, apk: Path, cache: Path) -> Path:
+def _extract(zf: zipfile.ZipFile, info: zipfile.ZipInfo, apk: Path, cache: Path,
+             cb: Any | None = None) -> Path:
+    _check(cb)
     cache.mkdir(parents=True, exist_ok=True)
     dest = _cache_file(cache, apk, info)
     if dest.is_file() and dest.stat().st_size == info.file_size:
         return dest
     part = dest.with_suffix(dest.suffix + ".part")
     part.unlink(missing_ok=True)
-    with zf.open(info, "r") as source, part.open("wb") as out:
-        shutil.copyfileobj(source, out, 1024 * 1024)
-    if part.stat().st_size != info.file_size:
+    try:
+        with zf.open(info, "r") as source, part.open("wb") as out:
+            while True:
+                _check(cb)
+                chunk = source.read(COPY_CHUNK_BYTES)
+                if not chunk:
+                    break
+                out.write(chunk)
+        _check(cb)
+        if part.stat().st_size != info.file_size:
+            raise IOError("native extraction size mismatch")
+        part.replace(dest)
+        return dest
+    except Exception:
         part.unlink(missing_ok=True)
-        raise IOError("native extraction size mismatch")
-    part.replace(dest)
-    return dest
+        raise
 
 
-def _semantic_strings(elf: ElfFile) -> list[dict[str, Any]]:
+def _semantic_strings(elf: ElfFile, cb: Any | None = None) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     scanned = 0
     seen: set[tuple[int, str]] = set()
     for sec in elf.sections:
+        _check(cb)
         if sec.type != 1 or sec.is_exec or not sec.is_alloc or sec.size <= 0:
             continue
         if scanned >= MAX_STRING_SCAN_BYTES:
@@ -122,7 +154,9 @@ def _semantic_strings(elf: ElfFile) -> list[dict[str, Any]]:
         take = min(sec.size, MAX_STRING_SCAN_BYTES - scanned)
         raw = bytes(memoryview(elf.blob)[sec.offset:sec.offset + take])
         scanned += take
-        for match in PRINTABLE.finditer(raw):
+        for no, match in enumerate(PRINTABLE.finditer(raw)):
+            if (no & 0xFF) == 0:
+                _check(cb)
             text = match.group().decode("utf-8", "replace").strip()
             domain = _domain(text)
             if not domain:
@@ -138,6 +172,7 @@ def _semantic_strings(elf: ElfFile) -> list[dict[str, Any]]:
             rows.append({"text": text[:300], "rva": rva, "section": sec.name, "domain": domain})
             if len(rows) >= MAX_STRING_TARGETS:
                 return rows
+    _check(cb)
     return rows
 
 
@@ -175,7 +210,8 @@ def _decode_ldr_x_unsigned(word: int) -> tuple[int, int, int] | None:
 
 
 def _scan_control_flow(elf: ElfFile, functions: list[Any], *, limit: int = MAX_CONTROL_FLOW,
-                       max_scan_bytes: int = 128 * 1024 * 1024) -> list[dict[str, Any]]:
+                       max_scan_bytes: int = 128 * 1024 * 1024,
+                       cb: Any | None = None) -> list[dict[str, Any]]:
     """Recover conservative ARM64 tail/thunk and indirect-slot control flow.
 
     Exact target RVAs are emitted only for direct ``B`` or ADRP+ADD+BR sequences.
@@ -184,6 +220,7 @@ def _scan_control_flow(elf: ElfFile, functions: list[Any], *, limit: int = MAX_C
     """
     if not elf.is_arm64():
         return []
+    _check(cb)
     funcs = [s for s in functions if s.name and s.value > 0 and s.shndx != 0]
     funcs.sort(key=lambda s: (s.value, s.name))
     starts = [s.value for s in funcs]
@@ -212,6 +249,7 @@ def _scan_control_flow(elf: ElfFile, functions: list[Any], *, limit: int = MAX_C
     seen: set[tuple[Any, ...]] = set()
     scanned = 0
     for region_addr, region_offset, region_size in regions:
+        _check(cb)
         if scanned >= max_scan_bytes:
             break
         take = min(region_size, max_scan_bytes - scanned) & ~3
@@ -219,6 +257,8 @@ def _scan_control_flow(elf: ElfFile, functions: list[Any], *, limit: int = MAX_C
         scanned += len(raw)
         try:
             for rel in range(0, len(raw), 4):
+                if (rel & 0x3FFF) == 0:
+                    _check(cb)
                 word = struct.unpack_from("<I", raw, rel)[0]
                 pc = region_addr + rel
                 caller = caller_for(pc)
@@ -303,10 +343,12 @@ def _scan_control_flow(elf: ElfFile, functions: list[Any], *, limit: int = MAX_C
                     return out
         finally:
             raw.release()
+    _check(cb)
     return out
 
 
-def _scan_library(apk: Path, entry: str, extracted: Path) -> dict[str, Any]:
+def _scan_library(apk: Path, entry: str, extracted: Path, cb: Any | None = None) -> dict[str, Any]:
+    _check(cb)
     elf = ElfFile.open_mmap(extracted)
     try:
         info = elf.info()
@@ -316,13 +358,16 @@ def _scan_library(apk: Path, entry: str, extracted: Path) -> dict[str, Any]:
             {"name": s.name, "rva": s.value, "size": s.size, "global": s.is_global}
             for s in functions[:MAX_FUNCTION_ROWS]
         ]
-        calls = direct_bl_calls(elf, limit=4000, max_scan_bytes=96 * 1024 * 1024)
-        control_flow = _scan_control_flow(elf, functions)
+        _check(cb)
+        calls = direct_bl_calls(elf, limit=4000, max_scan_bytes=96 * 1024 * 1024, cb=cb)
+        _check(cb)
+        control_flow = _scan_control_flow(elf, functions, cb=cb)
         exact_extra = [row for row in control_flow if isinstance(row.get("targetRva"), int)]
         indirect = [row for row in control_flow if row.get("kind") == "arm64-indirect-slot-blr"]
-        strings = _semantic_strings(elf)
+        strings = _semantic_strings(elf, cb)
         targets = {int(row["rva"]) for row in strings}
-        xrefs = arm64_address_xrefs(elf, targets, limit=2500, max_scan_bytes=96 * 1024 * 1024) if targets else []
+        xrefs = arm64_address_xrefs(elf, targets, limit=2500, max_scan_bytes=96 * 1024 * 1024, cb=cb) if targets else []
+        _check(cb)
 
         callers: dict[int, list[dict[str, Any]]] = {}
         callees: dict[int, list[dict[str, Any]]] = {}
@@ -345,7 +390,9 @@ def _scan_library(apk: Path, entry: str, extracted: Path) -> dict[str, Any]:
                 string_xrefs.setdefault(target, []).append(edge)
 
         findings: list[dict[str, Any]] = []
-        for sym in functions:
+        for no, sym in enumerate(functions):
+            if (no & 0xFF) == 0:
+                _check(cb)
             domain = _domain(sym.name)
             if not domain:
                 continue
@@ -381,7 +428,9 @@ def _scan_library(apk: Path, entry: str, extracted: Path) -> dict[str, Any]:
                 break
 
         if len(findings) < MAX_FINDINGS:
-            for row in strings:
+            for no, row in enumerate(strings):
+                if (no & 0x7F) == 0:
+                    _check(cb)
                 refs = string_xrefs.get(int(row["rva"]), [])[:60]
                 finding_id = hashlib.sha256(f"{apk.name}!{entry}!str!{row['rva']:x}!{row['text']}".encode("utf-8", "replace")).hexdigest()[:20]
                 findings.append({
@@ -408,6 +457,7 @@ def _scan_library(apk: Path, entry: str, extracted: Path) -> dict[str, Any]:
                 if len(findings) >= MAX_FINDINGS:
                     break
 
+        _check(cb)
         return {
             "apk": apk.name,
             "entry": entry,
@@ -436,7 +486,8 @@ def _scan_library(apk: Path, entry: str, extracted: Path) -> dict[str, Any]:
         elf.close()
 
 
-def scan_apk_paths(paths: Iterable[str | Path], cache_dir: str | Path, output_path: str | Path | None = None) -> dict[str, Any]:
+def scan_apk_paths(paths: Iterable[str | Path], cache_dir: str | Path,
+                   output_path: str | Path | None = None, cb: Any | None = None) -> dict[str, Any]:
     cache = Path(cache_dir)
     libraries: list[dict[str, Any]] = []
     findings: list[dict[str, Any]] = []
@@ -444,6 +495,7 @@ def scan_apk_paths(paths: Iterable[str | Path], cache_dir: str | Path, output_pa
     apk_count = 0
     candidates: list[tuple[Path, zipfile.ZipInfo]] = []
     for raw in paths:
+        _check(cb)
         apk = Path(raw)
         if not apk.is_file():
             continue
@@ -451,31 +503,42 @@ def scan_apk_paths(paths: Iterable[str | Path], cache_dir: str | Path, output_pa
         try:
             with zipfile.ZipFile(apk) as zf:
                 for info in zf.infolist():
+                    _check(cb)
                     low = info.filename.casefold()
                     if info.is_dir() or not low.endswith(".so") or info.file_size <= 0 or info.file_size > MAX_LIBRARY_BYTES:
                         continue
                     if "/arm64-v8a/" not in "/" + low:
                         continue
                     candidates.append((apk, info))
+        except NativeScanCancelled:
+            raise
         except Exception as exc:
+            if _cancelled(cb):
+                raise NativeScanCancelled("native deep scan cancelled") from exc
             errors.append({"apk": apk.name, "error": str(exc)})
     candidates.sort(key=lambda item: (
         0 if Path(item[1].filename).name.casefold() in {"libapp.so", "libil2cpp.so", "libmain.so", "libunity.so", "libcocos2dcpp.so"} else 1,
         item[0].name.casefold(), item[1].filename.casefold()))
 
     for apk, wanted in candidates[:MAX_LIBRARIES]:
+        _check(cb)
         try:
             with zipfile.ZipFile(apk) as zf:
                 info = zf.getinfo(wanted.filename)
-                extracted = _extract(zf, info, apk, cache)
-            row = _scan_library(apk, info.filename, extracted)
+                extracted = _extract(zf, info, apk, cache, cb)
+            row = _scan_library(apk, info.filename, extracted, cb)
             libraries.append(row)
             findings.extend(row.get("findings") or [])
             if len(findings) >= MAX_FINDINGS:
                 findings = findings[:MAX_FINDINGS]
+        except NativeScanCancelled:
+            raise
         except Exception as exc:
+            if _cancelled(cb):
+                raise NativeScanCancelled("native deep scan cancelled") from exc
             errors.append({"apk": apk.name, "entry": wanted.filename, "error": str(exc)})
 
+    _check(cb)
     out = {
         "schema": SCHEMA,
         "engineId": ENGINE_ID,
@@ -483,6 +546,7 @@ def scan_apk_paths(paths: Iterable[str | Path], cache_dir: str | Path, output_pa
         "manualImportRequired": False,
         "passive": True,
         "executesTargetCode": False,
+        "cancelAware": cb is not None,
         "apkCount": apk_count,
         "candidateLibraryCount": len(candidates),
         "analyzedLibraryCount": len(libraries),
@@ -492,11 +556,13 @@ def scan_apk_paths(paths: Iterable[str | Path], cache_dir: str | Path, output_pa
         "findings": findings,
         "errors": errors[:100],
     }
+    _check(cb)
     if output_path:
         Path(output_path).write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
     return out
 
 
-def scan_workspace(workdir: str | Path, output_path: str | Path | None = None) -> dict[str, Any]:
+def scan_workspace(workdir: str | Path, output_path: str | Path | None = None,
+                   cb: Any | None = None) -> dict[str, Any]:
     root = Path(workdir)
-    return scan_apk_paths(_workspace_apks(root), root / "native-deep-cache", output_path)
+    return scan_apk_paths(_workspace_apks(root), root / "native-deep-cache", output_path, cb)
