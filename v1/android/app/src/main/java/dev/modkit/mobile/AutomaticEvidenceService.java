@@ -86,7 +86,7 @@ public class AutomaticEvidenceService extends Service {
         check();if(!Python.isStarted())Python.start(new AndroidPlatform(this));PyObject cache=Python.getInstance().getModule("modkit.mobile.simple_cache");
 
         stage(1,6,"target digest + APK/split cache plan");
-        JSONObject plan=new JSONObject(cache.callAttr("plan_workspace",getFilesDir().getPath(),app.file("simple-cache.json").getPath()).toString());
+        JSONObject plan=new JSONObject(cache.callAttr("plan_workspace",getFilesDir().getPath(),app.file("simple-cache.json").getPath(),new Progress()).toString());
         boolean unchanged=plan.optBoolean("unchanged",false);boolean haveAnalysis=app.file("analysis.json").isFile()||app.file("re-analysis.json").isFile()||app.file("analysis.methods.jsonl").isFile();manifest.put("cachePlan",plan).put("cacheHit",unchanged&&haveAnalysis);
 
         File reTarget=targetForReAnalysis();stage(2,6,unchanged&&haveAnalysis?"cache hit: IL2CPP/DEX/native correlation":"IL2CPP + DEX/native correlation");JSONObject engines=new JSONObject();manifest.put("engines",engines);
@@ -126,7 +126,17 @@ public class AutomaticEvidenceService extends Service {
             manifest.put("connectedReport",new JSONObject().put("status","SUCCESS").put("schema",connected.optString("schema")).put("findingCount",connected.optInt("findingCount")).put("exactLinked",connected.optInt("exactLinked")).put("runtimeObserved",connected.optInt("runtimeObservedFindings")).put("il2cppStructural",connected.optInt("il2cppStructuralFindings")).put("metadataIdentityNoRva",connected.optInt("metadataIdentityConfirmedFindings")).put("metadataQualifiedNoRva",connected.optInt("metadataQualifiedIdentityFindings")).put("metadataTokenNoRva",connected.optInt("metadataTokenIdentityFindings")).put("metadataTokenConflicts",connected.optInt("metadataTokenConflictFindings")).put("nativeRvaRecovered",connected.optInt("nativeRvaRecoveredFindings")));
         }catch(Exception e){manifest.put("connectedReport",new JSONObject().put("status","PARTIAL").put("error",String.valueOf(e.getMessage())));progress("Connected report частичен: "+e.getMessage()+" · AutoMod/Evidence Graph сохранены.");}
 
-        cache.callAttr("record_workspace",getFilesDir().getPath(),app.file("simple-cache.json").getPath(),plan.toString());app.result=readJson("analysis.summary.json");JSONObject autoPlan=readJson("automod-plan.json");JSONObject connected=readJson("connected-report.json");JSONObject nativeRecovery=readJson("il2cpp-no-rva-native.json");JSONObject recoveryCounts=nativeRecovery==null?null:nativeRecovery.optJSONObject("counts");
+        JSONObject il2cppEngine=engines.optJSONObject("il2cpp"),reEngine=engines.optJSONObject("re");
+        String il2cppStatus=il2cppEngine==null?"":il2cppEngine.optString("status"),reStatus=reEngine==null?"":reEngine.optString("status");
+        boolean il2cppCacheable="SUCCESS".equals(il2cppStatus)||"CACHE_HIT".equals(il2cppStatus)||"NOT_APPLICABLE".equals(il2cppStatus);
+        boolean reCacheable="SUCCESS".equals(reStatus)||"CACHE_HIT".equals(reStatus);
+        boolean cacheEligible=il2cppCacheable&&reCacheable;manifest.put("cacheEligible",cacheEligible);
+        if(cacheEligible){
+            cache.callAttr("record_workspace",getFilesDir().getPath(),app.file("simple-cache.json").getPath(),plan.toString(),new Progress());manifest.put("cacheRecorded",true);
+        }else{
+            Files.deleteIfExists(app.file("simple-cache.json").toPath());manifest.put("cacheRecorded",false).put("cacheBlockedReason","core analyzer partial or incomplete");
+        }
+        check();app.result=readJson("analysis.summary.json");JSONObject autoPlan=readJson("automod-plan.json");JSONObject connected=readJson("connected-report.json");JSONObject nativeRecovery=readJson("il2cpp-no-rva-native.json");JSONObject recoveryCounts=nativeRecovery==null?null:nativeRecovery.optJSONObject("counts");
         String autoText=autoPlan==null?"":" · AutoMod build "+autoPlan.optInt("readyToBuildCount")+" / preflight "+autoPlan.optInt("readyForPreflightCount");String reportText=connected==null?"":" · report links "+connected.optInt("exactLinked")+" / recovered RVA "+connected.optInt("nativeRvaRecoveredFindings")+" / token-no-RVA "+connected.optInt("metadataTokenIdentityFindings")+" / conflicts "+connected.optInt("metadataTokenConflictFindings");String recoveryText=recoveryCounts==null?"":" · native recovery "+recoveryCounts.optInt("recoveredExact");
         progress("Готово. Найдено "+catalog.optInt("total")+", важных "+catalog.optInt("important")+", точных locator "+catalog.optInt("actionable")+", PATCH_READY "+catalog.optInt("buildable")+", server/trust audit "+catalog.optInt("serverAudit")+autoText+recoveryText+reportText+(unchanged?" · cache hit":" · fresh target")+".");
     }
