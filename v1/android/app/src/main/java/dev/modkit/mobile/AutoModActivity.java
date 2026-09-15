@@ -9,6 +9,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.DocumentsContract;
 import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -55,6 +56,7 @@ public class AutoModActivity extends AppCompatActivity {
     private MaterialButton rowButton(String label,LinearLayout row,View.OnClickListener listener){MaterialButton b=new MaterialButton(this);b.setText(label);b.setAllCaps(false);b.setTextSize(12);b.setTextColor(fg());b.setBackgroundTintList(ColorStateList.valueOf(action()));b.setOnClickListener(listener);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,-2,1f);lp.setMargins(dp(2),0,dp(2),0);row.addView(b,lp);return b;}
     private JSONObject read(String name){try{return new JSONObject(Io.readUtf8(app.file(name)));}catch(Exception e){return null;}}
     private void toast(String value){Toast.makeText(this,value,Toast.LENGTH_LONG).show();}
+    private void deleteCreatedDocument(Uri uri){if(uri==null)return;try{DocumentsContract.deleteDocument(getContentResolver(),uri);}catch(Exception ignored){}}
 
     @Override public void onCreate(Bundle state){
         super.onCreate(state);app=(App)getApplication();
@@ -94,13 +96,18 @@ public class AutoModActivity extends AppCompatActivity {
         JSONObject plan=read("automod-plan.json");if(plan==null){toast("Сначала обновите AutoMod-план");return;}
         if(plan.optInt("readyToBuildCount")+plan.optInt("readyForPreflightCount")<=0){toast("Нет кандидатов для prepare/preflight");return;}
         app.cancelled.set(false);app.busy.set(true);app.progress("AutoMod: exact recovery + Deep/binding/preflight…");
-        startForegroundService(new Intent(this,AutoModPrepareService.class));
+        try{startForegroundService(new Intent(this,AutoModPrepareService.class));}
+        catch(Exception e){app.busy.set(false);app.revision++;status.setText("AutoMod prepare не запущен: "+e.getMessage());toast("Не удалось запустить Exact prepare");}
     }
 
-    private void startWorker(String op,Uri uri){
-        if(!canStart())return;app.cancelled.set(false);app.busy.set(true);app.progress("AutoMod: "+op+"…");
-        Class<?> service="menu_build_apk".equals(op)?AutoModBuildGuardService.class:WorkerService.class;
-        Intent intent=new Intent(this,service).putExtra("op",op);if(uri!=null)intent.putExtra("uri",uri.toString());startForegroundService(intent);
+    private boolean startWorker(String op,Uri uri){
+        boolean buildOp="menu_build_apk".equals(op);
+        if(!canStart()){if(buildOp)deleteCreatedDocument(uri);return false;}
+        app.cancelled.set(false);app.busy.set(true);app.progress("AutoMod: "+op+"…");
+        Class<?> service=buildOp?AutoModBuildGuardService.class:WorkerService.class;
+        Intent intent=new Intent(this,service).putExtra("op",op);if(uri!=null)intent.putExtra("uri",uri.toString());
+        try{startForegroundService(intent);return true;}
+        catch(Exception e){app.busy.set(false);app.revision++;if(buildOp)deleteCreatedDocument(uri);status.setText("AutoMod: не удалось запустить "+op+": "+e.getMessage());toast("Не удалось запустить AutoMod-операцию");return false;}
     }
 
     private void chooseBuildDestination(){
