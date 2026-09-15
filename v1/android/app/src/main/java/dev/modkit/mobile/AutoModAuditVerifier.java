@@ -31,21 +31,25 @@ final class AutoModAuditVerifier {
         if(audit.optBoolean("promotesBuildability")||audit.optBoolean("addressRecoveryPromotesBuildability")) return false;
         if(!"EXACT_INPUT_SHA256".equals(audit.optString("freshnessPolicy"))) return false;
         JSONArray rows=audit.optJSONArray("inputFingerprints");
-        if(rows==null||rows.length()<4) return false;
+        JSONArray outputs=audit.optJSONArray("outputFingerprints");
+        if(rows==null||rows.length()<4||outputs==null||outputs.length()<1) return false;
         return validFingerprint(fingerprint(rows,"metadata"))
                 &&validFingerprint(fingerprint(rows,"library"))
                 &&validFingerprint(fingerprint(rows,"catalog"))
-                &&validFingerprint(fingerprint(rows,"sourceApk"));
+                &&validFingerprint(fingerprint(rows,"sourceApk"))
+                &&validFingerprint(fingerprint(outputs,"menuSpec"));
     }
 
     static JSONObject verifyCurrent(App app,File sourceApk,CancelGate gate)throws Exception {
         JSONObject audit=read(app);
         if(!structurallyReady(audit))throw new IOException("Exact recovery audit не содержит обязательную SHA-256 freshness proof");
         JSONArray rows=audit.getJSONArray("inputFingerprints");
+        JSONArray outputs=audit.getJSONArray("outputFingerprints");
         verify(rows,"metadata",app.file("metadata.bin"),gate);
         verify(rows,"library",app.file("library.so"),gate);
         verify(rows,"catalog",app.file("analysis.methods.jsonl"),gate);
         verify(rows,"sourceApk",sourceApk,gate);
+        verify(outputs,"menuSpec",app.file("menu-spec.json"),gate);
         return audit;
     }
 
