@@ -12,8 +12,10 @@ def test_dev37_analysis_and_file_workspace_are_wired_without_legacy_shell():
     assert 'AutoAnalysisActivity.class' in home
     assert 'FullModeActivity.class' in home
     assert 'FileWorkspaceActivity.class' in full
-    assert 'AutoAnalysisActivity.class' in compat and 'finish();' in compat
+    assert 'extends AutoAnalysisActivity' in compat
+    assert 'startActivity(' not in compat and 'finish();' not in compat
     assert '.AutoAnalysisActivity' in manifest and '.FileWorkspaceActivity' in manifest
+    # Historical operation IDs remain compatibility contracts for manual tools only.
     assert 'simple_prepare' in worker and 'simple_build' in worker
     assert 'workspace_inspect' in worker and 'workspace_build' in worker
 
