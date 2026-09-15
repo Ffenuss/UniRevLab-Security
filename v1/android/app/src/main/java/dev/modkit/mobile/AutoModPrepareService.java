@@ -68,6 +68,7 @@ public class AutoModPrepareService extends Service {
         File metadata=app.file("metadata.bin"),library=app.file("library.so"),catalog=app.file("analysis.methods.jsonl");
         if(!metadata.isFile()||!library.isFile()||!catalog.isFile())throw new IOException("Нужен завершённый IL2CPP-анализ: metadata.bin + library.so + method catalog");
         File source=targetPatchApk();if(!source.isFile())throw new IOException("Owning APK для подготовки меню не найден");
+        invalidatePreparedState();
         progress("AutoMod: exact CodeGenModule recovery → Deep Resolver → binding/preflight…");
         if(!Python.isStarted())Python.start(new AndroidPlatform(this));
         PyObject result=Python.getInstance().getModule("modkit.mobile.menu_native_recovery").callAttr("prepare_workspace",getFilesDir().getPath(),source.getPath(),new Progress());
@@ -75,6 +76,12 @@ public class AutoModPrepareService extends Service {
         JSONObject obj=new JSONObject(result.toString());JSONObject confirm=obj.optJSONObject("confirm"),pre=obj.optJSONObject("preflight");JSONArray promoted=confirm==null?null:confirm.optJSONArray("promoted"),rejected=confirm==null?null:confirm.optJSONArray("rejected");
         int promotedCount=promoted==null?0:promoted.length(),rejectedCount=rejected==null?0:rejected.length();boolean ready=pre!=null&&pre.optBoolean("readyForAutoBuild");
         progress("AutoMod prepare: подтверждено bindings "+promotedCount+", отклонено "+rejectedCount+", auto-build "+(ready?"READY":"BLOCK/REVIEW")+". Recovered RVA не обходит preflight.");
+    }
+
+    private void invalidatePreparedState()throws IOException{
+        for(String name:new String[]{"menu-spec.json","menu-preflight.json","menu-validation.json","menu-auto-confirm.json","menu-autopilot.json"}){
+            File file=app.file(name);if(file.exists()&&!file.delete())throw new IOException("Не удалось инвалидировать старый AutoMod artifact: "+name);
+        }
     }
 
     private File targetPatchApk()throws Exception{
