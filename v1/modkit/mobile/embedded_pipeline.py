@@ -131,7 +131,7 @@ def run_workspace(
 
     _check(cb, "Embedded 3/7 · Hermes HBC…")
     try:
-        deep = hermes_deep.scan_workspace(root, root / "hermes-deep.json")
+        deep = hermes_deep.scan_workspace(root, root / "hermes-deep.json", cb)
         runs.append({
             "engineId": "hermes.deep-embedded",
             "status": "SUCCESS" if deep.get("available") else "UNAVAILABLE",
@@ -142,6 +142,8 @@ def run_workspace(
         _merge_findings(static_report, deep, summary_key="deepHermes",
                         default_engine="hermes.deep-embedded", default_kind="SCRIPT_SYMBOL",
                         default_category="Runtime/Hermes")
+    except hermes_deep.HermesScanCancelled as exc:
+        raise Cancelled(str(exc)) from exc
     except Cancelled:
         raise
     except Exception as exc:
