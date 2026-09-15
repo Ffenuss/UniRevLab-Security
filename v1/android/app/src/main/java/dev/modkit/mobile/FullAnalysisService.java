@@ -26,10 +26,19 @@ import java.util.Locale;
 /** Runs reconstruction backends, then hands off to the isolated automatic evidence service. */
 public class FullAnalysisService extends Service {
     private App app;
+    private volatile long startedAt;
     @Override public void onCreate(){super.onCreate();app=(App)getApplication();((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).createNotificationChannel(new NotificationChannel("full-analysis","Полный анализ",NotificationManager.IMPORTANCE_LOW));}
     @Override public IBinder onBind(Intent intent){return null;}
     private Notification note(String text){Intent stop=new Intent(this,FullAnalysisService.class).setAction("cancel");PendingIntent cancel=PendingIntent.getService(this,92,stop,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);PendingIntent open=PendingIntent.getActivity(this,91,new Intent(this,AutoAnalysisActivity.class),PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);return new Notification.Builder(this,"full-analysis").setSmallIcon(R.drawable.ic_modkit).setContentTitle("ModKit · полный анализ").setContentText(text).setContentIntent(open).setOngoing(true).addAction(0,"Отмена",cancel).build();}
     private void progress(String text){app.progress(text);((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).notify(91,note(text));}
+    private void stage(int index,int total,String name){
+        long elapsed=Math.max(0L,System.currentTimeMillis()-startedAt);
+        try{
+            JSONObject row=new JSONObject().put("schema","modkit-simple-progress-1.1").put("phase","RECONSTRUCTION").put("stage",index).put("totalStages",total).put("name",name).put("remainingStages",Math.max(0,total-index)).put("elapsedMs",elapsed);
+            Files.write(app.file("simple-progress.json").toPath(),row.toString(2).getBytes(StandardCharsets.UTF_8));
+        }catch(Exception ignored){}
+        progress("Реконструкция ["+index+"/"+total+"]: "+name);
+    }
 
     /** Chaquopy callback shared with inventory and embedded backends. */
     public final class Progress {
@@ -43,12 +52,13 @@ public class FullAnalysisService extends Service {
         getSharedPreferences("state",0).edit().putBoolean("running",true).apply();
         new Thread(()->{
             boolean chain=true;
+            startedAt=System.currentTimeMillis();
             try{
                 List<File> inputs=DecompilerEngine.resolveTargetInputs(app);
                 if(inputs.isEmpty())throw new java.io.FileNotFoundException("Сначала выберите APK или установленный пакет.");
                 if(!Python.isStarted())Python.start(new AndroidPlatform(this));
 
-                progress("1/4 · Inventory: APK/split, DEX, native, Unity/IL2CPP и runtime-маркеры…");
+                stage(1,4,"Inventory: APK/split, DEX, native, Unity/IL2CPP и runtime-маркеры");
                 String scanJson=runInventory(inputs);
                 normalizeInstalledTarget(scanJson);
                 if(app.cancelled.get()){chain=false;progress("Полный анализ отменён пользователем.");return;}
@@ -60,9 +70,9 @@ public class FullAnalysisService extends Service {
                 if(manifest.isFile()&&app.file("modkit-decompiled.zip").isFile()){
                     try{JSONObject old=new JSONObject(Io.readUtf8(manifest));cached=digest.equals(old.optString("targetDigest"))&&old.optBoolean("complete");}catch(Exception ignored){}
                 }
-                if(cached)progress("2/4 · JADX: cache hit · target не изменился.");
+                if(cached)stage(2,4,"JADX: cache hit · target не изменился");
                 else{
-                    progress("2/4 · JADX: все classes*.dex и resources во всех split APK…");
+                    stage(2,4,"JADX: все classes*.dex и resources во всех split APK");
                     JSONObject state=new JSONObject().put("schema","modkit-full-reconstruction-1.1").put("targetDigest",digest).put("complete",false).put("startedAtMs",System.currentTimeMillis());
                     Files.write(manifest.toPath(),state.toString(2).getBytes(StandardCharsets.UTF_8));
                     try(DecompilerEngine dec=new DecompilerEngine(this)){
@@ -78,7 +88,7 @@ public class FullAnalysisService extends Service {
                 }
 
                 if(app.cancelled.get()){chain=false;progress("Полный анализ отменён пользователем.");return;}
-                progress("3/4 · Apktool "+ApktoolEngine.APKTOOL_VERSION+": resources + manifest + полный smali workspace…");
+                stage(3,4,"Apktool "+ApktoolEngine.APKTOOL_VERSION+": resources + manifest + полный smali workspace");
                 try{
                     JSONObject apktool=ApktoolEngine.analyze(this,inputs,app.cancelled);
                     Files.write(app.file("apktool-analysis.json").toPath(),apktool.toString(2).getBytes(StandardCharsets.UTF_8));
@@ -91,7 +101,7 @@ public class FullAnalysisService extends Service {
                 }
 
                 if(app.cancelled.get()){chain=false;progress("Полный анализ отменён пользователем.");return;}
-                progress("4/4 · Lua/JS/Hermes deep + ARM64 deep + Flutter AOT + Cocos correlation…");
+                stage(4,4,"Lua/JS/Hermes deep + ARM64 deep + Flutter AOT + Cocos correlation");
                 try{
                     Python.getInstance().getModule("modkit.mobile.embedded_pipeline").callAttr(
                             "run_workspace",getFilesDir().getPath(),
