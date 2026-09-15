@@ -60,6 +60,12 @@ public class FullAnalysisService extends Service {
             Files.deleteIfExists(app.file(name).toPath());
         }
     }
+    private void invalidateEmbeddedRunOutputs()throws Exception{
+        for(String name:new String[]{"artifact-families.json","embedded-analysis.json","lua-deep.json","hermes-deep.json","native-deep.json","cocos-deep.json","flutter-deep.json","deep-gameplay.json"}){
+            if(app.cancelled.get())throw new java.io.InterruptedIOException("cancelled");
+            Files.deleteIfExists(app.file(name).toPath());
+        }
+    }
 
     /** Chaquopy callback shared with inventory and embedded backends. */
     public final class Progress {
@@ -140,6 +146,7 @@ public class FullAnalysisService extends Service {
 
                 if(app.cancelled.get()){chain=false;progress("Полный анализ отменён пользователем.");return;}
                 stage(4,4,"Lua/JS/Hermes deep + ARM64 deep + Flutter AOT + Cocos correlation");
+                invalidateEmbeddedRunOutputs();
                 try{
                     Python.getInstance().getModule("modkit.mobile.embedded_pipeline").callAttr(
                             "run_workspace",getFilesDir().getPath(),
