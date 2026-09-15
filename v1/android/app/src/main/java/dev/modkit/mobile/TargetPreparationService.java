@@ -13,6 +13,7 @@ import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.PowerManager;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -32,12 +33,12 @@ import java.util.Locale;
 
 /** Copies/records the selected target only; analysis starts later in FullAnalysisService. */
 public class TargetPreparationService extends Service {
-    private static final int NOTE_ID=94;private App app;
+    private static final int NOTE_ID=94;private App app;private PowerManager.WakeLock wake;
     @Override public void onCreate(){super.onCreate();app=(App)getApplication();((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).createNotificationChannel(new NotificationChannel("target-preparation","Подготовка target",NotificationManager.IMPORTANCE_LOW));}
     @Override public IBinder onBind(Intent intent){return null;}
     private Notification note(String text){PendingIntent open=PendingIntent.getActivity(this,NOTE_ID,new Intent(this,TargetSelectionActivity.class),PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);return new Notification.Builder(this,"target-preparation").setSmallIcon(R.drawable.ic_modkit).setContentTitle("ModKit · выбор target").setContentText(text).setContentIntent(open).setOngoing(true).build();}
     private void progress(String text){app.progress(text);((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).notify(NOTE_ID,note(text));}
-    @Override public int onStartCommand(Intent intent,int flags,int startId){startForeground(NOTE_ID,note("Подготовка target…"));getSharedPreferences("state",0).edit().putBoolean("running",true).apply();new Thread(()->{try{String kind=intent==null?"":intent.getStringExtra("kind");if("installed".equals(kind))prepareInstalled(intent.getStringExtra("package"),intent.getStringExtra("label"));else if("apk".equals(kind))prepareApk(intent.getStringExtra("uri"),intent.getStringExtra("display"));else throw new IllegalArgumentException("Неизвестный тип target");}catch(Exception e){try{cleanupFailedPreparation();}catch(Exception cleanup){progress("Target не подготовлен: "+e.getMessage()+" · cleanup: "+cleanup.getMessage());return;}progress(app.cancelled.get()?"Подготовка target отменена. Старый/частичный target очищен.":"Target не подготовлен: "+e.getMessage()+" · частичный target очищен.");}finally{getSharedPreferences("state",0).edit().putBoolean("running",false).apply();app.busy.set(false);app.revision++;stopForeground(true);stopSelf();}},"modkit-target-preparation").start();return START_NOT_STICKY;}
+    @Override public int onStartCommand(Intent intent,int flags,int startId){startForeground(NOTE_ID,note("Подготовка target…"));if(wake==null||!wake.isHeld()){wake=((PowerManager)getSystemService(POWER_SERVICE)).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"ModKit:target-preparation");wake.acquire(30L*60L*1000L);}getSharedPreferences("state",0).edit().putBoolean("running",true).apply();new Thread(()->{try{String kind=intent==null?"":intent.getStringExtra("kind");if("installed".equals(kind))prepareInstalled(intent.getStringExtra("package"),intent.getStringExtra("label"));else if("apk".equals(kind))prepareApk(intent.getStringExtra("uri"),intent.getStringExtra("display"));else throw new IllegalArgumentException("Неизвестный тип target");}catch(Exception e){try{cleanupFailedPreparation();}catch(Exception cleanup){progress("Target не подготовлен: "+e.getMessage()+" · cleanup: "+cleanup.getMessage());return;}progress(app.cancelled.get()?"Подготовка target отменена. Старый/частичный target очищен.":"Target не подготовлен: "+e.getMessage()+" · частичный target очищен.");}finally{if(wake!=null&&wake.isHeld())wake.release();getSharedPreferences("state",0).edit().putBoolean("running",false).apply();app.busy.set(false);app.revision++;stopForeground(true);stopSelf();}},"modkit-target-preparation").start();return START_NOT_STICKY;}
 
     private void writeAtomicJson(String name,JSONObject value)throws Exception{
         File temp=app.file(name+".part"),dest=app.file(name);Files.deleteIfExists(temp.toPath());
