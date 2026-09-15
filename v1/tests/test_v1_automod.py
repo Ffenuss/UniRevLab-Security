@@ -118,6 +118,11 @@ def test_automod_android_surface_uses_existing_fail_closed_build_pipeline():
     assert '"menu_smart_prepare"' in activity
     assert '"menu_preflight"' in activity
     assert '"menu_smart_build_apk"' in activity
+    assert 'pf==null||!pf.optBoolean("readyForAutoBuild")' in activity
+    assert 'build.setEnabled(idle&&prepareCount>0&&preflightReady)' in activity
+    assert 'runtime VA observed' in activity
+    assert 'runtimeVaHex' in activity
+    assert "ProcessLabActivity.class" in activity
     assert "AutoModActivity.class" in auto
     assert "AutoModActivity.class" in full
     assert "AutoModActivity.class" in storage
