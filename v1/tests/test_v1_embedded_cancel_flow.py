@@ -55,10 +55,11 @@ def test_embedded_pipeline_stops_before_next_backend_on_cancel(tmp_path, monkeyp
     assert not (tmp_path / "embedded-analysis.json").exists()
 
 
-def test_full_analysis_passes_cancel_callback_to_embedded_pipeline():
+def test_full_analysis_passes_cancel_callback_to_inventory_and_embedded_pipeline():
     source = (ROOT / "android/app/src/main/java/dev/modkit/mobile/FullAnalysisService.java").read_text(encoding="utf-8")
     assert "public final class Progress" in source
     assert "public boolean isCancelled(){return app.cancelled.get();}" in source
     assert 'getModule("modkit.mobile.embedded_pipeline")' in source
     assert 'app.file("embedded-analysis.json").getPath(),new Progress())' in source
+    assert 'app.file("installed-scan.json").getPath(),new Progress(),false)' in source
     assert 'if(app.cancelled.get()){chain=false;progress("Полный анализ отменён пользователем.");return;}' in source
