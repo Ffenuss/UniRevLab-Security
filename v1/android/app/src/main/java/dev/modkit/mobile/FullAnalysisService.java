@@ -65,6 +65,7 @@ public class FullAnalysisService extends Service {
         for(String name:new String[]{
                 "simple-catalog.json","simple-catalog.json.part","simple-progress.json","simple-progress.json.part",
                 "il2cpp-no-rva-native.json","il2cpp-no-rva-native.json.part","il2cpp-no-rva-native.methods.jsonl","il2cpp-no-rva-native.methods.jsonl.part","il2cpp-no-rva-native.failures.jsonl","il2cpp-no-rva-native.failures.jsonl.part",
+                "menu-result.json","menu-auto-prepare.json","menu-auto-prepare-deep.json","menu-probe-prepare.json","menu-spec.simple-source.json","menu-payload-report.json","menu-apk-report.json",
                 "connected-report.json","connected-report.json.part","connected-report.md","connected-report.md.part"}){
             if(app.cancelled.get())throw new java.io.InterruptedIOException("cancelled");
             Files.deleteIfExists(app.file(name).toPath());
