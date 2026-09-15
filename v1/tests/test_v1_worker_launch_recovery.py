@@ -78,3 +78,14 @@ def test_input_documents_are_not_classified_as_created_outputs():
     assert "menu_runtime_import" not in created_helper
     assert 'if(!"patchpack_build".equals(op)' in patch
     assert 'if(!"native_save_uri".equals(op)' in native
+
+
+def test_new_native_import_clears_all_old_derived_search_disasm_and_xref_evidence():
+    source = _read("NativeWorkspaceActivity.java")
+    helper = source.split("private void clearDerivedForImport()", 1)[1].split("private void deleteCreatedDocument", 1)[0]
+    for name in ("native-search.json", "native-disasm.json", "native-xrefs.json"):
+        assert f'"{name}"' in helper
+    result = source.index("if(request==100)")
+    clear = source.index("clearDerivedForImport();", result)
+    launch = source.index('putExtra("op","native_import")', clear)
+    assert result < clear < launch
