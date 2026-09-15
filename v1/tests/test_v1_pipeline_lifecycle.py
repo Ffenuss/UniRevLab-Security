@@ -50,7 +50,7 @@ def test_full_rerun_invalidates_prepared_automod_and_per_run_evidence_before_tar
     ):
         assert f'"{name}"' in prepared_helper
 
-    run_helper = source.split("private void invalidatePerRunEvidenceState()", 1)[1].split("private void invalidateEmbeddedRunOutputs()", 1)[0]
+    run_helper = source.split("private void invalidatePerRunEvidenceState()", 1)[1].split("private void deleteRunTree", 1)[0]
     for name in (
         "simple-catalog.json",
         "simple-catalog.json.part",
@@ -259,18 +259,27 @@ def test_evidence_service_persists_live_phase_before_heavy_pipeline():
     assert '.put("phase","FINISHED")' in source
 
 
-def test_process_death_only_converts_running_manifest_to_system_interrupted_atomically():
+def test_process_death_recovers_running_manifest_or_orphan_atomic_part_fail_closed():
     source = _read("App.java")
+    helper = source.split("private boolean markInterruptedPipeline()", 1)[1].split("private void deleteInterruptedTargetTree", 1)[0]
 
-    assert 'File part=file("automatic-evidence.json.part")' in source
-    assert 'if(!"RUNNING".equals(value.optString("status")))return;' in source
-    assert '.put("status","FAILED").put("phase","FINISHED")' in source
-    assert '.put("interruptedBySystem",true)' in source
-    assert '.put("error","SYSTEM_INTERRUPTED")' in source
-    assert 'Files.write(part.toPath(),value.toString(2).getBytes(StandardCharsets.UTF_8))' in source
-    assert 'Files.move(part.toPath(),manifest.toPath(),StandardCopyOption.REPLACE_EXISTING)' in source
-    assert 'Files.deleteIfExists(part.toPath())' in source
-    assert 'markInterruptedPipeline();' in source
+    assert 'File part=file("automatic-evidence.json.part"),manifest=file("automatic-evidence.json")' in helper
+    assert "boolean interruptedPublication=part.isFile();" in helper
+    assert "if(interruptedPublication)" in helper
+    assert "Files.readAllBytes(part.toPath())" in helper
+    assert 'if(!interruptedPublication&&!"RUNNING".equals(value.optString("status")))return false;' in helper
+    assert '.put("status","FAILED").put("phase","FINISHED")' in helper
+    assert '.put("interruptedBySystem",true)' in helper
+    assert '.put("error","SYSTEM_INTERRUPTED")' in helper
+    assert 'Files.write(part.toPath(),value.toString(2).getBytes(StandardCharsets.UTF_8))' in helper
+    assert 'Files.move(part.toPath(),manifest.toPath(),StandardCopyOption.REPLACE_EXISTING)' in helper
+    assert "Files.deleteIfExists(manifest.toPath())" in helper
+
+    on_create = source.split("@Override public void onCreate()", 1)[1]
+    assert "boolean pipelineInterrupted=false;" in on_create
+    assert "pipelineInterrupted=markInterruptedPipeline();" in on_create
+    assert "if(wasRunning||pipelineInterrupted)" in on_create
+    assert "if(wasRunning||targetPreparing||pipelineInterrupted)" in on_create
 
 
 def test_target_switch_clears_pipeline_status_temp():
