@@ -34,8 +34,8 @@ import java.util.concurrent.Executors;
 public class AutoModActivity extends AppCompatActivity {
     private static final int BUILD_DOCUMENT=980;
     private App app;
-    private LinearLayout root,candidates;
-    private TextView summary,status,preflight;
+    private LinearLayout root,controlsList,runtimeList,reviewList;
+    private TextView summary,status,preflight,controlsHeading,runtimeHeading,reviewHeading;
     private MaterialButton refresh,prepare,check,build;
     private final Handler handler=new Handler(Looper.getMainLooper());
     private final ExecutorService executor=Executors.newSingleThreadExecutor();
@@ -62,7 +62,7 @@ public class AutoModActivity extends AppCompatActivity {
         super.onCreate(state);app=(App)getApplication();
         ScrollView scroll=new ScrollView(this);root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(dp(14),dp(14),dp(14),dp(24));root.setBackgroundColor(bg());scroll.addView(root);setContentView(scroll);
         TextView title=text("AutoMod / Patch Lab",27);title.setTypeface(null,Typeface.BOLD);root.addView(title);
-        TextView note=text("Fail-closed: в prepare/build проходят только подтверждённые exact locators. Runtime и metadata/no-RVA — corroboration до строгого recovery + binding + preflight.",12);note.setTextColor(muted());root.addView(note);
+        TextView note=text("Fail-closed: executable controls отделены от runtime/read-only и review evidence. В prepare/build проходят только quality-gated exact locators; metadata/no-RVA требует exact recovery + binding + preflight.",12);note.setTextColor(muted());root.addView(note);
         summary=text("",13);root.addView(summary);preflight=text("",12);preflight.setTextColor(muted());root.addView(preflight);status=text("",12);root.addView(status);
 
         LinearLayout planRow=actionRow();refresh=rowButton("Обновить план",planRow,v->rebuildPlan());prepare=rowButton("Exact prepare",planRow,v->startExactPrepare());
@@ -70,10 +70,18 @@ public class AutoModActivity extends AppCompatActivity {
         TextView toolsHeading=text("Инструменты",14);toolsHeading.setTypeface(null,Typeface.BOLD);root.addView(toolsHeading);
         LinearLayout tools=actionRow();rowButton("Runtime",tools,v->startActivity(new Intent(this,ProcessLabActivity.class)));rowButton("Controls",tools,v->startActivity(new Intent(this,MenuBuilderActivity.class).putExtra("focus","autopilot")));rowButton("Patch Pack",tools,v->startActivity(new Intent(this,PatchPackActivity.class)));
 
-        TextView heading=text("Приоритетные кандидаты · нажмите для деталей",16);heading.setTypeface(null,Typeface.BOLD);root.addView(heading);
-        candidates=new LinearLayout(this);candidates.setOrientation(LinearLayout.VERTICAL);root.addView(candidates);
+        controlsHeading=sectionHeading("Готовые controls · только executable/preflight");
+        controlsList=sectionList();
+        runtimeHeading=sectionHeading("Runtime / read-only · нужно дополнительное подтверждение");
+        runtimeList=sectionList();
+        reviewHeading=sectionHeading("Review / audit · не исполняется автоматически");
+        reviewList=sectionList();
         render();if(!app.file("automod-plan.json").isFile()&&app.file("simple-catalog.json").isFile())rebuildPlan();handler.post(poll);
     }
+
+    private TextView sectionHeading(String label){TextView heading=text(label,16);heading.setTypeface(null,Typeface.BOLD);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.setMargins(0,dp(10),0,dp(2));root.addView(heading,lp);return heading;}
+    private LinearLayout sectionList(){LinearLayout list=new LinearLayout(this);list.setOrientation(LinearLayout.VERTICAL);root.addView(list);return list;}
+    private int executableCount(JSONObject plan){return plan==null?0:plan.optInt("executableControlCount",plan.optInt("readyToBuildCount")+plan.optInt("readyForPreflightCount"));}
 
     private boolean canStart(){if(planning){toast("Дождитесь обновления AutoMod-плана");return false;}if(app.busy.get()){toast("Сейчас выполняется другая операция");return false;}if(!app.file("game.apk").isFile()&&!app.file("installed-target.json").isFile()){toast("Target не выбран");return false;}return true;}
     private boolean invalidatePreparedState(){
@@ -87,15 +95,16 @@ public class AutoModActivity extends AppCompatActivity {
     private void rebuildPlan(){
         if(planning){toast("AutoMod-план уже обновляется");return;}if(app.busy.get()){toast("Сейчас выполняется другая операция");return;}if(!app.file("simple-catalog.json").isFile()&&!app.file("game.apk").isFile()){toast("Сначала выполните полный анализ");return;}
         if(!invalidatePreparedState()){status.setText("AutoMod: не удалось инвалидировать старый prepare/preflight · refresh заблокирован fail-closed.");toast("Не удалось очистить старый AutoMod prepare state");render();return;}
-        planning=true;refresh.setEnabled(false);prepare.setEnabled(false);check.setEnabled(false);build.setEnabled(false);status.setText("AutoMod: проверяю Evidence Graph, exact SHA и native recovery…");
-        executor.execute(()->{try{if(!Python.isStarted())Python.start(new AndroidPlatform(this));PyObject result=Python.getInstance().getModule("modkit.mobile.automod_cancellable").callAttr("build_workspace_plan",getFilesDir().getPath(),app.file("automod-plan.json").getPath(),new PlanningProgress());new JSONObject(result.toString());runOnUiThread(()->status.setText("План обновлён · старый prepare/preflight инвалидирован."));}catch(Exception e){runOnUiThread(()->{status.setText("AutoMod: "+e.getMessage());toast("Не удалось обновить план");});}finally{planning=false;runOnUiThread(this::render);}});
+        planning=true;refresh.setEnabled(false);prepare.setEnabled(false);check.setEnabled(false);build.setEnabled(false);status.setText("AutoMod: проверяю Evidence Graph quality gate, exact SHA и native recovery…");
+        executor.execute(()->{try{if(!Python.isStarted())Python.start(new AndroidPlatform(this));PyObject result=Python.getInstance().getModule("modkit.mobile.automod_cancellable").callAttr("build_workspace_plan",getFilesDir().getPath(),app.file("automod-plan.json").getPath(),new PlanningProgress());new JSONObject(result.toString());runOnUiThread(()->status.setText("План обновлён · controls/runtime/review разделены · старый prepare/preflight инвалидирован."));}catch(Exception e){runOnUiThread(()->{status.setText("AutoMod: "+e.getMessage());toast("Не удалось обновить план");});}finally{planning=false;runOnUiThread(this::render);}});
     }
 
     private void startExactPrepare(){
         if(!canStart())return;
         JSONObject plan=read("automod-plan.json");if(plan==null){toast("Сначала обновите AutoMod-план");return;}
-        if(plan.optInt("readyToBuildCount")+plan.optInt("readyForPreflightCount")<=0){toast("Нет кандидатов для prepare/preflight");return;}
-        app.cancelled.set(false);app.busy.set(true);app.progress("AutoMod: exact recovery + Deep/binding/preflight…");
+        if(executableCount(plan)<=0){toast("Нет quality-gated executable controls для prepare/preflight");return;}
+        JSONObject policy=plan.optJSONObject("phase7Policy");if(policy==null||!policy.optBoolean("refinedCatalogRequiresControlCandidate")){toast("Phase 7 quality policy отсутствует. Обновите AutoMod-план.");return;}
+        app.cancelled.set(false);app.busy.set(true);app.progress("AutoMod: quality gate → exact recovery + Deep/binding/preflight…");
         try{startForegroundService(new Intent(this,AutoModPrepareService.class));}
         catch(Exception e){app.busy.set(false);app.revision++;status.setText("AutoMod prepare не запущен: "+e.getMessage());toast("Не удалось запустить Exact prepare");}
     }
@@ -112,8 +121,8 @@ public class AutoModActivity extends AppCompatActivity {
 
     private void chooseBuildDestination(){
         if(!canStart())return;
-        JSONObject plan=read("automod-plan.json");if(plan==null){toast("Сначала обновите AutoMod-план");return;}int ready=plan.optInt("readyToBuildCount")+plan.optInt("readyForPreflightCount");if(ready<=0){toast("Нет локальных кандидатов, допущенных до prepare/preflight");return;}
-        if(!exactPrepareAuditReady()){toast("Exact prepare audit отсутствует, не завершён или не SHA-bound. Сборка fail-closed заблокирована.");return;}
+        JSONObject plan=read("automod-plan.json");if(plan==null){toast("Сначала обновите AutoMod-план");return;}if(executableCount(plan)<=0){toast("Нет quality-gated executable controls, допущенных до prepare/preflight");return;}
+        if(!exactPrepareAuditReady()){toast("Exact prepare audit отсутствует, не завершён, не Phase-7-gated или не SHA-bound. Сборка fail-closed заблокирована.");return;}
         JSONObject pf=read("menu-preflight.json");if(pf==null||!pf.optBoolean("readyForAutoBuild")){toast("Сначала выполните успешный exact prepare/preflight. Сборка fail-closed заблокирована.");return;}
         boolean apkSet=hasApkSet();String mime=apkSet?"application/zip":"application/vnd.android.package-archive";String name=apkSet?"modkit-automod-signed.apks":"modkit-automod-signed.apk";Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT).setType(mime).addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE,name);startActivityForResult(intent,BUILD_DOCUMENT);
     }
@@ -123,20 +132,37 @@ public class AutoModActivity extends AppCompatActivity {
     private String count(JSONObject plan,String key){return String.valueOf(plan==null?0:plan.optInt(key));}
 
     private void render(){
-        JSONObject plan=read("automod-plan.json");JSONObject pf=read("menu-preflight.json");boolean auditReady=exactPrepareAuditReady();if(plan==null){summary.setText("План не построен · выполните полный анализ и обновите план.");candidates.removeAllViews();setButtons(null,pf);return;}
-        summary.setText("BUILD "+count(plan,"readyToBuildCount")+" · PREFLIGHT "+count(plan,"readyForPreflightCount")+" · RUNTIME "+count(plan,"runtimeNeededCount")+" · REVIEW "+count(plan,"reviewCount")+" · AUDIT "+count(plan,"auditOnlyCount")+" · EXCLUDED "+count(plan,"excludedCount")+"\nExact "+count(plan,"exactLocatorCount")+" · recovered RVA "+count(plan,"nativeRecoveredLocatorCount")+" · runtime VA "+count(plan,"runtimeObservedCount")+" · metadata/no-RVA "+count(plan,"metadataIdentityObservedCount")+" · total "+count(plan,"candidateCount"));
-        if(pf==null)preflight.setText("Exact SHA audit: "+(auditReady?"READY":"BLOCK")+" · Preflight: NOT RUN · build BLOCK");else preflight.setText("Exact SHA audit: "+(auditReady?"READY":"BLOCK")+" · Preflight: "+(pf.optBoolean("readyForAutoBuild")?"READY":"BLOCK")+" · controls "+pf.optInt("controlCount",pf.optInt("controls"))+" · blockers "+pf.optInt("blockerCount",pf.optInt("blockers")));
-        candidates.removeAllViews();JSONArray rows=plan.optJSONArray("candidates");int shown=0;if(rows!=null)for(int i=0;i<rows.length()&&shown<16;i++){JSONObject row=rows.optJSONObject(i);if(row==null)continue;String stage=row.optString("stage","REVIEW");if("EXCLUDED".equals(stage)&&shown>=12)continue;candidateCard(row);shown++;}setButtons(plan,pf);
+        JSONObject plan=read("automod-plan.json");JSONObject pf=read("menu-preflight.json");boolean auditReady=exactPrepareAuditReady();
+        if(plan==null){summary.setText("План не построен · выполните полный анализ и обновите план.");clearLanes();setButtons(null,pf);return;}
+        summary.setText("CONTROLS "+count(plan,"executableControlCount")+" · RUNTIME "+count(plan,"runtimeProbeCount")+" · REVIEW "+count(plan,"reviewOnlyCount")+" · AUDIT "+count(plan,"auditOnlyCount")+" · EXCLUDED "+count(plan,"excludedCount")+"\nBUILD "+count(plan,"readyToBuildCount")+" · PREFLIGHT "+count(plan,"readyForPreflightCount")+" · recovered RVA "+count(plan,"nativeRecoveredLocatorCount")+" · runtime VA "+count(plan,"runtimeObservedCount")+" · metadata/no-RVA "+count(plan,"metadataIdentityObservedCount")+" · total "+count(plan,"candidateCount"));
+        if(pf==null)preflight.setText("Phase 7 audit: "+(auditReady?"READY":"BLOCK")+" · Preflight: NOT RUN · build BLOCK");else preflight.setText("Phase 7 audit: "+(auditReady?"READY":"BLOCK")+" · Preflight: "+(pf.optBoolean("readyForAutoBuild")?"READY":"BLOCK")+" · controls "+pf.optInt("controlCount",pf.optInt("controls"))+" · blockers "+pf.optInt("blockerCount",pf.optInt("blockers")));
+        clearLanes();JSONArray rows=plan.optJSONArray("candidates");int controls=0,runtime=0,review=0;
+        if(rows!=null)for(int i=0;i<rows.length();i++){
+            JSONObject row=rows.optJSONObject(i);if(row==null)continue;
+            if(row.optBoolean("executableControl")){if(controls<12){candidateCard(row,controlsList,"CONTROL");controls++;}continue;}
+            if(row.optBoolean("runtimeProbe")||"RUNTIME_NEEDED".equals(row.optString("stage"))){if(runtime<10){candidateCard(row,runtimeList,"RUNTIME");runtime++;}continue;}
+            if(review<12){candidateCard(row,reviewList,"REVIEW");review++;}
+        }
+        controlsHeading.setText("Готовые controls · "+plan.optInt("executableControlCount",controls)+" · exact prepare/preflight");
+        runtimeHeading.setText("Runtime / read-only · "+plan.optInt("runtimeProbeCount",runtime)+" · buildability не повышает");
+        reviewHeading.setText("Review / audit · "+(plan.optInt("reviewOnlyCount")+plan.optInt("auditOnlyCount")+plan.optInt("excludedCount"))+" · не исполняется автоматически");
+        if(controls==0)addEmpty(controlsList,"Нет controls, прошедших Evidence Graph quality gate.");
+        if(runtime==0)addEmpty(runtimeList,"Нет кандидатов, требующих runtime-подтверждения.");
+        if(review==0)addEmpty(reviewList,"Нет review/audit evidence в отображаемой выборке.");
+        setButtons(plan,pf);
     }
 
-    private void candidateCard(JSONObject row){
+    private void clearLanes(){controlsList.removeAllViews();runtimeList.removeAllViews();reviewList.removeAllViews();}
+    private void addEmpty(LinearLayout target,String value){TextView empty=text(value,12);empty.setTextColor(muted());target.addView(empty);}
+
+    private void candidateCard(JSONObject row,LinearLayout target,String lane){
         MaterialCardView card=new MaterialCardView(this);card.setCardBackgroundColor(surface());card.setStrokeColor(outline());card.setStrokeWidth(dp(1));card.setRadius(dp(12));LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(dp(10),dp(7),dp(10),dp(8));card.addView(box);TextView h=text(row.optString("title","evidence"),15);h.setTypeface(null,Typeface.BOLD);box.addView(h);
-        String domain=row.optString("gameplayDomain","");String locator="";JSONObject loc=row.optJSONObject("locator");if(loc!=null){Object rva=loc.opt("rva");if(rva!=null&&rva!=JSONObject.NULL&&!"0".equals(String.valueOf(rva))&&!"0x0".equalsIgnoreCase(String.valueOf(rva)))locator=" · RVA "+String.valueOf(rva);else if(loc.has("entry"))locator=" · "+loc.optString("entry");}
-        JSONObject recovered=row.optJSONObject("nativeRvaRecovery");String recoveredText=recovered!=null&&row.optBoolean("nativeRvaRecovered")?" · RECOVERED":"";JSONObject runtime=row.optJSONObject("runtimeObservation");String runtimeText=runtime!=null&&runtime.optBoolean("mapped")?" · RUNTIME":"";JSONObject il2cpp=row.optJSONObject("il2cppStructural");String il2cppText=il2cpp==null?"":" · IL2CPP";JSONObject identity=row.optJSONObject("metadataIdentity");String identityText=identity==null?"":" · META";
-        TextView meta=text(row.optString("stage","REVIEW")+(domain.isEmpty()?"":" · "+domain)+locator+recoveredText+runtimeText+il2cppText+identityText,11);meta.setTextColor(muted());box.addView(meta);String reason=row.optString("reason","");if(!reason.isEmpty())box.addView(text(reason,12));card.setOnClickListener(v->new AlertDialog.Builder(this).setTitle(row.optString("title","Evidence details")).setMessage(row.toString()).setPositiveButton("OK",null).show());LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.setMargins(0,dp(3),0,dp(3));candidates.addView(card,lp);
+        String domain=row.optString("gameplayDomain","");String locator="";JSONObject loc=row.optJSONObject("locator");JSONObject resolved=row.optJSONObject("resolvedLocator");Object rva=loc==null?null:loc.opt("rva");if((rva==null||rva==JSONObject.NULL||"0".equals(String.valueOf(rva))||"0x0".equalsIgnoreCase(String.valueOf(rva)))&&resolved!=null)rva=resolved.opt("rva");if(rva!=null&&rva!=JSONObject.NULL&&!"0".equals(String.valueOf(rva))&&!"0x0".equalsIgnoreCase(String.valueOf(rva)))locator=" · RVA "+String.valueOf(rva);else if(loc!=null&&loc.has("entry"))locator=" · "+loc.optString("entry");
+        JSONObject recovered=row.optJSONObject("nativeRvaRecovery");String recoveredText=recovered!=null&&row.optBoolean("nativeRvaRecovered")?" · RECOVERED":"";JSONObject runtime=row.optJSONObject("runtimeObservation");String runtimeText=runtime!=null&&runtime.optBoolean("mapped")?" · RUNTIME":"";JSONObject il2cpp=row.optJSONObject("il2cppStructural");String il2cppText=il2cpp==null?"":" · IL2CPP";JSONObject identity=row.optJSONObject("metadataIdentity");String identityText=identity==null?"":" · META";String tier=row.optString("evidenceTier","");String quality=tier.isEmpty()?"":" · "+tier;
+        TextView meta=text(lane+" · "+row.optString("stage","REVIEW")+quality+(domain.isEmpty()?"":" · "+domain)+locator+recoveredText+runtimeText+il2cppText+identityText,11);meta.setTextColor(muted());box.addView(meta);String reason=row.optString("reason","");if(!reason.isEmpty())box.addView(text(reason,12));card.setOnClickListener(v->new AlertDialog.Builder(this).setTitle(row.optString("title","Evidence details")).setMessage(row.toString()).setPositiveButton("OK",null).show());LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.setMargins(0,dp(3),0,dp(3));target.addView(card,lp);
     }
 
-    private void setButtons(JSONObject plan,JSONObject pf){boolean idle=!app.busy.get()&&!planning;int prepareCount=plan==null?0:plan.optInt("readyToBuildCount")+plan.optInt("readyForPreflightCount");refresh.setEnabled(idle);prepare.setEnabled(idle&&prepareCount>0);check.setEnabled(idle&&app.file("menu-spec.json").isFile());boolean preflightReady=pf!=null&&pf.optBoolean("readyForAutoBuild");build.setEnabled(idle&&prepareCount>0&&preflightReady&&exactPrepareAuditReady());}
+    private void setButtons(JSONObject plan,JSONObject pf){boolean idle=!app.busy.get()&&!planning;int prepareCount=executableCount(plan);refresh.setEnabled(idle);prepare.setEnabled(idle&&prepareCount>0);check.setEnabled(idle&&app.file("menu-spec.json").isFile()&&exactPrepareAuditReady());boolean preflightReady=pf!=null&&pf.optBoolean("readyForAutoBuild");build.setEnabled(idle&&prepareCount>0&&preflightReady&&exactPrepareAuditReady());}
     private final Runnable poll=new Runnable(){public void run(){if(revision!=app.revision){revision=app.revision;render();if(!planning)status.setText(app.status==null?"":app.status);}else if(app.busy.get()&&!planning)status.setText(app.status==null?"":app.status);handler.postDelayed(this,600);}};
     @Override protected void onResume(){super.onResume();render();}
     @Override protected void onDestroy(){handler.removeCallbacks(poll);executor.shutdownNow();super.onDestroy();}
