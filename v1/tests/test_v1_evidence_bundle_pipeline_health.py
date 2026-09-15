@@ -28,7 +28,7 @@ def test_bundle_keeps_evidence_hashing_and_excludes_raw_target_binaries():
     assert '"hashes.sha256"' in source
 
 
-def test_bundle_export_fails_closed_while_analysis_is_running():
+def test_bundle_export_requires_terminal_pipeline_state_and_blocks_running_or_missing_manifest():
     source = Path(
         "android/app/src/main/java/dev/modkit/mobile/EvidenceBundleExporter.java"
     ).read_text(encoding="utf-8")
@@ -36,8 +36,12 @@ def test_bundle_export_fails_closed_while_analysis_is_running():
     assert 'static void ensureExportable(Context context)' in source
     assert 'app.busy.get()' in source
     assert '"RUNNING".equals(pipeline.optString("status"))' in source
+    assert 'if (pipeline == null)' in source
+    assert "Нет завершённого pipeline manifest" in source
+    for status in ("SUCCESS", "PARTIAL", "FAILED", "CANCELLED"):
+        assert f'"{status}".equals(status)' in source
+    assert "Pipeline state не является terminal" in source
     assert 'ensureExportable(context);' in source
-    assert "Анализ ещё выполняется" in source
 
 
 def test_bundle_streaming_loops_are_interruptible():
@@ -75,7 +79,7 @@ def test_report_center_preflights_before_building_connected_report():
     assert 'manifest.optString("pipelineStatus","UNKNOWN")' in source
 
 
-def test_report_center_propagates_cancel_to_python_and_zip_worker():
+def test_report_center_propagates_cancel_and_removes_failed_saf_destination():
     source = Path(
         "android/app/src/main/java/dev/modkit/mobile/ReportCenterActivity.java"
     ).read_text(encoding="utf-8")
@@ -85,5 +89,7 @@ def test_report_center_propagates_cancel_to_python_and_zip_worker():
     assert "exportCancelled.get()||Thread.currentThread().isInterrupted()" in source
     assert 'callAttr("build_connected_report"' in source
     assert "new ExportProgress()" in source
+    assert "DocumentsContract.deleteDocument(getContentResolver(),uri)" in source
+    assert "deleteFailedDestination(uri);" in source
     assert "Экспорт отменён." in source
     assert "worker.shutdownNow()" in source
