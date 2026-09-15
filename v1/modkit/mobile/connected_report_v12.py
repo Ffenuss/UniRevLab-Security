@@ -4,10 +4,15 @@ Runtime procfs layout, metadata/ELF structural checks and metadata identity are
 corroboration only. Exact CodeGenModule native recovery may prove an RVA, but the
 report never mutates the original actionable/buildable state; normal binding and
 preflight remain mandatory before a patch can be built.
+
+No-RVA recovery failures stay file-backed. The report streams that file and retains
+only blockers which can be tied to report findings by exact method id or exact fully
+qualified declaring-type + method identity.
 """
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +22,7 @@ SCHEMA = "modkit-connected-report-1.2"
 _IL2CPP_CROSSCHECK_SCHEMA = "modkit-il2cpp-crosscheck-1.0"
 _METADATA_IDENTITY_SCHEMA = "modkit-il2cpp-metadata-identity-1.1"
 _NATIVE_RECOVERY_SCHEMA = "modkit-il2cpp-no-rva-native-1.0"
+_NATIVE_SUCCESS = "NATIVE_RVA_RECOVERED_EXACT_CODEGENMODULE"
 
 
 def _json(path: Path) -> dict[str, Any]:
@@ -179,62 +185,69 @@ def _ensure_il2cpp_crosscheck(root: Path) -> dict[str, Any]:
     if inputs_available:
         outputs = [summary_path] if existing.get("error") else [summary_path, rows_path]
         if existing and (existing.get("schema") == _IL2CPP_CROSSCHECK_SCHEMA or existing.get("error")) and _fresh(outputs, inputs):
-            result = dict(existing);result["freshnessVerified"] = True;result["sourceInputsAvailable"] = True;return result
+            result = dict(existing); result["freshnessVerified"] = True; result["sourceInputsAvailable"] = True; return result
         try:
-            summary_path.unlink(missing_ok=True);rows_path.unlink(missing_ok=True)
+            summary_path.unlink(missing_ok=True); rows_path.unlink(missing_ok=True)
             from modkit.mobile.il2cpp_crosscheck import run_crosscheck
-            result = dict(run_crosscheck(metadata, library, methods, summary_path, rows_path));result["freshnessVerified"] = True;result["sourceInputsAvailable"] = True;return result
+            result = dict(run_crosscheck(metadata, library, methods, summary_path, rows_path)); result["freshnessVerified"] = True; result["sourceInputsAvailable"] = True; return result
         except Exception as exc:
             failure = {"schema":"modkit-il2cpp-crosscheck-error-1.0","engine":"il2cpp.structural-crosscheck-embedded","error":str(exc),"freshnessVerified":True,"sourceInputsAvailable":True,"promotesBuildability":False,"confirmsMethodToRvaAssociation":False}
-            try: summary_path.write_text(json.dumps(failure,ensure_ascii=False,indent=2),encoding="utf-8")
+            try: summary_path.write_text(json.dumps(failure, ensure_ascii=False, indent=2), encoding="utf-8")
             except Exception: pass
             return failure
     if existing:
-        result = dict(existing);result["freshnessVerified"] = False;result["sourceInputsAvailable"] = False;return result
+        result = dict(existing); result["freshnessVerified"] = False; result["sourceInputsAvailable"] = False; return result
     return {}
 
 
 def _ensure_metadata_identity(root: Path) -> dict[str, Any]:
     metadata, methods = root / "metadata.bin", root / "analysis.methods.jsonl"
     summary_path, rows_path = root / "il2cpp-metadata-identity.json", root / "il2cpp-metadata-identity.methods.jsonl"
-    existing = _json(summary_path);inputs = [metadata, methods];inputs_available = all(path.is_file() for path in inputs)
+    existing = _json(summary_path); inputs = [metadata, methods]; inputs_available = all(path.is_file() for path in inputs)
     if inputs_available:
         outputs = [summary_path] if existing.get("error") else [summary_path, rows_path]
         if existing and (existing.get("schema") == _METADATA_IDENTITY_SCHEMA or existing.get("error")) and _fresh(outputs, inputs):
-            result = dict(existing);result["freshnessVerified"] = True;result["sourceInputsAvailable"] = True;return result
+            result = dict(existing); result["freshnessVerified"] = True; result["sourceInputsAvailable"] = True; return result
         try:
-            summary_path.unlink(missing_ok=True);rows_path.unlink(missing_ok=True)
+            summary_path.unlink(missing_ok=True); rows_path.unlink(missing_ok=True)
             from modkit.mobile.il2cpp_metadata_identity import build_workspace_identity
-            result = dict(build_workspace_identity(root, summary_path));result["freshnessVerified"] = True;result["sourceInputsAvailable"] = True;return result
+            result = dict(build_workspace_identity(root, summary_path)); result["freshnessVerified"] = True; result["sourceInputsAvailable"] = True; return result
         except Exception as exc:
             failure = {"schema":"modkit-il2cpp-metadata-identity-error-1.1","engine":"il2cpp.metadata-identity-embedded","error":str(exc),"freshnessVerified":True,"sourceInputsAvailable":True,"addressResolver":False,"actionable":False,"promotesBuildability":False}
-            try: summary_path.write_text(json.dumps(failure,ensure_ascii=False,indent=2),encoding="utf-8")
+            try: summary_path.write_text(json.dumps(failure, ensure_ascii=False, indent=2), encoding="utf-8")
             except Exception: pass
             return failure
     if existing:
-        result = dict(existing);result["freshnessVerified"] = False;result["sourceInputsAvailable"] = False;return result
+        result = dict(existing); result["freshnessVerified"] = False; result["sourceInputsAvailable"] = False; return result
     return {}
 
 
 def _ensure_native_recovery(root: Path) -> dict[str, Any]:
     metadata, library, methods = root / "metadata.bin", root / "library.so", root / "analysis.methods.jsonl"
-    summary_path, rows_path = root / "il2cpp-no-rva-native.json", root / "il2cpp-no-rva-native.methods.jsonl"
-    existing = _json(summary_path);inputs = [metadata, library, methods];inputs_available = all(path.is_file() for path in inputs)
+    summary_path = root / "il2cpp-no-rva-native.json"
+    rows_path = root / "il2cpp-no-rva-native.methods.jsonl"
+    failures_path = root / "il2cpp-no-rva-native.failures.jsonl"
+    existing = _json(summary_path); inputs = [metadata, library, methods]; inputs_available = all(path.is_file() for path in inputs)
     if inputs_available:
-        outputs = [summary_path] if existing.get("error") else [summary_path, rows_path]
-        if existing and (existing.get("schema") == _NATIVE_RECOVERY_SCHEMA or existing.get("error")) and _fresh(outputs, inputs):
-            result = dict(existing);result["freshnessVerified"] = True;result["sourceInputsAvailable"] = True;return result
+        if existing.get("error"):
+            outputs = [summary_path]
+            current_format = True
+        else:
+            outputs = [summary_path, rows_path, failures_path]
+            current_format = existing.get("schema") == _NATIVE_RECOVERY_SCHEMA and existing.get("failureRowsFile") == failures_path.name and bool(existing.get("failuresAreFileBacked"))
+        if existing and (existing.get("error") or current_format) and _fresh(outputs, inputs):
+            result = dict(existing); result["freshnessVerified"] = True; result["sourceInputsAvailable"] = True; return result
         try:
-            summary_path.unlink(missing_ok=True);rows_path.unlink(missing_ok=True)
+            summary_path.unlink(missing_ok=True); rows_path.unlink(missing_ok=True); failures_path.unlink(missing_ok=True)
             from modkit.mobile.il2cpp_no_rva_native import recover_workspace
-            result = dict(recover_workspace(root, summary_path));result["freshnessVerified"] = True;result["sourceInputsAvailable"] = True;return result
+            result = dict(recover_workspace(root, summary_path)); result["freshnessVerified"] = True; result["sourceInputsAvailable"] = True; return result
         except Exception as exc:
             failure = {"schema":"modkit-il2cpp-no-rva-native-error-1.0","engine":"il2cpp.codegenmodule-native-recovery","error":str(exc),"freshnessVerified":True,"sourceInputsAvailable":True,"addressResolver":True,"actionable":False,"buildable":False,"promotesBuildability":False}
-            try: summary_path.write_text(json.dumps(failure,ensure_ascii=False,indent=2),encoding="utf-8")
+            try: summary_path.write_text(json.dumps(failure, ensure_ascii=False, indent=2), encoding="utf-8")
             except Exception: pass
             return failure
     if existing:
-        result = dict(existing);result["freshnessVerified"] = False;result["sourceInputsAvailable"] = False;return result
+        result = dict(existing); result["freshnessVerified"] = False; result["sourceInputsAvailable"] = False; return result
     return {}
 
 
@@ -258,176 +271,387 @@ def _safe_identity_conflict(row: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _identity_indexes(rows: list[dict[str, Any]]):
-    by_id: dict[str, dict[str, Any]] = {};by_pair: dict[tuple[str,str],list[dict[str,Any]]] = {};by_name: dict[str,list[dict[str,Any]]] = {};conflicts_by_id: dict[str,dict[str,Any]] = {}
+    by_id: dict[str, dict[str, Any]] = {}
+    by_pair: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    by_name: dict[str, list[dict[str, Any]]] = {}
+    conflicts_by_id: dict[str, dict[str, Any]] = {}
     for raw in rows:
-        if not isinstance(raw,dict): continue
-        row_id = raw.get("id");conflict = _safe_identity_conflict(raw)
+        if not isinstance(raw, dict):
+            continue
+        row_id = raw.get("id")
+        conflict = _safe_identity_conflict(raw)
         if conflict is not None:
-            if row_id not in (None,""): conflicts_by_id[str(row_id)] = conflict
+            if row_id not in (None, ""):
+                conflicts_by_id[str(row_id)] = conflict
             continue
         safe = _safe_identity(raw)
-        if safe is None: continue
-        if row_id not in (None,""): by_id[str(row_id)] = safe
-        method = _norm_name(safe.get("methodName"));cls = _norm_class(safe.get("class"))
-        if method: by_name.setdefault(method,[]).append(safe)
+        if safe is None:
+            continue
+        if row_id not in (None, ""):
+            by_id[str(row_id)] = safe
+        method = _norm_name(safe.get("methodName")); cls = _norm_class(safe.get("class"))
+        if method:
+            by_name.setdefault(method, []).append(safe)
         if method and cls:
-            by_pair.setdefault((cls,method),[]).append(safe);short = cls.rsplit(".",1)[-1]
-            if short != cls: by_pair.setdefault((short,method),[]).append(safe)
-    return by_id,by_pair,by_name,conflicts_by_id
+            by_pair.setdefault((cls, method), []).append(safe)
+    return by_id, by_pair, by_name, conflicts_by_id
 
 
 def _safe_native(row: dict[str, Any]) -> dict[str, Any] | None:
     rva = _number(row.get("rva"))
-    if str(row.get("status") or "") != "NATIVE_RVA_RECOVERED_EXACT_CODEGENMODULE" or rva is None or rva <= 0:
+    if str(row.get("status") or "") != _NATIVE_SUCCESS or rva is None or rva <= 0:
         return None
     if not bool(row.get("addressConfirmed")) or not bool(row.get("associationConfirmed")) or not bool(row.get("uniqueExecutablePointer")) or bool(row.get("promotesBuildability")):
         return None
     return {"engine":"il2cpp.codegenmodule-native-recovery","status":row.get("status"),"metadataMethodId":row.get("metadataMethodId"),"metadataToken":row.get("metadataToken"),"image":row.get("image"),"class":row.get("class"),"methodName":row.get("methodName"),"rva":rva,"rvaHex":row.get("rvaHex") or f"0x{rva:x}","addressConfirmed":True,"associationConfirmed":True,"uniqueExecutablePointer":True,"codeGenModuleMethodCount":row.get("codeGenModuleMethodCount"),"moduleResolution":row.get("moduleResolution"),"identityProof":row.get("identityProof"),"actionable":False,"buildable":False,"promotesBuildability":False,"mayEnterPreflight":True}
 
 
+def _safe_native_blocker(row: dict[str, Any]) -> dict[str, Any] | None:
+    status = str(row.get("status") or "")
+    if not status.startswith("NATIVE_RVA_") or status == _NATIVE_SUCCESS:
+        return None
+    if bool(row.get("addressConfirmed")) or bool(row.get("associationConfirmed")) or bool(row.get("actionable")) or bool(row.get("buildable")) or bool(row.get("promotesBuildability")):
+        return None
+    blockers = row.get("blockers") if isinstance(row.get("blockers"), list) else []
+    return {
+        "engine": "il2cpp.codegenmodule-native-recovery",
+        "status": status,
+        "metadataMethodId": row.get("metadataMethodId") if row.get("metadataMethodId") not in (None, "") else row.get("id"),
+        "metadataToken": row.get("metadataToken"),
+        "image": row.get("image"),
+        "class": row.get("class"),
+        "methodName": row.get("methodName"),
+        "blockers": blockers,
+        "moduleResolution": row.get("moduleResolution"),
+        "codeGenModuleCandidateCount": row.get("codeGenModuleCandidateCount"),
+        "pointerStatus": row.get("pointerStatus"),
+        "addressConfirmed": False,
+        "associationConfirmed": False,
+        "actionable": False,
+        "buildable": False,
+        "promotesBuildability": False,
+    }
+
+
 def _native_indexes(rows: list[dict[str, Any]]):
-    by_id: dict[str,dict[str,Any]] = {};by_pair: dict[tuple[str,str],list[dict[str,Any]]] = {}
+    by_id: dict[str, dict[str, Any]] = {}
+    by_pair: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for raw in rows:
-        if not isinstance(raw,dict): continue
+        if not isinstance(raw, dict):
+            continue
         safe = _safe_native(raw)
-        if safe is None: continue
-        mid = raw.get("metadataMethodId") if raw.get("metadataMethodId") not in (None,"") else raw.get("id")
-        if mid not in (None,""): by_id[str(mid)] = safe
-        method = _norm_name(safe.get("methodName"));cls = _norm_class(safe.get("class"))
+        if safe is None:
+            continue
+        mid = raw.get("metadataMethodId") if raw.get("metadataMethodId") not in (None, "") else raw.get("id")
+        if mid not in (None, ""):
+            by_id[str(mid)] = safe
+        method = _norm_name(safe.get("methodName")); cls = _norm_class(safe.get("class"))
         if method and cls:
-            by_pair.setdefault((cls,method),[]).append(safe);short = cls.rsplit(".",1)[-1]
-            if short != cls: by_pair.setdefault((short,method),[]).append(safe)
-    return by_id,by_pair
+            by_pair.setdefault((cls, method), []).append(safe)
+    return by_id, by_pair
 
 
 def _finding_rva(finding: dict[str, Any]) -> str:
     locator = finding.get("locator")
-    return _norm_hex(locator.get("rva")) if isinstance(locator,dict) else ""
+    return _norm_hex(locator.get("rva")) if isinstance(locator, dict) else ""
 
 
 def _finding_method_id(finding: dict[str, Any]) -> str:
     locator = finding.get("locator")
-    if isinstance(locator,dict):
-        for key in ("methodId","metadataMethodId","methodIndex"):
-            if locator.get(key) not in (None,""): return str(locator.get(key))
+    if isinstance(locator, dict):
+        for key in ("methodId", "metadataMethodId", "methodIndex"):
+            if locator.get(key) not in (None, ""):
+                return str(locator.get(key))
     linked = finding.get("linkedMethods")
-    if isinstance(linked,list) and len(linked)==1 and isinstance(linked[0],dict):
-        for key in ("id","methodId","metadataMethodId"):
-            if linked[0].get(key) not in (None,""): return str(linked[0].get(key))
+    if isinstance(linked, list) and len(linked) == 1 and isinstance(linked[0], dict):
+        for key in ("id", "methodId", "metadataMethodId"):
+            if linked[0].get(key) not in (None, ""):
+                return str(linked[0].get(key))
     return ""
 
 
-def _finding_class_method(finding: dict[str, Any]) -> tuple[str,str]:
+def _finding_class_method(finding: dict[str, Any]) -> tuple[str, str]:
     locator = finding.get("locator")
-    if not isinstance(locator,dict): return "",""
-    return _norm_class(locator.get("class") or locator.get("className")), _norm_name(locator.get("method") or locator.get("methodName"))
+    if isinstance(locator, dict):
+        cls = _norm_class(locator.get("class") or locator.get("className"))
+        method = _norm_name(locator.get("method") or locator.get("methodName"))
+        if cls or method:
+            return cls, method
+    linked = finding.get("linkedMethods")
+    if isinstance(linked, list) and len(linked) == 1 and isinstance(linked[0], dict):
+        row = linked[0]
+        return _norm_class(row.get("class") or row.get("cls") or row.get("declaringType")), _norm_name(row.get("name") or row.get("method") or row.get("methodName"))
+    return "", ""
 
 
-def _match_pair(index: dict[tuple[str,str],list[dict[str,Any]]], cls: str, method: str) -> dict[str,Any] | None:
-    if not cls or not method: return None
-    matches = index.get((cls,method),[])
-    if len(matches)==1: return matches[0]
-    short = cls.rsplit(".",1)[-1]
-    if short != cls:
-        matches = index.get((short,method),[])
-        if len(matches)==1: return matches[0]
+def _match_pair(index: dict[tuple[str, str], list[dict[str, Any]]], cls: str, method: str) -> dict[str, Any] | None:
+    if not cls or not method:
+        return None
+    matches = index.get((cls, method), [])
+    return matches[0] if len(matches) == 1 else None
+
+
+def _identity_compatible(row: dict[str, Any], cls: str, method: str) -> bool:
+    row_cls = _norm_class(row.get("class")); row_method = _norm_name(row.get("methodName"))
+    if cls and row_cls != cls:
+        return False
+    if method and row_method != method:
+        return False
+    return True
+
+
+def _native_for_finding(finding: dict[str, Any], by_id: dict[str, dict[str, Any]], by_pair: dict[tuple[str, str], list[dict[str, Any]]]) -> dict[str, Any] | None:
+    method_id = _finding_method_id(finding); cls, method = _finding_class_method(finding)
+    if method_id:
+        row = by_id.get(method_id)
+        return row if isinstance(row, dict) and _identity_compatible(row, cls, method) else None
+    return _match_pair(by_pair, cls, method)
+
+
+def _relevant_native_keys(findings: list[dict[str, Any]]) -> tuple[set[str], set[tuple[str, str]]]:
+    ids: set[str] = set(); pairs: set[tuple[str, str]] = set()
+    for finding in findings:
+        if not isinstance(finding, dict) or _finding_rva(finding):
+            continue
+        mid = _finding_method_id(finding); cls, method = _finding_class_method(finding)
+        if mid:
+            ids.add(mid)
+        if cls and method:
+            pairs.add((cls, method))
+    return ids, pairs
+
+
+def _stream_native_blockers(path: Path, findings: list[dict[str, Any]]) -> tuple[dict[str, dict[str, Any]], dict[tuple[str, str], list[dict[str, Any]]]]:
+    wanted_ids, wanted_pairs = _relevant_native_keys(findings)
+    by_id: dict[str, dict[str, Any]] = {}
+    by_pair: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    if not path.is_file() or (not wanted_ids and not wanted_pairs):
+        return by_id, by_pair
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as source:
+            for line in source:
+                if not line.strip():
+                    continue
+                try:
+                    raw = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(raw, dict):
+                    continue
+                safe = _safe_native_blocker(raw)
+                if safe is None:
+                    continue
+                mid_value = safe.get("metadataMethodId")
+                mid = str(mid_value) if mid_value not in (None, "") else ""
+                cls = _norm_class(safe.get("class")); method = _norm_name(safe.get("methodName"))
+                if mid and mid in wanted_ids:
+                    by_id[mid] = safe
+                if cls and method and (cls, method) in wanted_pairs:
+                    by_pair.setdefault((cls, method), []).append(safe)
+    except OSError:
+        return {}, {}
+    return by_id, by_pair
+
+
+def _identity_for_finding(finding: dict[str, Any], by_id, by_pair, by_name) -> dict[str, Any] | None:
+    method_id = _finding_method_id(finding); cls, method = _finding_class_method(finding)
+    if method_id:
+        row = by_id.get(method_id)
+        if isinstance(row, dict) and _identity_compatible(row, cls, method):
+            return row
+        return None
+    row = _match_pair(by_pair, cls, method)
+    if row is not None:
+        return row
+    if method:
+        name_matches = by_name.get(method, [])
+        # Name-only evidence may be used only when the evidence itself does not
+        # claim qualified/token identity. Strong identity must match full class.
+        weak = [item for item in name_matches if not item.get("metadataQualifiedMethodPresent") and not item.get("metadataTokenConfirmed")]
+        if len(weak) == 1:
+            return weak[0]
     return None
 
 
 def _append_artifact_guide(report: dict[str, Any], root: Path) -> None:
     guide = report.get("artifactGuide")
-    if not isinstance(guide,list): guide=[];report["artifactGuide"]=guide
-    present={str(row.get("file")) for row in guide if isinstance(row,dict)}
-    specs=[
-        ("runtime-session.json","Read-only procfs runtime snapshot","PID/UID, threads, file mappings and observed module load bases."),
-        ("runtime-correlation.json","Static RVA → observed runtime VA correlation","Runtime layout corroboration; not proof of method execution or patch safety."),
-        ("il2cpp-crosscheck.json","Independent IL2CPP metadata + ELF structural summary","Checks metadata layout and executable ELF ranges without claiming an independent CodeRegistration mapping."),
-        ("il2cpp-crosscheck.methods.jsonl","Per-method IL2CPP structural cross-check","Shows independent method-name and executable-range evidence."),
-        ("il2cpp-metadata-identity.json","No-RVA IL2CPP metadata identity summary","Confirms method/token identity while leaving native address unresolved."),
-        ("il2cpp-metadata-identity.methods.jsonl","Per-method no-RVA metadata identity","Separates token, Class::Method, name-only, conflict and unresolved evidence."),
-        ("il2cpp-no-rva-native.json","Exact no-RVA native recovery summary","Reports CodeGenModule recovery after exact metadata token-domain and executable-pointer proof."),
-        ("il2cpp-no-rva-native.methods.jsonl","Recovered native RVA per-method evidence","Use only rows with exact MethodDef identity, exact module count and unique executable method pointer; still requires binding/preflight."),
+    if not isinstance(guide, list):
+        guide = []; report["artifactGuide"] = guide
+    present = {str(row.get("file")) for row in guide if isinstance(row, dict)}
+    specs = [
+        ("runtime-session.json", "Read-only procfs runtime snapshot", "PID/UID, threads, file mappings and observed module load bases."),
+        ("runtime-correlation.json", "Static RVA → observed runtime VA correlation", "Runtime layout corroboration; not proof of method execution or patch safety."),
+        ("il2cpp-crosscheck.json", "Independent IL2CPP metadata + ELF structural summary", "Checks metadata layout and executable ELF ranges without claiming an independent CodeRegistration mapping."),
+        ("il2cpp-crosscheck.methods.jsonl", "Per-method IL2CPP structural cross-check", "Shows independent method-name and executable-range evidence."),
+        ("il2cpp-metadata-identity.json", "No-RVA IL2CPP metadata identity summary", "Confirms method/token identity while leaving native address unresolved."),
+        ("il2cpp-metadata-identity.methods.jsonl", "Per-method no-RVA metadata identity", "Separates token, Class::Method, name-only, conflict and unresolved evidence."),
+        ("il2cpp-no-rva-native.json", "Exact no-RVA native recovery summary", "Reports CodeGenModule recovery after exact metadata token-domain and executable-pointer proof."),
+        ("il2cpp-no-rva-native.methods.jsonl", "Recovered native RVA per-method evidence", "Contains exact recoveries only; each recovered locator still requires binding/preflight."),
+        ("il2cpp-no-rva-native.failures.jsonl", "No-RVA native recovery blocker provenance", "File-backed unresolved reasons: identity/token conflict, ambiguous module, missing/non-executable/shared pointer and other blockers."),
     ]
-    for name,purpose,use in specs:
-        if name in present: continue
-        path=root/name;guide.append({"file":name,"available":path.exists(),"bytes":path.stat().st_size if path.is_file() else None,"purpose":purpose,"whenToUse":use})
+    for name, purpose, use in specs:
+        if name in present:
+            continue
+        path = root / name
+        guide.append({"file":name,"available":path.exists(),"bytes":path.stat().st_size if path.is_file() else None,"purpose":purpose,"whenToUse":use})
 
 
 def _append_markdown(path: Path, report: dict[str, Any]) -> None:
-    if not path.is_file(): path.write_text("# ModKit connected report\n",encoding="utf-8")
-    lines=["","## Runtime / IL2CPP corroboration","",f"- Runtime-observed findings: {report.get('runtimeObservedFindings',0)}",f"- IL2CPP structural findings: {report.get('il2cppStructuralFindings',0)}",f"- IL2CPP metadata+executable-range both present: {report.get('il2cppStructuralBothFindings',0)}",f"- No-RVA metadata identity confirmed: {report.get('metadataIdentityConfirmedFindings',0)}",f"- No-RVA qualified class+method confirmed: {report.get('metadataQualifiedIdentityFindings',0)}",f"- No-RVA token identity confirmed: {report.get('metadataTokenIdentityFindings',0)}",f"- No-RVA token conflicts (blocked): {report.get('metadataTokenConflictFindings',0)}",f"- Exact native RVA recovered: {report.get('nativeRvaRecoveredFindings',0)}","","> Runtime VA is observed module-layout evidence, not proof that the method executed.","","> Metadata identity never invents an RVA. Token/name/class disagreement is blocked fail-closed.","","> Native recovery reports an address only after exact MethodDef identity, exact CodeGenModule count and unique executable pointer proof. Recovered RVA does not make a finding buildable; binding/preflight are still required.",""]
+    if not path.is_file():
+        path.write_text("# ModKit connected report\n", encoding="utf-8")
+    lines = [
+        "", "## Runtime / IL2CPP corroboration", "",
+        f"- Runtime-observed findings: {report.get('runtimeObservedFindings', 0)}",
+        f"- IL2CPP structural findings: {report.get('il2cppStructuralFindings', 0)}",
+        f"- IL2CPP metadata+executable-range both present: {report.get('il2cppStructuralBothFindings', 0)}",
+        f"- No-RVA metadata identity confirmed: {report.get('metadataIdentityConfirmedFindings', 0)}",
+        f"- No-RVA qualified class+method confirmed: {report.get('metadataQualifiedIdentityFindings', 0)}",
+        f"- No-RVA token identity confirmed: {report.get('metadataTokenIdentityFindings', 0)}",
+        f"- No-RVA token conflicts (blocked): {report.get('metadataTokenConflictFindings', 0)}",
+        f"- Exact native RVA recovered: {report.get('nativeRvaRecoveredFindings', 0)}",
+        f"- Native RVA recovery blocked with explicit provenance: {report.get('nativeRvaBlockedFindings', 0)}",
+        "",
+        "> Runtime VA is observed module-layout evidence, not proof that the method executed.", "",
+        "> Metadata identity never invents an RVA. Token/name/class disagreement is blocked fail-closed.", "",
+        "> Native recovery reports an address only after exact MethodDef identity, exact CodeGenModule count and unique executable pointer proof. Recovered RVA does not make a finding buildable; binding/preflight are still required.", "",
+    ]
     for finding in report.get("findings") or []:
-        if not isinstance(finding,dict): continue
-        runtime=finding.get("runtimeObservation");il2cpp=finding.get("il2cppStructural");identity=finding.get("metadataIdentity");conflict=finding.get("metadataIdentityConflict");native=finding.get("nativeRvaRecovery")
-        if not any(isinstance(value,dict) for value in (runtime,il2cpp,identity,conflict,native)): continue
+        if not isinstance(finding, dict):
+            continue
+        runtime = finding.get("runtimeObservation"); il2cpp = finding.get("il2cppStructural"); identity = finding.get("metadataIdentity"); conflict = finding.get("metadataIdentityConflict"); native = finding.get("nativeRvaRecovery"); blocker = finding.get("nativeRvaBlocker")
+        if not any(isinstance(value, dict) for value in (runtime, il2cpp, identity, conflict, native, blocker)):
+            continue
         lines.append(f"### Corroboration · {finding.get('title') or finding.get('id') or 'Finding'}")
-        if isinstance(runtime,dict): lines.append(f"- Runtime: RVA {runtime.get('rvaHex') or '?'} → VA {runtime.get('runtimeVaHex') or '?'} · module {runtime.get('moduleBasename') or runtime.get('modulePath') or '?'} · mapped={runtime.get('mapped')} · perms={runtime.get('mappingPerms') or '?'}")
-        if isinstance(il2cpp,dict): lines.append(f"- IL2CPP structural: {il2cpp.get('status')} · metadata-name={il2cpp.get('metadataMethodNamePresent')} · executable-range={il2cpp.get('executableElfRangePresent')} · associationConfirmed=false")
-        if isinstance(identity,dict): lines.append(f"- IL2CPP metadata identity: {identity.get('status')} · class={identity.get('class') or '?'} · method={identity.get('methodName') or '?'} · token={identity.get('metadataToken') or '?'} · RVA=UNRESOLVED · actionable=false · buildable=false")
-        if isinstance(conflict,dict): lines.append(f"- IL2CPP metadata identity CONFLICT: token={conflict.get('metadataToken') or '?'} · catalog={conflict.get('class') or '?'}::{conflict.get('methodName') or '?'} · metadata={conflict.get('metadataResolvedClass') or '?'}::{conflict.get('metadataResolvedMethodName') or '?'} · blocked=true · RVA=UNRESOLVED")
-        if isinstance(native,dict): lines.append(f"- IL2CPP native recovery: {native.get('rvaHex') or '?'} · {native.get('status')} · uniqueExecutablePointer={native.get('uniqueExecutablePointer')} · buildable=false · requires-preflight=true")
+        if isinstance(runtime, dict):
+            lines.append(f"- Runtime: RVA {runtime.get('rvaHex') or '?'} → VA {runtime.get('runtimeVaHex') or '?'} · module {runtime.get('moduleBasename') or runtime.get('modulePath') or '?'} · mapped={runtime.get('mapped')} · perms={runtime.get('mappingPerms') or '?'}")
+        if isinstance(il2cpp, dict):
+            lines.append(f"- IL2CPP structural: {il2cpp.get('status')} · metadata-name={il2cpp.get('metadataMethodNamePresent')} · executable-range={il2cpp.get('executableElfRangePresent')} · associationConfirmed=false")
+        if isinstance(identity, dict):
+            lines.append(f"- IL2CPP metadata identity: {identity.get('status')} · class={identity.get('class') or '?'} · method={identity.get('methodName') or '?'} · token={identity.get('metadataToken') or '?'} · RVA=UNRESOLVED · actionable=false · buildable=false")
+        if isinstance(conflict, dict):
+            lines.append(f"- IL2CPP metadata identity CONFLICT: token={conflict.get('metadataToken') or '?'} · catalog={conflict.get('class') or '?'}::{conflict.get('methodName') or '?'} · metadata={conflict.get('metadataResolvedClass') or '?'}::{conflict.get('metadataResolvedMethodName') or '?'} · blocked=true · RVA=UNRESOLVED")
+        if isinstance(native, dict):
+            lines.append(f"- IL2CPP native recovery: {native.get('rvaHex') or '?'} · {native.get('status')} · uniqueExecutablePointer={native.get('uniqueExecutablePointer')} · buildable=false · requires-preflight=true")
+        if isinstance(blocker, dict):
+            reasons = ", ".join(str(value) for value in blocker.get("blockers") or []) or "unspecified"
+            lines.append(f"- IL2CPP native recovery: BLOCKED · {blocker.get('status')} · blockers={reasons} · RVA=UNRESOLVED · actionable=false · buildable=false")
         lines.append("")
-    with path.open("a",encoding="utf-8") as stream: stream.write("\n".join(lines))
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write("\n".join(lines))
 
 
 def build_connected_report(workdir: str | Path, output_json: str | Path | None = None, output_md: str | Path | None = None) -> dict[str, Any]:
-    root=Path(workdir);report=_build_base(root,None,output_md);report["schema"]=SCHEMA
-    runtime_summary=_json(root/"runtime-correlation.json");runtime_by_id,runtime_by_rva=_runtime_indexes(runtime_summary)
-    il2cpp_summary=_ensure_il2cpp_crosscheck(root);il2cpp_rows=_jsonl(root/"il2cpp-crosscheck.methods.jsonl") if il2cpp_summary and not il2cpp_summary.get("error") else [];il2cpp_by_rva=_il2cpp_index(il2cpp_rows)
-    identity_summary=_ensure_metadata_identity(root);identity_rows=_jsonl(root/"il2cpp-metadata-identity.methods.jsonl") if identity_summary and not identity_summary.get("error") else [];identity_by_id,identity_by_pair,identity_by_name,identity_conflicts_by_id=_identity_indexes(identity_rows)
-    native_summary=_ensure_native_recovery(root);native_rows=_jsonl(root/"il2cpp-no-rva-native.methods.jsonl") if native_summary and not native_summary.get("error") else [];native_by_id,native_by_pair=_native_indexes(native_rows)
+    root = Path(workdir)
+    report = _build_base(root, None, output_md)
+    report["schema"] = SCHEMA
 
-    runtime_count=il2cpp_count=il2cpp_both=identity_count=identity_qualified_count=identity_token_count=identity_conflict_count=native_count=0
-    findings=report.get("findings") if isinstance(report.get("findings"),list) else []
+    runtime_summary = _json(root / "runtime-correlation.json")
+    runtime_by_id, runtime_by_rva = _runtime_indexes(runtime_summary)
+    il2cpp_summary = _ensure_il2cpp_crosscheck(root)
+    il2cpp_rows = _jsonl(root / "il2cpp-crosscheck.methods.jsonl") if il2cpp_summary and not il2cpp_summary.get("error") else []
+    il2cpp_by_rva = _il2cpp_index(il2cpp_rows)
+    identity_summary = _ensure_metadata_identity(root)
+    identity_rows = _jsonl(root / "il2cpp-metadata-identity.methods.jsonl") if identity_summary and not identity_summary.get("error") else []
+    identity_by_id, identity_by_pair, identity_by_name, identity_conflicts_by_id = _identity_indexes(identity_rows)
+    native_summary = _ensure_native_recovery(root)
+    native_rows = _jsonl(root / "il2cpp-no-rva-native.methods.jsonl") if native_summary and not native_summary.get("error") else []
+    native_by_id, native_by_pair = _native_indexes(native_rows)
+
+    findings = report.get("findings") if isinstance(report.get("findings"), list) else []
+    failure_by_id, failure_by_pair = _stream_native_blockers(root / "il2cpp-no-rva-native.failures.jsonl", findings)
+    runtime_count = il2cpp_count = il2cpp_both = 0
+    identity_count = identity_qualified_count = identity_token_count = identity_conflict_count = 0
+    native_count = native_blocked_count = 0
+    native_blocker_statuses: Counter[str] = Counter()
+
     for finding in findings:
-        if not isinstance(finding,dict): continue
-        original_buildable=bool(finding.get("buildable"));original_actionable=bool(finding.get("actionable"));card_id=finding.get("id");rva=_finding_rva(finding);method_id=_finding_method_id(finding)
-        runtime=runtime_by_id.get(str(card_id)) if card_id not in (None,"") else None
-        if runtime is None and rva and len(runtime_by_rva.get(rva,[]))==1: runtime=runtime_by_rva[rva][0]
-        if isinstance(runtime,dict):
-            finding["runtimeObservation"]=runtime;finding["runtimeObserved"]=bool(runtime.get("mapped"));runtime_count+=int(finding["runtimeObserved"])
-        il2cpp=il2cpp_by_rva.get(rva) if rva else None
-        if isinstance(il2cpp,dict):
-            finding["il2cppStructural"]=il2cpp;finding["il2cppStructuralObserved"]=bool(il2cpp.get("metadataMethodNamePresent") or il2cpp.get("executableElfRangePresent"));il2cpp_count+=int(finding["il2cppStructuralObserved"]);il2cpp_both+=int(il2cpp.get("status")=="STRUCTURAL_BOTH_PRESENT")
-        if not rva:
-            cls,method=_finding_class_method(finding)
-            native=native_by_id.get(method_id) if method_id else None
-            if native is None: native=_match_pair(native_by_pair,cls,method)
-            if isinstance(native,dict):
-                finding["nativeRvaRecovery"]=native;finding["nativeRvaRecovered"]=True;finding["recoveredLocator"]={"rva":native.get("rva"),"rvaHex":native.get("rvaHex"),"source":"EXACT_CODEGENMODULE_RECOVERY","addressConfirmed":True,"associationConfirmed":True,"mayEnterPreflight":True};native_count+=1
-            identity=None
-            if method_id and method_id in identity_conflicts_by_id:
-                finding["metadataIdentityConflict"]=identity_conflicts_by_id[method_id];finding["metadataIdentityConfirmed"]=False;identity_conflict_count+=1
-            else:
-                if method_id: identity=identity_by_id.get(method_id)
-                if identity is None:
-                    identity=_match_pair(identity_by_pair,cls,method)
-                    if identity is None and method and len(identity_by_name.get(method,[]))==1: identity=identity_by_name[method][0]
-                if isinstance(identity,dict):
-                    finding["metadataIdentity"]=identity;finding["metadataIdentityConfirmed"]=bool(identity.get("metadataTokenConfirmed") or identity.get("metadataQualifiedMethodPresent") or identity.get("metadataMethodNamePresent"));identity_count+=int(finding["metadataIdentityConfirmed"]);identity_qualified_count+=int(bool(identity.get("metadataQualifiedMethodPresent")));identity_token_count+=int(bool(identity.get("metadataTokenConfirmed")))
-        finding["buildable"]=original_buildable;finding["actionable"]=original_actionable
+        if not isinstance(finding, dict):
+            continue
+        original_buildable = bool(finding.get("buildable")); original_actionable = bool(finding.get("actionable"))
+        card_id = finding.get("id"); rva = _finding_rva(finding); method_id = _finding_method_id(finding)
+        runtime = runtime_by_id.get(str(card_id)) if card_id not in (None, "") else None
+        if runtime is None and rva and len(runtime_by_rva.get(rva, [])) == 1:
+            runtime = runtime_by_rva[rva][0]
+        if isinstance(runtime, dict):
+            finding["runtimeObservation"] = runtime; finding["runtimeObserved"] = bool(runtime.get("mapped")); runtime_count += int(finding["runtimeObserved"])
+        il2cpp = il2cpp_by_rva.get(rva) if rva else None
+        if isinstance(il2cpp, dict):
+            finding["il2cppStructural"] = il2cpp; finding["il2cppStructuralObserved"] = bool(il2cpp.get("metadataMethodNamePresent") or il2cpp.get("executableElfRangePresent")); il2cpp_count += int(finding["il2cppStructuralObserved"]); il2cpp_both += int(il2cpp.get("status") == "STRUCTURAL_BOTH_PRESENT")
 
-    identity_counts=identity_summary.get("counts") if isinstance(identity_summary.get("counts"),dict) else {};source_conflicts=int(identity_counts.get("tokenConflictNoRva") or 0)
-    values={"runtimeObservedFindings":runtime_count,"il2cppStructuralFindings":il2cpp_count,"il2cppStructuralBothFindings":il2cpp_both,"metadataIdentityConfirmedFindings":identity_count,"metadataQualifiedIdentityFindings":identity_qualified_count,"metadataTokenIdentityFindings":identity_token_count,"metadataTokenConflictFindings":identity_conflict_count,"metadataTokenConflictRows":source_conflicts,"nativeRvaRecoveredFindings":native_count}
-    report.update(values);summary=report.get("summary")
-    if not isinstance(summary,dict): summary={};report["summary"]=summary
+        if not rva:
+            native = _native_for_finding(finding, native_by_id, native_by_pair)
+            if isinstance(native, dict):
+                finding["nativeRvaRecovery"] = native
+                finding["nativeRvaRecovered"] = True
+                finding["recoveredLocator"] = {"rva":native.get("rva"),"rvaHex":native.get("rvaHex"),"source":"EXACT_CODEGENMODULE_RECOVERY","addressConfirmed":True,"associationConfirmed":True,"mayEnterPreflight":True}
+                native_count += 1
+            else:
+                blocker = _native_for_finding(finding, failure_by_id, failure_by_pair)
+                if isinstance(blocker, dict):
+                    finding["nativeRvaBlocker"] = blocker
+                    finding["nativeRvaRecovered"] = False
+                    native_blocked_count += 1
+                    native_blocker_statuses[str(blocker.get("status") or "NATIVE_RVA_UNRESOLVED")] += 1
+
+            if method_id and method_id in identity_conflicts_by_id:
+                conflict = identity_conflicts_by_id[method_id]
+                cls, method = _finding_class_method(finding)
+                if _identity_compatible(conflict, cls, method):
+                    finding["metadataIdentityConflict"] = conflict; finding["metadataIdentityConfirmed"] = False; identity_conflict_count += 1
+            else:
+                identity = _identity_for_finding(finding, identity_by_id, identity_by_pair, identity_by_name)
+                if isinstance(identity, dict):
+                    finding["metadataIdentity"] = identity
+                    finding["metadataIdentityConfirmed"] = bool(identity.get("metadataTokenConfirmed") or identity.get("metadataQualifiedMethodPresent") or identity.get("metadataMethodNamePresent"))
+                    identity_count += int(finding["metadataIdentityConfirmed"])
+                    identity_qualified_count += int(bool(identity.get("metadataQualifiedMethodPresent")))
+                    identity_token_count += int(bool(identity.get("metadataTokenConfirmed")))
+
+        finding["buildable"] = original_buildable
+        finding["actionable"] = original_actionable
+
+    identity_counts = identity_summary.get("counts") if isinstance(identity_summary.get("counts"), dict) else {}
+    source_conflicts = int(identity_counts.get("tokenConflictNoRva") or 0)
+    values = {
+        "runtimeObservedFindings": runtime_count,
+        "il2cppStructuralFindings": il2cpp_count,
+        "il2cppStructuralBothFindings": il2cpp_both,
+        "metadataIdentityConfirmedFindings": identity_count,
+        "metadataQualifiedIdentityFindings": identity_qualified_count,
+        "metadataTokenIdentityFindings": identity_token_count,
+        "metadataTokenConflictFindings": identity_conflict_count,
+        "metadataTokenConflictRows": source_conflicts,
+        "nativeRvaRecoveredFindings": native_count,
+        "nativeRvaBlockedFindings": native_blocked_count,
+        "nativeRvaBlockerStatusCounts": dict(sorted(native_blocker_statuses.items())),
+    }
+    report.update(values)
+    summary = report.get("summary")
+    if not isinstance(summary, dict):
+        summary = {}; report["summary"] = summary
     summary.update(values)
 
-    report["corroboration"]={
-        "runtime":{"available":bool(runtime_summary),"schema":runtime_summary.get("schema"),"mode":runtime_summary.get("mode"),"correlationCount":int(runtime_summary.get("correlationCount") or 0),"mappedRuntimeVaCount":int(runtime_summary.get("mappedRuntimeVaCount") or 0),"writesTargetMemory":False,"injectsCode":False,"promotesBuildability":False},
-        "il2cppStructural":{"available":bool(il2cpp_summary),"schema":il2cpp_summary.get("schema"),"engine":il2cpp_summary.get("engine"),"counts":il2cpp_summary.get("counts"),"freshnessVerified":bool(il2cpp_summary.get("freshnessVerified")),"sourceInputsAvailable":bool(il2cpp_summary.get("sourceInputsAvailable")),"confirmsMethodToRvaAssociation":False,"executesTargetCode":False,"promotesBuildability":False},
-        "il2cppMetadataIdentity":{"available":bool(identity_summary),"schema":identity_summary.get("schema"),"engine":identity_summary.get("engine"),"metadataVersion":identity_summary.get("metadataVersion"),"typeLayout":identity_summary.get("typeLayout"),"typeLayoutScore":identity_summary.get("typeLayoutScore"),"uniqueMethodTokenCount":int(identity_summary.get("uniqueMethodTokenCount") or 0),"counts":identity_summary.get("counts"),"freshnessVerified":bool(identity_summary.get("freshnessVerified")),"sourceInputsAvailable":bool(identity_summary.get("sourceInputsAvailable")),"tokenConflictRows":source_conflicts,"addressResolver":False,"actionable":False,"promotesBuildability":False},
-        "il2cppNativeRvaRecovery":{"available":bool(native_summary),"schema":native_summary.get("schema"),"engine":native_summary.get("engine"),"metadataVersion":native_summary.get("metadataVersion"),"resolvedModuleCount":int(native_summary.get("resolvedModuleCount") or 0),"counts":native_summary.get("counts"),"freshnessVerified":bool(native_summary.get("freshnessVerified")),"sourceInputsAvailable":bool(native_summary.get("sourceInputsAvailable")),"addressResolver":bool(native_summary.get("addressResolver")),"requiresUniqueExecutablePointer":bool(native_summary.get("requiresUniqueExecutablePointer")),"mayEnterPreflight":True,"actionable":False,"buildable":False,"promotesBuildability":False},
+    report["corroboration"] = {
+        "runtime": {"available":bool(runtime_summary),"schema":runtime_summary.get("schema"),"mode":runtime_summary.get("mode"),"correlationCount":int(runtime_summary.get("correlationCount") or 0),"mappedRuntimeVaCount":int(runtime_summary.get("mappedRuntimeVaCount") or 0),"writesTargetMemory":False,"injectsCode":False,"promotesBuildability":False},
+        "il2cppStructural": {"available":bool(il2cpp_summary),"schema":il2cpp_summary.get("schema"),"engine":il2cpp_summary.get("engine"),"counts":il2cpp_summary.get("counts"),"freshnessVerified":bool(il2cpp_summary.get("freshnessVerified")),"sourceInputsAvailable":bool(il2cpp_summary.get("sourceInputsAvailable")),"confirmsMethodToRvaAssociation":False,"executesTargetCode":False,"promotesBuildability":False},
+        "il2cppMetadataIdentity": {"available":bool(identity_summary),"schema":identity_summary.get("schema"),"engine":identity_summary.get("engine"),"metadataVersion":identity_summary.get("metadataVersion"),"typeLayout":identity_summary.get("typeLayout"),"typeLayoutScore":identity_summary.get("typeLayoutScore"),"uniqueMethodTokenCount":int(identity_summary.get("uniqueMethodTokenCount") or 0),"counts":identity_summary.get("counts"),"freshnessVerified":bool(identity_summary.get("freshnessVerified")),"sourceInputsAvailable":bool(identity_summary.get("sourceInputsAvailable")),"tokenConflictRows":source_conflicts,"addressResolver":False,"actionable":False,"promotesBuildability":False},
+        "il2cppNativeRvaRecovery": {"available":bool(native_summary),"schema":native_summary.get("schema"),"engine":native_summary.get("engine"),"metadataVersion":native_summary.get("metadataVersion"),"resolvedModuleCount":int(native_summary.get("resolvedModuleCount") or 0),"counts":native_summary.get("counts"),"statusCounts":native_summary.get("statusCounts"),"failureRowsFile":native_summary.get("failureRowsFile"),"failuresAreFileBacked":bool(native_summary.get("failuresAreFileBacked")),"freshnessVerified":bool(native_summary.get("freshnessVerified")),"sourceInputsAvailable":bool(native_summary.get("sourceInputsAvailable")),"addressResolver":bool(native_summary.get("addressResolver")),"requiresUniqueExecutablePointer":bool(native_summary.get("requiresUniqueExecutablePointer")),"mayEnterPreflight":True,"actionable":False,"buildable":False,"promotesBuildability":False},
     }
-    semantics=report.get("evidenceSemantics")
-    if not isinstance(semantics,dict): semantics={};report["evidenceSemantics"]=semantics
-    semantics["PROCFS_MODULE_LAYOUT"]="Observed process module mapping/load base. RVA→runtime VA is layout evidence, not proof of code execution."
-    semantics["IL2CPP_STRUCTURAL_CROSSCHECK"]="Metadata method-name presence and executable ELF range are checked independently; this does not confirm the method-to-RVA association."
-    semantics["IL2CPP_METADATA_IDENTITY_NO_RVA"]="Global metadata can confirm token/name/declaring type while RVA remains unresolved; identity-only evidence is non-actionable."
-    semantics["IL2CPP_METADATA_TOKEN_CONFLICT_NO_RVA"]="A unique token disagrees with catalogue class/method identity; the row is conflict evidence and never confirmation."
-    semantics["IL2CPP_EXACT_CODEGENMODULE_RVA_RECOVERY"]="An RVA is reported only after exact MethodDef identity, exact per-image method-count filtering and a unique file-backed executable pointer. It may enter binding/preflight but never promotes buildability by itself."
-    semantics["corroborationBuildability"]="Runtime/structural/metadata identity never make findings buildable; exact recovered RVA still requires validated local binding and successful preflight."
-    _append_artifact_guide(report,root)
-    if output_json: Path(output_json).write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding="utf-8")
-    if output_md: _append_markdown(Path(output_md),report)
+
+    semantics = report.get("evidenceSemantics")
+    if not isinstance(semantics, dict):
+        semantics = {}; report["evidenceSemantics"] = semantics
+    semantics["PROCFS_MODULE_LAYOUT"] = "Observed process module mapping/load base. RVA→runtime VA is layout evidence, not proof of code execution."
+    semantics["IL2CPP_STRUCTURAL_CROSSCHECK"] = "Metadata method-name presence and executable ELF range are checked independently; this does not confirm the method-to-RVA association."
+    semantics["IL2CPP_METADATA_IDENTITY_NO_RVA"] = "Global metadata can confirm token/name/declaring type while RVA remains unresolved; identity-only evidence is non-actionable."
+    semantics["IL2CPP_METADATA_TOKEN_CONFLICT_NO_RVA"] = "A unique token disagrees with catalogue class/method identity; the row is conflict evidence and never confirmation."
+    semantics["IL2CPP_EXACT_CODEGENMODULE_RVA_RECOVERY"] = "An RVA is reported only after exact MethodDef identity, exact per-image method-count filtering and a unique file-backed executable pointer. It may enter binding/preflight but never promotes buildability by itself."
+    semantics["IL2CPP_NATIVE_RVA_BLOCKER"] = "The exact native recovery backend attempted address resolution but stopped fail-closed at the recorded blocker. RVA remains unresolved and non-actionable."
+    semantics["corroborationBuildability"] = "Runtime/structural/metadata identity never make findings buildable; exact recovered RVA still requires validated local binding and successful preflight."
+
+    _append_artifact_guide(report, root)
+    if output_json:
+        Path(output_json).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    if output_md:
+        _append_markdown(Path(output_md), report)
     return report
