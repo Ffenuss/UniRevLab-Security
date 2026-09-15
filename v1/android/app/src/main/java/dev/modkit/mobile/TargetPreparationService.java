@@ -74,8 +74,10 @@ public class TargetPreparationService extends Service {
             "analysis.resolver-index.json","analysis.autopilot-index.jsonl","analysis.gameplay-coverage.json",
             "analysis-deep","re-analysis.json","re-analysis.ui.json","re-analysis.menu.json","security-surfaces.json",
             "simple-catalog.json","simple-cache.json","simple-progress.json","simple-progress.json.part","rodroid",
-            "menu-spec.json","menu-result.json","menu-preflight.json","menu-validation.json","menu-auto-prepare.json","menu-auto-confirm.json","menu-autopilot.json","menu-native-recovery.json","menu-native-recovery.json.tmp","menu-project",
+            "menu-spec.json","menu-result.json","menu-preflight.json","menu-validation.json","menu-auto-prepare.json","menu-auto-prepare-deep.json","menu-auto-confirm.json","menu-autopilot.json","menu-probe-prepare.json","menu-spec.simple-source.json","menu-native-recovery.json","menu-native-recovery.json.tmp","menu-project",
             "menu-payload-report.json","menu-apk-report.json","menu-payload-build.zip","menu-unsigned.apk",
+            "patchpack-report.json","patchpack-unsigned.apk",
+            "workspace-patch.zip","workspace-patch.zip.tmp","workspace-source.json","workspace-report.json","workspace-edit.bin","workspace-unsigned.apk",
             "target-signed.apk","target-signed.apks","target-signed-set",
             "connected-report.json","connected-report.json.part","connected-report.md","connected-report.md.part","evidence-bundle.zip"
         };
