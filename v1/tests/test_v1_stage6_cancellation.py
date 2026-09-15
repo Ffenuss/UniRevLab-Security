@@ -45,6 +45,22 @@ def test_connected_report_cancel_preserves_previous_outputs(tmp_path):
     assert not (tmp_path / "connected-report.md.part").exists()
 
 
+def test_connected_report_uses_one_final_cancel_gate_for_output_pair(tmp_path):
+    output_json = tmp_path / "connected-report.json"
+    output_md = tmp_path / "connected-report.md"
+
+    report = connected_report_streaming.build_connected_report(
+        tmp_path, output_json, output_md, _NeverCancel()
+    )
+
+    policy = report["memoryPolicy"]
+    assert policy["coordinatedFinalCancelGate"] is True
+    assert policy["multiFileTransactionAtomic"] is False
+    assert output_json.is_file() and output_md.is_file()
+    assert not (tmp_path / "connected-report.json.part").exists()
+    assert not (tmp_path / "connected-report.md.part").exists()
+
+
 def test_automod_cancellable_keeps_base_schema_and_finding_scoped_policy(tmp_path):
     (tmp_path / "simple-catalog.json").write_text(json.dumps({
         "schema": "modkit-simple-mode-1.3",
