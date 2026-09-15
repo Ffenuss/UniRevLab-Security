@@ -61,7 +61,7 @@ public class TargetPreparationService extends Service {
         String[] names={
             "full-reconstruction.json","full-reconstruction.json.part","modkit-decompiled.zip","apktool-analysis.json","apktool-analysis.json.part","apktool-workspace",
             "artifact-families.json","embedded-analysis.json","automatic-evidence.json","automatic-evidence.json.part","automod-plan.json","automod-plan.json.part",
-            "runtime-session.json","runtime-session.json.part","runtime-correlation.json",
+            "runtime-session.json","runtime-session.json.part","runtime-correlation.json","runtime-correlation.json.part","runtime-correlation.json.build",
             "il2cpp-crosscheck.json","il2cpp-crosscheck.json.part","il2cpp-crosscheck.methods.jsonl","il2cpp-crosscheck.methods.jsonl.part",
             "il2cpp-metadata-identity.json","il2cpp-metadata-identity.json.part","il2cpp-metadata-identity.methods.jsonl","il2cpp-metadata-identity.methods.jsonl.part",
             "il2cpp-no-rva-native.json","il2cpp-no-rva-native.json.part","il2cpp-no-rva-native.methods.jsonl","il2cpp-no-rva-native.methods.jsonl.part","il2cpp-no-rva-native.failures.jsonl","il2cpp-no-rva-native.failures.jsonl.part",
