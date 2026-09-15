@@ -19,6 +19,7 @@ from . import artifact_families
 SCHEMA = "modkit-security-surfaces-1.3"
 MAX_ENTRY_BYTES = 64 * 1024 * 1024
 MAX_FINDINGS = 6000
+READ_CHUNK_BYTES = 1024 * 1024
 PRINTABLE = re.compile(rb"[\x20-\x7e]{5,}")
 URL_RE = re.compile(r"\b(?:https?|wss?)://[^\s\"'<>\\]{4,512}", re.I)
 HOSTPORT_RE = re.compile(r"(?<![A-Za-z0-9._-])((?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,63}:\d{2,5})(?!\d)")
@@ -28,6 +29,26 @@ CRYPTO_MARKERS = ("aes/gcm", "aes/cbc", "chacha20", "blowfish", "xtea", "pbkdf2"
 KEY_MARKERS = ("encryption_key", "aes_key", "crypto_key", "keystore", "keyalias", "secretkeyspec", "keygenerator", "api_key", "apikey", "client_id", "client_secret")
 NETWORK_MARKERS = ("retrofit", "okhttp", "websocket", "io.grpc", "grpc", "graphql", "certificatepinner", "trustmanager")
 CONNECTION_CONFIG_MARKERS = ("baseurl", "base_url", "api_host", "apihost", "server_url", "serverurl", "server_host", "gateway_url", "socket_url", "websocket_url")
+
+
+class ScanCancelled(RuntimeError):
+    """Raised cooperatively so callers never publish a partial security report."""
+
+
+def _cancelled(cb: Any | None) -> bool:
+    if cb is None:
+        return False
+    checker = getattr(cb, "isCancelled", None)
+    if callable(checker):
+        return bool(checker())
+    if callable(cb):
+        return bool(cb())
+    return False
+
+
+def _check(cb: Any | None) -> None:
+    if _cancelled(cb):
+        raise ScanCancelled("security scan cancelled")
 
 
 def _sha(text: str) -> str:
@@ -98,12 +119,30 @@ def find_network_and_crypto_markers(text: str, apk: str = "", entry: str = "", b
     return rows
 
 
-def _strings(data: bytes):
-    for match in PRINTABLE.finditer(data):
+def _strings(data: bytes, cb: Any | None = None):
+    _check(cb)
+    for no, match in enumerate(PRINTABLE.finditer(data)):
+        if (no & 0xFF) == 0:
+            _check(cb)
         yield match.start(), match.group().decode("utf-8", "replace")
 
 
-def _scan_entry(apk: Path, z: zipfile.ZipFile, info: zipfile.ZipInfo, remaining: int) -> list[dict[str, Any]]:
+def _read_entry(z: zipfile.ZipFile, info: zipfile.ZipInfo, cb: Any | None = None) -> bytes:
+    chunks: list[bytes] = []
+    with z.open(info, "r") as source:
+        while True:
+            _check(cb)
+            chunk = source.read(READ_CHUNK_BYTES)
+            if not chunk:
+                break
+            chunks.append(chunk)
+    _check(cb)
+    return b"".join(chunks)
+
+
+def _scan_entry(apk: Path, z: zipfile.ZipFile, info: zipfile.ZipInfo, remaining: int,
+                cb: Any | None = None) -> list[dict[str, Any]]:
+    _check(cb)
     if info.is_dir() or info.file_size <= 0 or info.file_size > MAX_ENTRY_BYTES:
         return []
     low = info.filename.lower()
@@ -111,14 +150,17 @@ def _scan_entry(apk: Path, z: zipfile.ZipFile, info: zipfile.ZipInfo, remaining:
     if not interesting:
         return []
     try:
-        data = z.read(info)
+        data = _read_entry(z, info, cb)
+    except ScanCancelled:
+        raise
     except Exception:
         return []
     rows: list[dict[str, Any]] = []
-    for offset, text in _strings(data):
+    for offset, text in _strings(data, cb):
         rows.extend(find_network_and_crypto_markers(text, apk.name, info.filename, offset))
         if len(rows) >= remaining:
             break
+    _check(cb)
     return rows[:remaining]
 
 
@@ -144,28 +186,34 @@ def _group(findings: list[dict[str, Any]], name: str) -> dict[str, Any]:
     }
 
 
-def scan_apk_paths(paths: Iterable[str | Path], output_path: str | Path | None = None) -> dict[str, Any]:
+def scan_apk_paths(paths: Iterable[str | Path], output_path: str | Path | None = None,
+                   cb: Any | None = None) -> dict[str, Any]:
     findings: list[dict[str, Any]] = []
     seen: set[tuple[str, str, str, int]] = set()
     skipped = 0
     for raw in paths:
+        _check(cb)
         apk = Path(raw)
         if not apk.is_file():
             continue
         try:
             with zipfile.ZipFile(apk) as z:
                 for info in z.infolist():
+                    _check(cb)
                     if len(findings) >= MAX_FINDINGS:
                         break
                     if info.file_size > MAX_ENTRY_BYTES:
                         skipped += 1
                         continue
-                    for row in _scan_entry(apk, z, info, MAX_FINDINGS - len(findings)):
+                    for row in _scan_entry(apk, z, info, MAX_FINDINGS - len(findings), cb):
                         key = (row["kind"], row["apk"], row["entry"], row["offset"])
                         if key not in seen:
                             seen.add(key); findings.append(row)
+        except ScanCancelled:
+            raise
         except Exception:
             continue
+    _check(cb)
     counts: dict[str, int] = {}
     for row in findings:
         counts[row["kind"]] = counts.get(row["kind"], 0) + 1
@@ -185,6 +233,7 @@ def scan_apk_paths(paths: Iterable[str | Path], output_path: str | Path | None =
         "skippedOversizeEntries": skipped,
         "truncated": len(findings) >= MAX_FINDINGS,
     }
+    _check(cb)
     if output_path:
         Path(output_path).write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
     return out
@@ -233,12 +282,15 @@ def _artifact_report(root: Path, apk_paths: list[Path]) -> tuple[dict[str, Any],
     return artifact_families.scan_apk_paths(apk_paths, path), False
 
 
-def scan_workspace(workdir: str | Path, output_path: str | Path | None = None) -> dict[str, Any]:
+def scan_workspace(workdir: str | Path, output_path: str | Path | None = None,
+                   cb: Any | None = None) -> dict[str, Any]:
     root = Path(workdir)
+    _check(cb)
     apk_paths = _workspace_apks(root)
     artifact_output = root / "artifact-families.json"
     artifact_report, reused_enriched = _artifact_report(root, apk_paths)
-    out = scan_apk_paths(apk_paths, None)
+    _check(cb)
+    out = scan_apk_paths(apk_paths, None, cb)
     out["artifactFamilies"] = {
         "schema": artifact_report.get("schema"),
         "total": artifact_report.get("total", 0),
@@ -251,6 +303,7 @@ def scan_workspace(workdir: str | Path, output_path: str | Path | None = None) -
         "reusedEnrichedReport": reused_enriched,
         "report": artifact_output.name,
     }
+    _check(cb)
     if output_path:
         Path(output_path).write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
     return out
