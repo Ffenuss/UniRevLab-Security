@@ -49,6 +49,7 @@ def test_automod_planner_is_fail_closed_and_never_promotes_static_keyword_to_bui
     assert plan["failClosed"] is True
     assert plan["modifiesTarget"] is False
     assert plan["runtimeEvidencePromotesBuildability"] is False
+    assert plan["il2cppCrosscheckPromotesBuildability"] is False
     assert plan["autoBuildRequiresValidatedExecutableBinding"] is True
     assert plan["serverBypassGenerated"] is False
 
@@ -85,6 +86,37 @@ def test_runtime_va_observation_is_attached_but_never_promotes_candidate_to_buil
     assert plan["runtimeEvidencePromotesBuildability"] is False
 
 
+def test_il2cpp_structural_crosscheck_is_attached_by_rva_without_promoting_build():
+    catalog = {"cards": [
+        card("hp", "SetHealth", "LOCATOR_CONFIRMED", actionable=True, locator={"rva": 0x1234, "library": "libil2cpp.so"}),
+    ]}
+    rows = [{
+        "id": "method-row-8",
+        "methodName": "SetHealth",
+        "rva": 0x1234,
+        "rvaHex": "0x1234",
+        "metadataMethodNamePresent": True,
+        "executableElfRangePresent": True,
+        "elfRangeMode": "DIRECT_ELF_VADDR",
+        "segmentIndex": 2,
+        "status": "STRUCTURAL_BOTH_PRESENT",
+        "associationConfirmed": False,
+        "promotesBuildability": False,
+    }]
+    plan = build_plan(catalog, None, rows)
+    row = plan["candidates"][0]
+    assert row["stage"] == "READY_FOR_PREFLIGHT"
+    assert row["buildable"] is False
+    assert row["il2cppStructuralObserved"] is True
+    assert row["il2cppStructural"]["status"] == "STRUCTURAL_BOTH_PRESENT"
+    assert row["il2cppStructural"]["associationConfirmed"] is False
+    assert row["il2cppStructural"]["promotesBuildability"] is False
+    assert plan["il2cppStructuralObservedCount"] == 1
+    assert plan["il2cppStructuralBothCount"] == 1
+    assert plan["readyToBuildCount"] == 0
+    assert plan["il2cppCrosscheckPromotesBuildability"] is False
+
+
 def test_workspace_plan_writes_schema_and_uses_existing_catalog(tmp_path):
     catalog = {"cards": [card("x", "MaxHP", "LOCATOR_CONFIRMED", actionable=True, locator={"rva": 4096})]}
     (tmp_path / "simple-catalog.json").write_text(json.dumps(catalog), encoding="utf-8")
@@ -98,7 +130,7 @@ def test_workspace_plan_writes_schema_and_uses_existing_catalog(tmp_path):
     output = tmp_path / "automod-plan.json"
     plan = build_workspace_plan(tmp_path, output)
     stored = json.loads(output.read_text(encoding="utf-8"))
-    assert plan["schema"] == "modkit-automod-plan-1.1"
+    assert plan["schema"] == "modkit-automod-plan-1.2"
     assert stored["readyForPreflightCount"] == 1
     assert stored["readyToBuildCount"] == 0
     assert stored["runtimeObservedCount"] == 1
