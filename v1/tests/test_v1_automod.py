@@ -48,19 +48,61 @@ def test_automod_planner_is_fail_closed_and_never_promotes_static_keyword_to_bui
     assert plan["readyToBuildCount"] == 1
     assert plan["failClosed"] is True
     assert plan["modifiesTarget"] is False
+    assert plan["runtimeEvidencePromotesBuildability"] is False
     assert plan["autoBuildRequiresValidatedExecutableBinding"] is True
     assert plan["serverBypassGenerated"] is False
+
+
+def test_runtime_va_observation_is_attached_but_never_promotes_candidate_to_build():
+    catalog = {"cards": [
+        card("hp", "SetHealth", "LOCATOR_CONFIRMED", actionable=True, locator={"rva": 0x1234, "library": "libil2cpp.so"}),
+    ]}
+    runtime = {
+        "schema": "modkit-runtime-correlation-1.0",
+        "correlations": [{
+            "id": "hp",
+            "runtimeEvidence": "PROCFS_MODULE_LAYOUT",
+            "modulePath": "/data/app/game/lib/arm64/libil2cpp.so",
+            "moduleBasename": "libil2cpp.so",
+            "loadBaseHex": "0x70000000",
+            "rvaHex": "0x1234",
+            "runtimeVaHex": "0x70001234",
+            "mapped": True,
+            "mappingPerms": "r-xp",
+            "matchMode": "EXACT_LIBRARY_BASENAME",
+            "promotesBuildability": False,
+        }],
+    }
+    plan = build_plan(catalog, runtime)
+    row = plan["candidates"][0]
+    assert row["stage"] == "READY_FOR_PREFLIGHT"
+    assert row["buildable"] is False
+    assert row["runtimeObserved"] is True
+    assert row["runtimeObservation"]["runtimeVaHex"] == "0x70001234"
+    assert row["runtimeObservation"]["promotesBuildability"] is False
+    assert plan["runtimeObservedCount"] == 1
+    assert plan["readyToBuildCount"] == 0
+    assert plan["runtimeEvidencePromotesBuildability"] is False
 
 
 def test_workspace_plan_writes_schema_and_uses_existing_catalog(tmp_path):
     catalog = {"cards": [card("x", "MaxHP", "LOCATOR_CONFIRMED", actionable=True, locator={"rva": 4096})]}
     (tmp_path / "simple-catalog.json").write_text(json.dumps(catalog), encoding="utf-8")
+    (tmp_path / "runtime-correlation.json").write_text(json.dumps({
+        "correlations": [{
+            "id": "x", "runtimeEvidence": "PROCFS_MODULE_LAYOUT", "mapped": True,
+            "loadBaseHex": "0x50000000", "rvaHex": "0x1000", "runtimeVaHex": "0x50001000",
+            "promotesBuildability": False,
+        }]
+    }), encoding="utf-8")
     output = tmp_path / "automod-plan.json"
     plan = build_workspace_plan(tmp_path, output)
     stored = json.loads(output.read_text(encoding="utf-8"))
-    assert plan["schema"] == "modkit-automod-plan-1.0"
+    assert plan["schema"] == "modkit-automod-plan-1.1"
     assert stored["readyForPreflightCount"] == 1
     assert stored["readyToBuildCount"] == 0
+    assert stored["runtimeObservedCount"] == 1
+    assert stored["runtimeSource"] == "runtime-correlation.json"
 
 
 def test_automod_android_surface_uses_existing_fail_closed_build_pipeline():
@@ -83,4 +125,6 @@ def test_automod_android_surface_uses_existing_fail_closed_build_pipeline():
     assert '"automod-plan.json"' in evidence
     assert '"automod-plan.json"' in prep
     assert '"automod-plan.json"' in storage
+    assert '"runtime-correlation.json"' in prep
+    assert '"runtime-correlation.json"' in storage
     assert '"deep-gameplay.json"' in storage
