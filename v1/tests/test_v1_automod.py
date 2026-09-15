@@ -154,6 +154,7 @@ def test_no_rva_metadata_identity_is_attached_without_inventing_address_or_build
     assert row["actionable"] is False
     assert plan["metadataIdentityObservedCount"] == 1
     assert plan["metadataQualifiedNoRvaCount"] == 1
+    assert plan["exactLocatorCount"] == 0
     assert plan["readyToBuildCount"] == 0
     assert plan["readyForPreflightCount"] == 0
     assert plan["metadataIdentityPromotesBuildability"] is False
@@ -170,6 +171,25 @@ def test_ambiguous_name_only_metadata_identity_is_not_attached_by_guess():
     assert row["metadataIdentityObserved"] is False
     assert row["metadataIdentity"] is None
     assert plan["metadataIdentityObservedCount"] == 0
+
+
+def test_short_class_metadata_identity_is_not_duplicated_in_pair_index():
+    catalog = {"cards": [card("short", "SetHealth", "APP_OWNED", locator={"class": "Player", "method": "SetHealth", "rva": None})]}
+    identity_rows = [{
+        "id": 9,
+        "class": "Player",
+        "methodName": "SetHealth",
+        "status": "METADATA_QUALIFIED_METHOD_CONFIRMED_NO_RVA",
+        "metadataMethodNamePresent": True,
+        "metadataQualifiedMethodPresent": True,
+        "addressConfirmed": False,
+        "actionable": False,
+        "buildable": False,
+        "promotesBuildability": False,
+    }]
+    plan = build_plan(catalog, None, None, identity_rows)
+    assert plan["candidates"][0]["metadataIdentityObserved"] is True
+    assert plan["metadataQualifiedNoRvaCount"] == 1
 
 
 def test_workspace_plan_writes_schema_and_uses_existing_catalog(tmp_path):
@@ -209,6 +229,11 @@ def test_automod_android_surface_uses_existing_fail_closed_build_pipeline():
     assert 'build.setEnabled(idle&&prepareCount>0&&preflightReady)' in activity
     assert 'runtime VA observed' in activity
     assert 'runtimeVaHex' in activity
+    assert 'metadata identity/no-RVA' in activity
+    assert 'metadataIdentityObservedCount' in activity
+    assert 'metadataQualifiedNoRvaCount' in activity
+    assert 'metadataIdentity' in activity
+    assert 'RVA unresolved' in activity
     assert "ProcessLabActivity.class" in activity
     assert "AutoModActivity.class" in auto
     assert "AutoModActivity.class" in full
