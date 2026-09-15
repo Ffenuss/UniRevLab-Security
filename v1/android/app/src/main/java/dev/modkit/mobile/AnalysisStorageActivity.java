@@ -32,7 +32,8 @@ public class AnalysisStorageActivity extends AppCompatActivity {
         if("il2cpp-metadata-identity.json".equals(name))return "IL2CPP no-RVA metadata identity summary · "+name;
         if("il2cpp-metadata-identity.methods.jsonl".equals(name))return "IL2CPP no-RVA per-method identity evidence · "+name;
         if("il2cpp-no-rva-native.json".equals(name))return "IL2CPP exact no-RVA → native RVA recovery summary · "+name;
-        if("il2cpp-no-rva-native.methods.jsonl".equals(name))return "IL2CPP recovered RVA per-method evidence · "+name;
+        if("il2cpp-no-rva-native.methods.jsonl".equals(name))return "IL2CPP exact recovered RVA evidence · "+name;
+        if("il2cpp-no-rva-native.failures.jsonl".equals(name))return "IL2CPP unresolved native recovery blockers · "+name;
         if("deep-gameplay.json".equals(name))return "Gameplay semantic evidence · "+name;
         if("lua-deep.json".equals(name))return "Lua bytecode · "+name;
         if("hermes-deep.json".equals(name))return "Hermes HBC · "+name;
@@ -47,7 +48,7 @@ public class AnalysisStorageActivity extends AppCompatActivity {
             "full-reconstruction.json","modkit-decompiled.zip","apktool-analysis.json","apktool-workspace",
             "installed-scan.json","artifact-families.json","embedded-analysis.json","automatic-evidence.json","automod-plan.json",
             "runtime-session.json","runtime-correlation.json","il2cpp-crosscheck.json","il2cpp-crosscheck.methods.jsonl",
-            "il2cpp-metadata-identity.json","il2cpp-metadata-identity.methods.jsonl","il2cpp-no-rva-native.json","il2cpp-no-rva-native.methods.jsonl",
+            "il2cpp-metadata-identity.json","il2cpp-metadata-identity.methods.jsonl","il2cpp-no-rva-native.json","il2cpp-no-rva-native.methods.jsonl","il2cpp-no-rva-native.failures.jsonl",
             "deep-gameplay.json","lua-deep.json","hermes-deep.json","native-deep.json","cocos-deep.json","flutter-deep.json",
             "analysis.summary.json","analysis.methods.jsonl","analysis.fields.jsonl","analysis.evidence-graph.jsonl",
             "analysis.gameplay-coverage.json","re-analysis.json","security-surfaces.json","simple-catalog.json",
