@@ -43,12 +43,12 @@ def test_home_has_only_release_routes_not_legacy_shell():
         assert forbidden not in home
 
 
-def test_legacy_entry_points_are_redirects_only():
+def test_legacy_entry_points_are_in_place_aliases_not_redirect_hops():
     main = read("android/app/src/main/java/dev/modkit/mobile/MainActivity.java")
     simple = read("android/app/src/main/java/dev/modkit/mobile/SimpleModeActivity.java")
-    assert "FullModeActivity.class" in main
-    assert "AutoAnalysisActivity.class" in simple
-    for forbidden in ("section(", "RecyclerView", "Для глупых", "Discovery / Methods"):
+    assert "extends FullModeActivity" in main
+    assert "extends AutoAnalysisActivity" in simple
+    for forbidden in ("startActivity(", "finish()", "section(", "RecyclerView", "Для глупых", "Discovery / Methods"):
         assert forbidden not in main + simple
 
 
