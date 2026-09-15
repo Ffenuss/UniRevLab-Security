@@ -98,9 +98,20 @@ public class AutomaticEvidenceService extends Service {
 
         check();stage(3,6,"embedded evidence + gameplay ownership correlation");JSONObject artifactSummary=readJson("artifact-families.json");JSONObject embeddedSummary=readJson("embedded-analysis.json");manifest.put("artifactFamilies",artifactSummary==null?JSONObject.NULL:new JSONObject().put("total",artifactSummary.optInt("total")).put("familyCounts",artifactSummary.optJSONObject("familyCounts")));manifest.put("embeddedAnalysis",embeddedSummary==null?JSONObject.NULL:embeddedSummary);
 
-        check();stage(4,6,unchanged&&app.file("security-surfaces.json").isFile()?"cache hit: passive Network/API + TLS + Crypto":"passive Network/API + TLS + Crypto scan");JSONObject security;
-        if(unchanged&&app.file("security-surfaces.json").isFile())security=new JSONObject(Io.readUtf8(app.file("security-surfaces.json")));else{PyObject sec=Python.getInstance().getModule("modkit.mobile.security_scan");security=new JSONObject(sec.callAttr("scan_workspace",getFilesDir().getPath(),app.file("security-surfaces.json").getPath(),new Progress()).toString());}
-        manifest.put("security",new JSONObject().put("total",security.optInt("total")).put("uniqueEndpoints",security.optInt("uniqueEndpoints")));
+        check();JSONObject cachedSecurity=unchanged?readJson("security-surfaces.json"):null;boolean securityCacheHit=cachedSecurity!=null&&!hasError(cachedSecurity);stage(4,6,securityCacheHit?"cache hit: passive Network/API + TLS + Crypto":"passive Network/API + TLS + Crypto scan");
+        try{
+            JSONObject security=cachedSecurity;
+            if(!securityCacheHit){PyObject sec=Python.getInstance().getModule("modkit.mobile.security_scan");security=new JSONObject(sec.callAttr("scan_workspace",getFilesDir().getPath(),app.file("security-surfaces.json").getPath(),new Progress()).toString());}
+            String securityError=security==null?"security scan returned null":security.optString("error","");
+            JSONObject securityStatus=new JSONObject().put("status",securityError.isEmpty()?"SUCCESS":"PARTIAL").put("cacheHit",securityCacheHit).put("total",security==null?0:security.optInt("total")).put("uniqueEndpoints",security==null?0:security.optInt("uniqueEndpoints"));
+            if(!securityError.isEmpty())securityStatus.put("error",securityError);
+            manifest.put("security",securityStatus);
+            if(!securityError.isEmpty())progress("Security scan частичен: "+securityError+" · продолжаю Evidence Graph/AutoMod/report.");
+        }catch(Exception e){
+            if(app.cancelled.get())check();
+            manifest.put("security",new JSONObject().put("status","PARTIAL").put("cacheHit",false).put("total",0).put("uniqueEndpoints",0).put("error",String.valueOf(e.getMessage())));
+            progress("Security scan частичен: "+e.getMessage()+" · продолжаю Evidence Graph/AutoMod/report.");
+        }
 
         check();stage(5,6,"Evidence Graph: ownership + confirmation ladder + exact locators + ranking");PyObject simple=Python.getInstance().getModule("modkit.mobile.simple_mode_cancellable");JSONObject catalog=new JSONObject(simple.callAttr("build_catalog",getFilesDir().getPath(),app.file("simple-catalog.json").getPath(),new Progress()).toString());manifest.put("catalog",new JSONObject().put("total",catalog.optInt("total")).put("important",catalog.optInt("important")).put("buildable",catalog.optInt("buildable")).put("actionable",catalog.optInt("actionable")).put("serverAudit",catalog.optInt("serverAudit")));
 
@@ -143,6 +154,7 @@ public class AutomaticEvidenceService extends Service {
         if(reconstruction==null)degradedReasons.put("JADX_RECONSTRUCTION_MISSING");else if(!reconstruction.optBoolean("complete",false))degradedReasons.put("JADX_RECONSTRUCTION_PARTIAL");else if(reconstruction.optInt("errors")>0)degradedReasons.put("JADX_DECODE_ERRORS");
         if(apktoolSummary==null)degradedReasons.put("APKTOOL_SUMMARY_MISSING");else if("FAILED".equals(apktoolSummary.optString("status"))||hasError(apktoolSummary)||apktoolSummary.optInt("failed")>0)degradedReasons.put("APKTOOL_PARTIAL");
         if(embeddedSummary==null)degradedReasons.put("EMBEDDED_SUMMARY_MISSING");else if(embeddedSummary.optInt("failed")>0)degradedReasons.put("EMBEDDED_PARTIAL");
+        JSONObject securityStatus=manifest.optJSONObject("security");if(securityStatus!=null&&"PARTIAL".equals(securityStatus.optString("status")))degradedReasons.put("SECURITY_PARTIAL");
         if("PARTIAL".equals(il2cppStatus))degradedReasons.put("IL2CPP_PARTIAL");if("PARTIAL".equals(reStatus))degradedReasons.put("RE_ANALYSIS_PARTIAL");
         JSONObject noRvaStatus=manifest.optJSONObject("noRvaNative"),autoStatus=manifest.optJSONObject("autoMod"),reportStatus=manifest.optJSONObject("connectedReport");
         if(noRvaStatus!=null&&"PARTIAL".equals(noRvaStatus.optString("status")))degradedReasons.put("NO_RVA_NATIVE_PARTIAL");
