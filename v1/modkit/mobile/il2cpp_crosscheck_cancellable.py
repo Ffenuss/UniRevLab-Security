@@ -45,12 +45,83 @@ def _part(path: Path) -> Path:
     return path.with_name(path.name + ".part")
 
 
+def _read_blob(path: str | Path, gate: _Gate) -> bytearray:
+    data = bytearray()
+    with Path(path).open("rb") as source:
+        while True:
+            chunk = source.read(1024 * 1024)
+            if not chunk:
+                break
+            gate.force()
+            data.extend(chunk)
+    gate.force()
+    return data
+
+
+def parse_metadata(metadata_path: str | Path, cb: Any | None = None) -> tuple[dict[str, Any], set[str]]:
+    """Base-compatible metadata parser with cooperative checks in the full method loop."""
+    gate = _Gate(cb)
+    gate.force()
+    blob = _read_blob(metadata_path, gate)
+    if len(blob) < 56:
+        raise ValueError("global-metadata.dat is too small")
+    sanity = _base._u32(blob, 0)
+    version = _base._i32(blob, 4)
+    if sanity != _base._METADATA_SANITY:
+        raise ValueError(f"unexpected metadata sanity: 0x{sanity:08x}")
+    if version < 16 or version > 64:
+        raise ValueError(f"unsupported/implausible metadata version: {version}")
+
+    string_offset, string_size = _base._i32(blob, 24), _base._i32(blob, 28)
+    methods_offset, methods_size = _base._i32(blob, 48), _base._i32(blob, 52)
+    for label, offset, size in (
+        ("string", string_offset, string_size),
+        ("methods", methods_offset, methods_size),
+    ):
+        if offset < 0 or size < 0 or offset > len(blob) or offset + size > len(blob):
+            raise ValueError(f"metadata {label} table is out of bounds")
+
+    record_size, score = _base._choose_method_record_size(
+        blob, string_offset, string_size, methods_offset, methods_size, version
+    )
+    gate.force()
+    names: set[str] = set()
+    method_count = 0
+    if record_size:
+        method_count = methods_size // record_size
+        string_limit = string_offset + string_size
+        for index in range(method_count):
+            gate.tick()
+            pos = methods_offset + index * record_size
+            name_index = _base._u32(blob, pos)
+            if name_index >= string_size:
+                continue
+            name = _base._cstring(blob, string_offset + name_index, string_limit)
+            if _base._plausible_name(name):
+                names.add(name)
+    gate.force()
+    return ({
+        "sanityHex": f"0x{sanity:08x}",
+        "version": version,
+        "fileSize": len(blob),
+        "stringOffset": string_offset,
+        "stringSize": string_size,
+        "methodsOffset": methods_offset,
+        "methodsSize": methods_size,
+        "methodRecordSize": record_size,
+        "methodRecordLayoutScore": round(score, 4),
+        "methodDefinitionCount": method_count,
+        "uniqueMethodNameCount": len(names),
+        "methodTableParsed": record_size is not None,
+    }, names)
+
+
 def run_crosscheck(metadata_path: str | Path, library_path: str | Path, methods_path: str | Path,
                    output_path: str | Path, rows_path: str | Path | None = None,
                    cb: Any | None = None) -> dict[str, Any]:
     gate = _Gate(cb)
     gate.force()
-    metadata, method_names = _base.parse_metadata(metadata_path)
+    metadata, method_names = parse_metadata(metadata_path, cb)
     gate.force()
     elf = _base.parse_elf(library_path)
     gate.force()
@@ -122,6 +193,7 @@ def run_crosscheck(metadata_path: str | Path, library_path: str | Path, methods_
             "rowsFile": rows_destination.name,
             "samples": samples,
             "cancelAware": cb is not None,
+            "metadataParsingCancelAware": cb is not None,
             "atomicOutputPromotion": True,
         }
         output_part.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
