@@ -58,14 +58,44 @@ public class App extends Application {
             catch(Exception writeError){Files.deleteIfExists(part.toPath());throw writeError;}
         }catch(Exception ignored){}
     }
+    private void deleteInterruptedTargetTree(File value){
+        if(value==null||!value.exists())return;
+        if(value.isDirectory()){
+            File[] children=value.listFiles();
+            if(children!=null)for(File child:children)deleteInterruptedTargetTree(child);
+        }
+        try{Files.deleteIfExists(value.toPath());}catch(Exception ignored){}
+    }
+    private void cleanupInterruptedTargetPreparation(){
+        result=null;
+        String[] names={
+                "installed-target.json","installed-target.json.part","installed-apk-set.zip","installed-apk-set.zip.tmp","installed-scan.json","installed-apks",
+                "game.apk","game.apk.part","game-native-split.apk","metadata.bin","library.so",
+                "automatic-evidence.json","automatic-evidence.json.part","full-reconstruction.json","full-reconstruction.json.part","modkit-decompiled.zip","apktool-analysis.json","apktool-analysis.json.part","apktool-workspace",
+                "artifact-families.json","embedded-analysis.json","lua-deep.json","hermes-deep","hermes-deep.json","native-deep.json","native-deep-cache","cocos-deep.json","flutter-deep.json","deep-gameplay.json",
+                "analysis.json","analysis.summary.json","analysis.summary.json.part","analysis.ui.jsonl","analysis.methods.jsonl","analysis.methods.jsonl.idx","analysis.methods.jsonl.rva.idx","analysis.methods.jsonl.pages.idx","analysis.methods.meta.json",
+                "analysis.candidates.jsonl","analysis.discoveries.jsonl","analysis.fields.jsonl","analysis.evidence-graph.jsonl","analysis.evidence-graph.jsonl.idx","analysis.evidence-graph.meta.json","analysis.resolver-index.json","analysis.autopilot-index.jsonl","analysis.gameplay-coverage.json","analysis-deep","rodroid",
+                "re-analysis.json","re-analysis.ui.json","re-analysis.menu.json","security-surfaces.json","simple-catalog.json","simple-catalog.json.part","simple-cache.json","simple-progress.json","simple-progress.json.part",
+                "automod-plan.json","automod-plan.json.part","menu-spec.json","menu-preflight.json","menu-validation.json","menu-result.json","menu-auto-prepare.json","menu-auto-prepare-deep.json","menu-auto-confirm.json","menu-autopilot.json","menu-probe-prepare.json","menu-spec.simple-source.json","menu-native-recovery.json","menu-native-recovery.json.tmp","menu-project",
+                "connected-report.json","connected-report.json.part","connected-report.md","connected-report.md.part","evidence-bundle.zip"
+        };
+        for(String name:names)deleteInterruptedTargetTree(file(name));
+        getSharedPreferences("state",0).edit().remove("selections").remove("active.project").remove("metadata.bin").remove("library.so").remove("installed.package").remove("game.apk").apply();
+    }
     @Override public void onCreate() {
         super.onCreate();
-        if (getSharedPreferences("state",0).getBoolean("running",false)) {
+        boolean wasRunning=getSharedPreferences("state",0).getBoolean("running",false);
+        boolean targetPreparing=getSharedPreferences("state",0).getBoolean("target.preparing",false);
+        if(targetPreparing){
+            cleanupInterruptedTargetPreparation();
+            status="Подготовка target была прервана системой. Частичный APK/APK-set очищен; выберите target заново.";
+            stage="STOPPED";
+        }else if(wasRunning){
             status = "Предыдущая операция прервана системой. Можно запустить её заново.";
             stage = "STOPPED";
-            markInterruptedPipeline();
-            getSharedPreferences("state",0).edit().putBoolean("running",false).apply();
         }
+        if(wasRunning){markInterruptedPipeline();}
+        if(wasRunning||targetPreparing){getSharedPreferences("state",0).edit().putBoolean("running",false).putBoolean("target.preparing",false).apply();}
         new Thread(() -> {
             synchronized (this) {
                 if (busy.get()) return;
