@@ -27,6 +27,8 @@ final class AnalysisJournal {
 
     private AnalysisJournal(){}
 
+    static JSONObject data(String key,Object value){JSONObject row=new JSONObject();try{row.put(key,value);}catch(Exception ignored){}return row;}
+
     static void startSession(Context context){
         synchronized(LOCK){
             try{
