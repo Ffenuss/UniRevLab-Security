@@ -60,6 +60,11 @@ _RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 _SHORT = {alias for _, aliases in _RULES for alias in aliases if len(re.sub(r"[^a-z0-9]", "", alias)) <= 3}
+_COMPACT_PREFIXES = (
+    "get", "set", "add", "grant", "apply", "reset", "update", "read", "write", "load", "save",
+    "current", "max", "min", "base", "total", "player", "character", "local", "new", "old",
+    "has", "is", "can", "use", "consume", "regen", "increase", "decrease", "modify",
+)
 
 
 def _id(*parts: object) -> str:
@@ -77,6 +82,20 @@ def _words(value: object) -> tuple[set[str], str]:
     return tokens, compact
 
 
+def _single_alias_hit(alias_compact: str, tokens: set[str], compact: str) -> bool:
+    """Match a single semantic word only at a real semantic boundary.
+
+    Arbitrary substring matching caused false positives such as ``mana`` inside
+    ``ShippingManager``. CamelCase/snake_case names are already tokenized by
+    ``_words``. For fully-lowercase compact symbols (``gethealth``), allow only
+    a small set of explicit semantic prefixes rather than an unrestricted
+    substring search.
+    """
+    if alias_compact in tokens or compact == alias_compact:
+        return True
+    return any(compact == prefix + alias_compact for prefix in _COMPACT_PREFIXES)
+
+
 def classify(value: object) -> tuple[str, list[str]]:
     tokens, compact = _words(value)
     for domain, aliases in _RULES:
@@ -88,9 +107,9 @@ def classify(value: object) -> tuple[str, list[str]]:
             if alias in _SHORT:
                 hit = alias_compact in tokens
             elif len(alias_tokens) > 1:
-                hit = alias_tokens.issubset(tokens) or alias_compact in compact
+                hit = alias_tokens.issubset(tokens) or compact == alias_compact
             else:
-                hit = alias_compact in tokens or alias_compact in compact
+                hit = _single_alias_hit(alias_compact, tokens, compact)
             if hit:
                 matched.append(alias)
         if matched:
