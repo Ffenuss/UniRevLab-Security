@@ -60,6 +60,15 @@ public class FullAnalysisService extends Service {
             Files.deleteIfExists(app.file(name).toPath());
         }
     }
+    private void invalidatePerRunEvidenceState()throws Exception{
+        for(String name:new String[]{
+                "simple-catalog.json","simple-catalog.json.part","simple-progress.json","simple-progress.json.part",
+                "il2cpp-no-rva-native.json","il2cpp-no-rva-native.json.part","il2cpp-no-rva-native.methods.jsonl","il2cpp-no-rva-native.methods.jsonl.part","il2cpp-no-rva-native.failures.jsonl","il2cpp-no-rva-native.failures.jsonl.part",
+                "connected-report.json","connected-report.json.part","connected-report.md","connected-report.md.part"}){
+            if(app.cancelled.get())throw new java.io.InterruptedIOException("cancelled");
+            Files.deleteIfExists(app.file(name).toPath());
+        }
+    }
     private void invalidateEmbeddedRunOutputs()throws Exception{
         for(String name:new String[]{"artifact-families.json","embedded-analysis.json","lua-deep.json","hermes-deep.json","native-deep.json","cocos-deep.json","flutter-deep.json","deep-gameplay.json"}){
             if(app.cancelled.get())throw new java.io.InterruptedIOException("cancelled");
@@ -80,13 +89,15 @@ public class FullAnalysisService extends Service {
         getSharedPreferences("state",0).edit().putBoolean("running",true).apply();
         new Thread(()->{
             boolean chain=true;
-            boolean preparedStateInvalidated=false;
+            boolean runStateInvalidated=false;
             String handoffFailure=null;
             String reconstructionFailure=null;
             startedAt=System.currentTimeMillis();
             pipelineState("RUNNING","RECONSTRUCTION",false,false,null);
             try{
-                invalidatePreparedAutoModState();preparedStateInvalidated=true;
+                invalidatePreparedAutoModState();
+                invalidatePerRunEvidenceState();
+                runStateInvalidated=true;
                 List<File> inputs=DecompilerEngine.resolveTargetInputs(app);
                 if(inputs.isEmpty())throw new java.io.FileNotFoundException("Сначала выберите APK или установленный пакет.");
                 if(!Python.isStarted())Python.start(new AndroidPlatform(this));
@@ -159,7 +170,7 @@ public class FullAnalysisService extends Service {
                 if(app.cancelled.get()){chain=false;progress("Полный анализ отменён пользователем.");}
             }catch(Exception e){
                 chain=false;
-                if(!preparedStateInvalidated)reconstructionFailure="AUTOMOD_PREPARED_STATE_INVALIDATION_FAILED: "+String.valueOf(e.getMessage());
+                if(!runStateInvalidated)reconstructionFailure="RUN_EPOCH_INVALIDATION_FAILED: "+String.valueOf(e.getMessage());
                 else if(!app.cancelled.get())reconstructionFailure="RECONSTRUCTION_FAILED: "+String.valueOf(e.getMessage());
                 progress(app.cancelled.get()?"Полный анализ отменён.":"Полный анализ остановлен: "+e.getMessage()+" · Evidence Graph не будет запущен на неполной реконструкции.");
             }finally{
