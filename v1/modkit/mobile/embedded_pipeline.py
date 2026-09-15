@@ -174,7 +174,7 @@ def run_workspace(
 
     _check(cb, "Embedded 5/7 · Cocos correlation…")
     try:
-        cocos_report = cocos_deep.scan_workspace(root, static_report, native_report, root / "cocos-deep.json")
+        cocos_report = cocos_deep.scan_workspace(root, static_report, native_report, root / "cocos-deep.json", cb)
         runs.append({
             "engineId": cocos_deep.ENGINE_ID,
             "status": "SUCCESS" if cocos_report.get("available") else "UNAVAILABLE",
@@ -186,6 +186,8 @@ def run_workspace(
         _merge_findings(static_report, cocos_report, summary_key="deepCocos",
                         default_engine=cocos_deep.ENGINE_ID, default_kind="COCOS_EVIDENCE",
                         default_category="Runtime/Cocos")
+    except cocos_deep.CocosScanCancelled as exc:
+        raise Cancelled(str(exc)) from exc
     except Cancelled:
         raise
     except Exception as exc:
