@@ -40,6 +40,18 @@ def test_bundle_export_fails_closed_while_analysis_is_running():
     assert "Анализ ещё выполняется" in source
 
 
+def test_bundle_streaming_loops_are_interruptible():
+    source = Path(
+        "android/app/src/main/java/dev/modkit/mobile/EvidenceBundleExporter.java"
+    ).read_text(encoding="utf-8")
+
+    assert "Thread.currentThread().isInterrupted()" in source
+    assert "InterruptedIOException" in source
+    assert "collectInto(root, child, out, depth + 1)" in source
+    assert "while ((n = in.read(buf)) != -1) { checkInterrupted(); zip.write(buf, 0, n); }" in source
+    assert "while ((n = in.read(buf)) != -1) { checkInterrupted(); digest.update(buf, 0, n); }" in source
+
+
 def test_report_center_preflights_before_building_connected_report():
     source = Path(
         "android/app/src/main/java/dev/modkit/mobile/ReportCenterActivity.java"
@@ -50,3 +62,17 @@ def test_report_center_preflights_before_building_connected_report():
     export = source.index("EvidenceBundleExporter.export(this,uri)")
     assert preflight < connected < export
     assert 'manifest.optString("pipelineStatus","UNKNOWN")' in source
+
+
+def test_report_center_propagates_cancel_to_python_and_zip_worker():
+    source = Path(
+        "android/app/src/main/java/dev/modkit/mobile/ReportCenterActivity.java"
+    ).read_text(encoding="utf-8")
+
+    assert "Отменить экспорт" in source
+    assert "job.cancel(true)" in source
+    assert "exportCancelled.get()||Thread.currentThread().isInterrupted()" in source
+    assert 'callAttr("build_connected_report"' in source
+    assert "new ExportProgress()" in source
+    assert "Экспорт отменён." in source
+    assert "worker.shutdownNow()" in source
