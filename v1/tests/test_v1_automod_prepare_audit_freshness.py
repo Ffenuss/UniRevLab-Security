@@ -83,3 +83,15 @@ def test_automod_build_routes_through_final_sha_guard_only_for_automod_path():
     assert 'preflight.optBoolean("readyForAutoBuild")' in guard
     assert '.putExtra("op","menu_build_apk")' in guard
     assert '()->app.cancelled.get()' in guard
+
+
+def test_blocked_prebuild_guard_removes_created_saf_destination():
+    guard = (ANDROID / "AutoModBuildGuardService.java").read_text(encoding="utf-8")
+
+    assert "Uri destination=null;" in guard
+    assert "destination=Uri.parse(uriText);" in guard
+    assert "if(destination!=null&&!handedOff)" in guard
+    assert "DocumentsContract.deleteDocument(getContentResolver(),destination)" in guard
+    handoff = guard.index("handedOff=true;")
+    cleanup = guard.index("DocumentsContract.deleteDocument")
+    assert cleanup < handoff
