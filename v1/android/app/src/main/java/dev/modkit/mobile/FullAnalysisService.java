@@ -98,16 +98,23 @@ public class FullAnalysisService extends Service {
         if(intent!=null&&"cancel".equals(intent.getAction())){app.cancelled.set(true);progress("Отмена запрошена — завершаю текущий безопасный шаг…");return START_NOT_STICKY;}
         startForeground(91,note("Подготовка полного анализа…"));
         if(wake==null||!wake.isHeld()){wake=((PowerManager)getSystemService(POWER_SERVICE)).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"ModKit:full-analysis");wake.acquire(2L*60L*60L*1000L);}
+        startedAt=System.currentTimeMillis();
+        try{
+            writePipelineState("RUNNING","RECONSTRUCTION",false,false,null);
+        }catch(Exception startError){
+            try{Files.deleteIfExists(app.file("automatic-evidence.json.part").toPath());Files.deleteIfExists(app.file("automatic-evidence.json").toPath());}catch(Exception ignored){}
+            getSharedPreferences("state",0).edit().putBoolean("running",false).apply();
+            progress("Полный анализ не запущен: не удалось опубликовать RUNNING manifest: "+String.valueOf(startError.getMessage()));
+            if(wake!=null&&wake.isHeld())wake.release();app.busy.set(false);app.revision++;stopForeground(true);stopSelf();return START_NOT_STICKY;
+        }
         getSharedPreferences("state",0).edit().putBoolean("running",true).apply();
         new Thread(()->{
             boolean chain=true;
-            boolean pipelineStarted=false;
+            boolean pipelineStarted=true;
             boolean runStateInvalidated=false;
             String handoffFailure=null;
             String reconstructionFailure=null;
-            startedAt=System.currentTimeMillis();
             try{
-                writePipelineState("RUNNING","RECONSTRUCTION",false,false,null);pipelineStarted=true;
                 invalidatePreparedAutoModState();
                 invalidatePerRunEvidenceState();
                 runStateInvalidated=true;
