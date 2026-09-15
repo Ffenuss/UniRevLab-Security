@@ -38,7 +38,7 @@ final class EvidenceBundleExporter {
         if (Thread.currentThread().isInterrupted()) throw new java.io.InterruptedIOException("Evidence Bundle export cancelled");
     }
 
-    static void ensureExportable(Context context) throws Exception {
+    private static JSONObject terminalPipeline(Context context) throws Exception {
         checkInterrupted();
         App app = (App)context.getApplicationContext();
         JSONObject pipeline = readJson(new File(app.getFilesDir(), "automatic-evidence.json"));
@@ -50,10 +50,20 @@ final class EvidenceBundleExporter {
         if (!("SUCCESS".equals(status) || "PARTIAL".equals(status) || "FAILED".equals(status) || "CANCELLED".equals(status))) {
             throw new java.io.IOException("Pipeline state не является terminal: " + (status.isEmpty() ? "UNKNOWN" : status));
         }
+        return pipeline;
     }
 
+    private static String pipelineEpoch(JSONObject pipeline) {
+        return pipeline.optString("schema", "") + "|" + pipeline.optString("status", "") + "|" +
+                pipeline.optLong("startedAtMs", -1L) + "|" + pipeline.optLong("finishedAtMs", -1L) + "|" +
+                pipeline.optLong("updatedAtMs", -1L);
+    }
+
+    static void ensureExportable(Context context) throws Exception { terminalPipeline(context); }
+    static String exportEpoch(Context context) throws Exception { return pipelineEpoch(terminalPipeline(context)); }
+
     static JSONObject export(Context context, Uri output) throws Exception {
-        ensureExportable(context);
+        String initialEpoch = exportEpoch(context);
         App app = (App)context.getApplicationContext();
         List<File> candidates = collect(app.getFilesDir());
         JSONArray entries = new JSONArray();
@@ -79,10 +89,13 @@ final class EvidenceBundleExporter {
                     }
 
                     checkInterrupted();
+                    String finalEpoch = exportEpoch(context);
+                    if (!initialEpoch.equals(finalEpoch)) throw new java.io.IOException("Pipeline изменился во время экспорта; Evidence Bundle отменён для защиты epoch consistency.");
                     String engineCatalog = engineCatalog(context);
                     writeText(zip, "toolchain/engine-catalog.json", engineCatalog);
-                    JSONObject pipeline = readJson(new File(app.getFilesDir(), "automatic-evidence.json"));
-                    JSONArray degradedReasons = pipeline == null ? new JSONArray() : pipeline.optJSONArray("degradedReasons");
+                    JSONObject pipeline = terminalPipeline(context);
+                    if (!initialEpoch.equals(pipelineEpoch(pipeline))) throw new java.io.IOException("Pipeline изменился во время экспорта; Evidence Bundle отменён для защиты epoch consistency.");
+                    JSONArray degradedReasons = pipeline.optJSONArray("degradedReasons");
                     if (degradedReasons == null) degradedReasons = new JSONArray();
                     JSONObject manifest = new JSONObject()
                             .put("schema", "modkit-evidence-bundle-1.0")
@@ -91,13 +104,13 @@ final class EvidenceBundleExporter {
                             .put("evidenceFiles", entries)
                             .put("evidenceFileCount", entries.length())
                             .put("evidenceBytes", total[0])
-                            .put("pipelineStatus", pipeline == null ? "UNKNOWN" : pipeline.optString("status", "UNKNOWN"))
-                            .put("pipelineComplete", pipeline != null && pipeline.optBoolean("complete", false))
-                            .put("pipelineDegraded", pipeline != null && pipeline.optBoolean("degraded", false))
+                            .put("pipelineStatus", pipeline.optString("status", "UNKNOWN"))
+                            .put("pipelineComplete", pipeline.optBoolean("complete", false))
+                            .put("pipelineDegraded", pipeline.optBoolean("degraded", false))
                             .put("pipelineDegradedReasons", degradedReasons)
                             .put("rawTargetBinariesIncluded", false)
                             .put("note", "Target APK/SO/metadata are intentionally not duplicated; hashes/locators remain in analysis evidence.");
-                    if (pipeline != null && !pipeline.optString("error", "").isEmpty()) manifest.put("pipelineError", pipeline.optString("error"));
+                    if (!pipeline.optString("error", "").isEmpty()) manifest.put("pipelineError", pipeline.optString("error"));
                     writeText(zip, "bundle-manifest.json", manifest.toString(2));
 
                     StringBuilder hashes = new StringBuilder();
@@ -108,6 +121,7 @@ final class EvidenceBundleExporter {
                     }
                     writeText(zip, "hashes.sha256", hashes.toString());
                     checkInterrupted();
+                    if (!initialEpoch.equals(exportEpoch(context))) throw new java.io.IOException("Pipeline изменился до завершения экспорта; Evidence Bundle отменён для защиты epoch consistency.");
                     return manifest;
                 }
             }
