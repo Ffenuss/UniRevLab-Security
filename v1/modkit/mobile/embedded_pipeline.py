@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from modkit.mobile import artifact_families, cocos_deep, deep_gameplay, flutter_deep, hermes_deep, lua_deep, native_deep
+from modkit.mobile import artifact_families, cocos_deep, deep_gameplay, flutter_deep, hermes_deep, lua_deep, lua_deep_cancellable, native_deep
 
 SCHEMA = "modkit-embedded-analysis-1.4"
 
@@ -112,7 +112,7 @@ def run_workspace(
 
     _check(cb, "Embedded 2/7 · Lua bytecode…")
     try:
-        lua_report = lua_deep.scan_workspace(root, root / "lua-deep.json")
+        lua_report = lua_deep_cancellable.scan_workspace(root, root / "lua-deep.json", cb)
         runs.append({
             "engineId": lua_deep.ENGINE_ID,
             "status": "SUCCESS" if lua_report.get("available") else "UNAVAILABLE",
@@ -123,6 +123,8 @@ def run_workspace(
         _merge_findings(static_report, lua_report, summary_key="deepLua",
                         default_engine=lua_deep.ENGINE_ID, default_kind="LUA_BYTECODE",
                         default_category="Runtime/Lua")
+    except lua_deep_cancellable.LuaScanCancelled as exc:
+        raise Cancelled(str(exc)) from exc
     except Cancelled:
         raise
     except Exception as exc:
