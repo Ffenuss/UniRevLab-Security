@@ -59,15 +59,28 @@ final class EvidenceBundleExporter {
                 pipeline.optLong("updatedAtMs", -1L);
     }
 
+    private static boolean diagnosticFreshOnly(JSONObject pipeline) {
+        String status = pipeline.optString("status", "");
+        return "FAILED".equals(status) || "CANCELLED".equals(status);
+    }
+
+    private static boolean belongsToFailureEpoch(File file, JSONObject pipeline) {
+        long startedAt = pipeline.optLong("startedAtMs", -1L);
+        return startedAt > 0L && file.lastModified() >= startedAt;
+    }
+
     static void ensureExportable(Context context) throws Exception { terminalPipeline(context); }
     static String exportEpoch(Context context) throws Exception { return pipelineEpoch(terminalPipeline(context)); }
 
     static JSONObject export(Context context, Uri output) throws Exception {
-        String initialEpoch = exportEpoch(context);
+        JSONObject initialPipeline = terminalPipeline(context);
+        String initialEpoch = pipelineEpoch(initialPipeline);
+        boolean freshOnly = diagnosticFreshOnly(initialPipeline);
         App app = (App)context.getApplicationContext();
         List<File> candidates = collect(app.getFilesDir());
         JSONArray entries = new JSONArray();
         long[] total = {0L};
+        int[] staleExcluded = {0};
         try {
             try (OutputStream raw = context.getContentResolver().openOutputStream(output, "wt")) {
                 if (raw == null) throw new java.io.IOException("Не удалось открыть Evidence Bundle для записи");
@@ -78,6 +91,7 @@ final class EvidenceBundleExporter {
                         if (total[0] + file.length() > MAX_TEXT_TOTAL) break;
                         String relative = app.getFilesDir().toPath().relativize(file.toPath()).toString().replace(File.separatorChar, '/');
                         if (!isEvidenceFile(relative)) continue;
+                        if (freshOnly && !belongsToFailureEpoch(file, initialPipeline)) { staleExcluded[0]++; continue; }
                         String hash = sha256(file);
                         ZipEntry ze = new ZipEntry("evidence/" + relative); ze.setTime(0L); zip.putNextEntry(ze);
                         try (BufferedInputStream in = new BufferedInputStream(new FileInputStream(file), BUFFER)) {
@@ -108,8 +122,12 @@ final class EvidenceBundleExporter {
                             .put("pipelineComplete", pipeline.optBoolean("complete", false))
                             .put("pipelineDegraded", pipeline.optBoolean("degraded", false))
                             .put("pipelineDegradedReasons", degradedReasons)
+                            .put("diagnosticFreshOnly", freshOnly)
+                            .put("staleEvidenceFilesExcluded", staleExcluded[0])
                             .put("rawTargetBinariesIncluded", false)
-                            .put("note", "Target APK/SO/metadata are intentionally not duplicated; hashes/locators remain in analysis evidence.");
+                            .put("note", freshOnly
+                                    ? "FAILED/CANCELLED diagnostic bundle contains only evidence modified in the current pipeline epoch; older cache evidence is excluded."
+                                    : "Target APK/SO/metadata are intentionally not duplicated; hashes/locators remain in analysis evidence.");
                     if (!pipeline.optString("error", "").isEmpty()) manifest.put("pipelineError", pipeline.optString("error"));
                     writeText(zip, "bundle-manifest.json", manifest.toString(2));
 
