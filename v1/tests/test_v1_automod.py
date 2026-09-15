@@ -50,6 +50,7 @@ def test_automod_planner_is_fail_closed_and_never_promotes_static_keyword_to_bui
     assert plan["modifiesTarget"] is False
     assert plan["runtimeEvidencePromotesBuildability"] is False
     assert plan["il2cppCrosscheckPromotesBuildability"] is False
+    assert plan["metadataIdentityPromotesBuildability"] is False
     assert plan["autoBuildRequiresValidatedExecutableBinding"] is True
     assert plan["serverBypassGenerated"] is False
 
@@ -117,6 +118,60 @@ def test_il2cpp_structural_crosscheck_is_attached_by_rva_without_promoting_build
     assert plan["il2cppCrosscheckPromotesBuildability"] is False
 
 
+def test_no_rva_metadata_identity_is_attached_without_inventing_address_or_buildability():
+    catalog = {"cards": [
+        card(
+            "hp-no-rva",
+            "SetHealth",
+            "APP_OWNED",
+            actionable=False,
+            locator={"methodId": 77, "class": "Game.Player", "method": "SetHealth", "rva": None},
+        ),
+    ]}
+    identity_rows = [{
+        "id": 77,
+        "class": "Game.Player",
+        "methodName": "SetHealth",
+        "status": "METADATA_QUALIFIED_METHOD_CONFIRMED_NO_RVA",
+        "metadataMethodNamePresent": True,
+        "metadataQualifiedMethodPresent": True,
+        "addressConfirmed": False,
+        "rva": None,
+        "actionable": False,
+        "buildable": False,
+        "promotesBuildability": False,
+    }]
+    plan = build_plan(catalog, None, None, identity_rows)
+    row = plan["candidates"][0]
+    assert row["stage"] == "REVIEW"
+    assert row["metadataIdentityObserved"] is True
+    assert row["metadataIdentity"]["metadataQualifiedMethodPresent"] is True
+    assert row["metadataIdentity"]["addressConfirmed"] is False
+    assert row["metadataIdentity"]["rva"] is None
+    assert row["metadataIdentity"]["actionable"] is False
+    assert row["metadataIdentity"]["buildable"] is False
+    assert row["buildable"] is False
+    assert row["actionable"] is False
+    assert plan["metadataIdentityObservedCount"] == 1
+    assert plan["metadataQualifiedNoRvaCount"] == 1
+    assert plan["readyToBuildCount"] == 0
+    assert plan["readyForPreflightCount"] == 0
+    assert plan["metadataIdentityPromotesBuildability"] is False
+
+
+def test_ambiguous_name_only_metadata_identity_is_not_attached_by_guess():
+    catalog = {"cards": [card("ambiguous", "SetHealth", "APP_OWNED", locator={"rva": None})]}
+    identity_rows = [
+        {"id": 1, "class": "A.Player", "methodName": "SetHealth", "status": "METADATA_METHOD_NAME_PRESENT_NO_RVA", "addressConfirmed": False, "promotesBuildability": False},
+        {"id": 2, "class": "B.Player", "methodName": "SetHealth", "status": "METADATA_METHOD_NAME_PRESENT_NO_RVA", "addressConfirmed": False, "promotesBuildability": False},
+    ]
+    plan = build_plan(catalog, None, None, identity_rows)
+    row = plan["candidates"][0]
+    assert row["metadataIdentityObserved"] is False
+    assert row["metadataIdentity"] is None
+    assert plan["metadataIdentityObservedCount"] == 0
+
+
 def test_workspace_plan_writes_schema_and_uses_existing_catalog(tmp_path):
     catalog = {"cards": [card("x", "MaxHP", "LOCATOR_CONFIRMED", actionable=True, locator={"rva": 4096})]}
     (tmp_path / "simple-catalog.json").write_text(json.dumps(catalog), encoding="utf-8")
@@ -130,7 +185,7 @@ def test_workspace_plan_writes_schema_and_uses_existing_catalog(tmp_path):
     output = tmp_path / "automod-plan.json"
     plan = build_workspace_plan(tmp_path, output)
     stored = json.loads(output.read_text(encoding="utf-8"))
-    assert plan["schema"] == "modkit-automod-plan-1.2"
+    assert plan["schema"] == "modkit-automod-plan-1.3"
     assert stored["readyForPreflightCount"] == 1
     assert stored["readyToBuildCount"] == 0
     assert stored["runtimeObservedCount"] == 1
@@ -164,4 +219,6 @@ def test_automod_android_surface_uses_existing_fail_closed_build_pipeline():
     assert '"automod-plan.json"' in storage
     assert '"runtime-correlation.json"' in prep
     assert '"runtime-correlation.json"' in storage
+    assert '"il2cpp-metadata-identity.json"' in prep
+    assert '"il2cpp-metadata-identity.json"' in storage
     assert '"deep-gameplay.json"' in storage
