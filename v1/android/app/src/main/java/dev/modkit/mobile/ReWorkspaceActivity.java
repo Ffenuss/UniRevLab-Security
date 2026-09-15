@@ -37,7 +37,8 @@ public class ReWorkspaceActivity extends Activity {
     private void startWork(Intent i){
         if(app.busy.get()){toast("Сейчас выполняется другая операция");return;}
         if(!app.file("game.apk").isFile() && "re_analyze".equals(i.getStringExtra("op"))){toast("Сначала выберите исходный APK на главном экране");return;}
-        app.cancelled.set(false);app.busy.set(true);app.progress("Подготовка…");i.setClass(this,WorkerService.class);startForegroundService(i);
+        app.cancelled.set(false);app.busy.set(true);app.progress("Подготовка…");i.setClass(this,WorkerService.class);
+        try{startForegroundService(i);}catch(Exception e){app.busy.set(false);app.revision++;app.progress("RE Workspace: не удалось запустить операцию: "+e.getMessage());toast("Не удалось запустить RE-операцию");}
     }
     private JSONObject readUi(){try{return new JSONObject(Io.readUtf8(app.file("re-analysis.ui.json")));}catch(Exception e){return null;}}
     private void addLinesCard(String title,JSONArray lines){
