@@ -13,6 +13,8 @@ def test_bundle_manifest_surfaces_pipeline_health():
         "pipelineDegraded",
         "pipelineDegradedReasons",
         "pipelineError",
+        "diagnosticFreshOnly",
+        "staleEvidenceFilesExcluded",
     ):
         assert f'"{field}"' in source
 
@@ -44,6 +46,21 @@ def test_bundle_export_requires_terminal_pipeline_state_and_blocks_running_or_mi
     assert "Pipeline state не является terminal" in source
 
 
+def test_failed_or_cancelled_bundle_excludes_evidence_older_than_current_epoch():
+    source = Path(
+        "android/app/src/main/java/dev/modkit/mobile/EvidenceBundleExporter.java"
+    ).read_text(encoding="utf-8")
+
+    assert "private static boolean diagnosticFreshOnly(JSONObject pipeline)" in source
+    assert 'return "FAILED".equals(status) || "CANCELLED".equals(status);' in source
+    assert "private static boolean belongsToFailureEpoch(File file, JSONObject pipeline)" in source
+    assert 'pipeline.optLong("startedAtMs", -1L)' in source
+    assert "file.lastModified() >= startedAt" in source
+    assert "boolean freshOnly = diagnosticFreshOnly(initialPipeline);" in source
+    assert "if (freshOnly && !belongsToFailureEpoch(file, initialPipeline)) { staleExcluded[0]++; continue; }" in source
+    assert "FAILED/CANCELLED diagnostic bundle contains only evidence modified in the current pipeline epoch" in source
+
+
 def test_bundle_export_is_bound_to_one_pipeline_epoch():
     source = Path(
         "android/app/src/main/java/dev/modkit/mobile/EvidenceBundleExporter.java"
@@ -51,7 +68,8 @@ def test_bundle_export_is_bound_to_one_pipeline_epoch():
 
     assert "private static String pipelineEpoch(JSONObject pipeline)" in source
     assert "static String exportEpoch(Context context)" in source
-    assert "String initialEpoch = exportEpoch(context);" in source
+    assert "JSONObject initialPipeline = terminalPipeline(context);" in source
+    assert "String initialEpoch = pipelineEpoch(initialPipeline);" in source
     assert "String finalEpoch = exportEpoch(context);" in source
     assert "if (!initialEpoch.equals(finalEpoch))" in source
     assert "if (!initialEpoch.equals(exportEpoch(context)))" in source
