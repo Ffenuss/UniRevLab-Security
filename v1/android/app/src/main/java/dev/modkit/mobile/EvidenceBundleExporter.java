@@ -45,6 +45,11 @@ final class EvidenceBundleExporter {
         if (app.busy.get() || (pipeline != null && "RUNNING".equals(pipeline.optString("status")))) {
             throw new java.io.IOException("Анализ ещё выполняется. Экспорт доступен после завершения или отмены текущего прогона.");
         }
+        if (pipeline == null) throw new java.io.IOException("Нет завершённого pipeline manifest. Сначала запустите полный анализ.");
+        String status = pipeline.optString("status", "");
+        if (!("SUCCESS".equals(status) || "PARTIAL".equals(status) || "FAILED".equals(status) || "CANCELLED".equals(status))) {
+            throw new java.io.IOException("Pipeline state не является terminal: " + (status.isEmpty() ? "UNKNOWN" : status));
+        }
     }
 
     static JSONObject export(Context context, Uri output) throws Exception {
