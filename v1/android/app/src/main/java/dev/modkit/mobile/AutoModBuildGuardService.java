@@ -9,6 +9,7 @@ import android.content.Intent;
 import android.net.Uri;
 import android.os.IBinder;
 import android.os.PowerManager;
+import android.provider.DocumentsContract;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -44,9 +45,11 @@ public class AutoModBuildGuardService extends Service {
         getSharedPreferences("state",0).edit().putBoolean("running",true).apply();
         new Thread(()->{
             boolean handedOff=false;
+            Uri destination=null;
             try{
                 String uriText=intent==null?null:intent.getStringExtra("uri");
                 if(uriText==null||uriText.isEmpty())throw new IOException("Не выбран файл назначения AutoMod APK");
+                destination=Uri.parse(uriText);
                 check();
                 File source=targetPatchApk();
                 progress("AutoMod build: повторно сверяю SHA-256 metadata/lib/catalog/owning APK…");
@@ -54,11 +57,12 @@ public class AutoModBuildGuardService extends Service {
                 check();
                 JSONObject preflight=read("menu-preflight.json");
                 if(preflight==null||!preflight.optBoolean("readyForAutoBuild"))throw new IOException("AutoMod preflight больше не READY; повторите Exact prepare");
-                Intent worker=new Intent(this,WorkerService.class).putExtra("op","menu_build_apk").putExtra("uri",Uri.parse(uriText).toString());
+                Intent worker=new Intent(this,WorkerService.class).putExtra("op","menu_build_apk").putExtra("uri",destination.toString());
                 startForegroundService(worker);
                 handedOff=true;
                 progress("AutoMod build: exact SHA актуальны · передаю в штатную preflight/signing сборку…");
             }catch(Exception e){
+                if(destination!=null&&!handedOff)try{DocumentsContract.deleteDocument(getContentResolver(),destination);}catch(Exception ignored){}
                 progress(app.cancelled.get()?"AutoMod build отменён.":"AutoMod build заблокирован: "+String.valueOf(e.getMessage()));
             }finally{
                 if(wake!=null&&wake.isHeld())wake.release();
