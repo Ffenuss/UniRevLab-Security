@@ -45,7 +45,7 @@ def test_connected_report_cancel_preserves_previous_outputs(tmp_path):
     assert not (tmp_path / "connected-report.md.part").exists()
 
 
-def test_connected_report_uses_one_final_cancel_gate_for_output_pair(tmp_path):
+def test_connected_report_uses_one_final_cancel_gate_and_exact_freshness(tmp_path):
     output_json = tmp_path / "connected-report.json"
     output_md = tmp_path / "connected-report.md"
 
@@ -56,6 +56,9 @@ def test_connected_report_uses_one_final_cancel_gate_for_output_pair(tmp_path):
     policy = report["memoryPolicy"]
     assert policy["coordinatedFinalCancelGate"] is True
     assert policy["multiFileTransactionAtomic"] is False
+    assert report["freshnessPolicy"]["secondaryIl2cppEvidence"] == "EXACT_INPUT_SHA256"
+    assert report["freshnessPolicy"]["mtimeTrustedAsIdentity"] is False
+    assert report["freshnessPolicy"]["standaloneReportRefreshesEvidence"] is True
     assert output_json.is_file() and output_md.is_file()
     assert not (tmp_path / "connected-report.json.part").exists()
     assert not (tmp_path / "connected-report.md.part").exists()
