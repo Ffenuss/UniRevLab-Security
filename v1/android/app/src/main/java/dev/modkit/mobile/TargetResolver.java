@@ -15,8 +15,10 @@ import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -56,14 +58,18 @@ final class TargetResolver {
         ArrayList<Member> members=new ArrayList<>();
         if(manifest!=null){
             JSONArray splits=manifest.optJSONArray("splits");
-            if(splits!=null){
-                for(int i=0;i<splits.length();i++){
-                    JSONObject row=splits.optJSONObject(i);if(row==null)continue;String path=row.optString("path","");if(path.isEmpty())continue;File file=new File(path);if(!file.isFile())throw new IOException("Target split отсутствует: "+row.optString("name",file.getName()));
-                    members.add(new Member(row.optInt("index",i),row.optString("name",file.getName()),file,row.optString("sha256",""),row.optInt("nativeCount",0),row.optInt("dexCount",0)));
-                }
+            if(splits==null||splits.length()==0)throw new IOException("Target manifest не содержит APK/split members; fallback на base.apk запрещён");
+            Set<Integer> seenIndexes=new HashSet<>();Set<String> seenPaths=new HashSet<>();
+            for(int i=0;i<splits.length();i++){
+                JSONObject row=splits.optJSONObject(i);if(row==null)throw new IOException("Target manifest содержит повреждённую split row #"+i);
+                int index=row.optInt("index",i);if(!seenIndexes.add(index))throw new IOException("Target manifest содержит duplicate split index: "+index);
+                String path=row.optString("path","");if(path.isEmpty())throw new IOException("Target split #"+index+" не содержит path");
+                File file=new File(path);String canonical=file.getCanonicalPath();if(!seenPaths.add(canonical))throw new IOException("Target manifest повторно ссылается на один APK: "+canonical);
+                if(!file.isFile())throw new IOException("Target split отсутствует: "+row.optString("name",file.getName()));
+                members.add(new Member(index,row.optString("name",file.getName()),file,row.optString("sha256",""),row.optInt("nativeCount",0),row.optInt("dexCount",0)));
             }
-        }
-        if(members.isEmpty()){
+            int expected=manifest.optInt("expectedApkCount",members.size());if(expected>0&&members.size()!=expected)throw new IOException("Target APK-set неполон: copied="+members.size()+" / expected="+expected);
+        }else{
             File single=app.file("game.apk");if(!single.isFile())throw new IOException("Target APK не выбран");members.add(new Member(0,single.getName(),single,"",0,0));
         }
         members.sort(Comparator.comparingInt(m->m.index));
@@ -75,8 +81,8 @@ final class TargetResolver {
     }
 
     static JSONObject verify(Target target,AtomicBoolean cancelled)throws Exception{
-        JSONArray rows=new JSONArray();boolean ok=true;int patchOwnerIndex=-1;
-        if(target.manifest!=null){JSONObject owner=target.manifest.optJSONObject("patchOwner");if(owner!=null)patchOwnerIndex=owner.optInt("splitIndex",-1);}
+        JSONArray rows=new JSONArray();boolean ok=true;int patchOwnerIndex=-1;boolean fullIl2cppPair=false;
+        if(target.manifest!=null){JSONObject owner=target.manifest.optJSONObject("patchOwner");if(owner!=null)patchOwnerIndex=owner.optInt("splitIndex",-1);fullIl2cppPair=target.manifest.optBoolean("fullIl2cppPair",false);}
         boolean patchOwnerSeen=patchOwnerIndex<0;
         for(Member member:target.members){
             check(cancelled);JSONObject row=new JSONObject().put("index",member.index).put("name",member.name).put("path",member.file.getAbsolutePath()).put("expectedSha256",member.sha256).put("size",member.file.length());
@@ -84,9 +90,9 @@ final class TargetResolver {
             String actual=sha256(member.file,cancelled);boolean match=member.sha256==null||member.sha256.isEmpty()||member.sha256.equalsIgnoreCase(actual);
             row.put("actualSha256",actual).put("ok",match);if(!match){row.put("reason","sha256-mismatch");ok=false;}if(member.index==patchOwnerIndex)patchOwnerSeen=true;rows.put(row);
         }
-        if(!patchOwnerSeen)ok=false;
+        if(!patchOwnerSeen||fullIl2cppPair&&patchOwnerIndex<0)ok=false;
         if(target.manifest!=null&&"PARTIAL".equals(target.manifest.optString("scanCompleteness")))ok=false;
-        return new JSONObject().put("schema","modkit-target-resolver-verify-1.0").put("ok",ok&&rows.length()>0).put("targetId",target.targetId).put("apkSet",target.apkSet).put("memberCount",rows.length()).put("patchOwnerIndex",patchOwnerIndex).put("patchOwnerPresent",patchOwnerSeen).put("currentTargetDigest",targetDigest(target,cancelled)).put("members",rows);
+        return new JSONObject().put("schema","modkit-target-resolver-verify-1.1").put("ok",ok&&rows.length()>0).put("targetId",target.targetId).put("apkSet",target.apkSet).put("memberCount",rows.length()).put("fullIl2cppPair",fullIl2cppPair).put("patchOwnerIndex",patchOwnerIndex).put("patchOwnerPresent",patchOwnerSeen).put("currentTargetDigest",targetDigest(target,cancelled)).put("members",rows);
     }
 
     static JSONObject requireVerified(Target target,AtomicBoolean cancelled)throws Exception{
