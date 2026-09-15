@@ -170,22 +170,32 @@ public class ProcessLabActivity extends AppCompatActivity {
         });
     }
 
-    private void writeRuntimeSession(JSONObject snapshot) throws Exception {
-        java.io.File destination=app.file("runtime-session.json"),part=app.file("runtime-session.json.part");
+    private void writeAtomicJson(String name,JSONObject value) throws Exception {
+        java.io.File destination=app.file(name),part=app.file(name+".part");
         Files.deleteIfExists(part.toPath());
-        try{Files.write(part.toPath(),snapshot.toString(2).getBytes(StandardCharsets.UTF_8));Files.move(part.toPath(),destination.toPath(),StandardCopyOption.REPLACE_EXISTING);}
+        try{Files.write(part.toPath(),value.toString(2).getBytes(StandardCharsets.UTF_8));Files.move(part.toPath(),destination.toPath(),StandardCopyOption.REPLACE_EXISTING);}
         catch(Exception e){Files.deleteIfExists(part.toPath());throw e;}
     }
+
+    private void writeRuntimeSession(JSONObject snapshot) throws Exception { writeAtomicJson("runtime-session.json",snapshot); }
 
     private JSONObject persistAndCorrelate(RootProcessEngine.RuntimeSession created) throws Exception {
         JSONObject snapshot = created.toJson(rootProbe);
         writeRuntimeSession(snapshot);
+        java.io.File destination=app.file("runtime-correlation.json"),backendTemp=app.file("runtime-correlation.json.build");
+        Files.deleteIfExists(destination.toPath());Files.deleteIfExists(app.file("runtime-correlation.json.part").toPath());Files.deleteIfExists(backendTemp.toPath());
         try {
             if (!Python.isStarted()) Python.start(new AndroidPlatform(this));
             PyObject module = Python.getInstance().getModule("modkit.mobile.runtime_correlate");
-            return new JSONObject(module.callAttr("build_workspace_correlation", getFilesDir().getPath(), app.file("runtime-session.json").getPath(), app.file("runtime-correlation.json").getPath()).toString());
+            JSONObject linked=new JSONObject(module.callAttr("build_workspace_correlation", getFilesDir().getPath(), app.file("runtime-session.json").getPath(), backendTemp.getPath()).toString());
+            Files.deleteIfExists(backendTemp.toPath());
+            writeAtomicJson("runtime-correlation.json",linked);
+            return linked;
         } catch (Exception e) {
-            return new JSONObject().put("schema", "modkit-runtime-correlation-error-1.0").put("error", String.valueOf(e.getMessage())).put("correlationCount", 0).put("mappedRuntimeVaCount", 0);
+            Files.deleteIfExists(backendTemp.toPath());Files.deleteIfExists(app.file("runtime-correlation.json.part").toPath());Files.deleteIfExists(destination.toPath());
+            JSONObject error=new JSONObject().put("schema", "modkit-runtime-correlation-error-1.0").put("error", String.valueOf(e.getMessage())).put("correlationCount", 0).put("mappedRuntimeVaCount", 0);
+            try{writeAtomicJson("runtime-correlation.json",error);}catch(Exception ignored){}
+            return error;
         }
     }
 
