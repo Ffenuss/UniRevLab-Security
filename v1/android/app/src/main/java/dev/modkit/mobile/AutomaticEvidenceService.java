@@ -102,14 +102,22 @@ public class AutomaticEvidenceService extends Service {
 
         stage(1,6,"target digest + APK/split cache plan");
         JSONObject plan=new JSONObject(cache.callAttr("plan_workspace",getFilesDir().getPath(),app.file("simple-cache.json").getPath(),new Progress()).toString());
-        boolean unchanged=plan.optBoolean("unchanged",false);boolean haveAnalysis=app.file("analysis.json").isFile()||app.file("re-analysis.json").isFile()||app.file("analysis.methods.jsonl").isFile();manifest.put("cachePlan",plan).put("cacheHit",unchanged&&haveAnalysis);
+        boolean unchanged=plan.optBoolean("unchanged",false);
+        boolean hasIl2cppPair=app.file("metadata.bin").isFile()&&app.file("library.so").isFile();
+        boolean haveReAnalysis=app.file("re-analysis.json").isFile();
+        boolean haveIl2cppAnalysis=!hasIl2cppPair||app.file("analysis.json").isFile()||app.file("analysis.methods.jsonl").isFile();
+        boolean coreCacheReady=haveReAnalysis&&haveIl2cppAnalysis;
+        manifest.put("cachePlan",plan).put("cacheHit",unchanged&&coreCacheReady);
 
-        File reTarget=targetForReAnalysis();stage(2,6,unchanged&&haveAnalysis?"cache hit: IL2CPP/DEX/native correlation":"IL2CPP + DEX/native correlation");JSONObject engines=new JSONObject();manifest.put("engines",engines);
-        if(!unchanged||!haveAnalysis){
+        File reTarget=targetForReAnalysis();stage(2,6,unchanged&&coreCacheReady?"cache hit: IL2CPP/DEX/native correlation":"IL2CPP + DEX/native correlation");JSONObject engines=new JSONObject();manifest.put("engines",engines);
+        if(!unchanged||!coreCacheReady){
             invalidateFreshCoreOutputs();
             try{engines.put("il2cpp",runIl2cpp(reTarget));}catch(Exception e){if(app.cancelled.get())check();engines.put("il2cpp",new JSONObject().put("status","PARTIAL").put("error",String.valueOf(e.getMessage())));progress("IL2CPP частичен: "+e.getMessage()+" · продолжаю DEX/native correlation.");}
             check();try{engines.put("re",runReAnalysis(reTarget));}catch(Exception e){if(app.cancelled.get())check();engines.put("re",new JSONObject().put("status","PARTIAL").put("error",String.valueOf(e.getMessage())));progress("DEX/native correlation частична: "+e.getMessage()+" · продолжаю остальные evidence backend'ы.");}
-        }else{engines.put("il2cpp",new JSONObject().put("status","CACHE_HIT"));engines.put("re",new JSONObject().put("status","CACHE_HIT"));}
+        }else{
+            engines.put("il2cpp",hasIl2cppPair?new JSONObject().put("status","CACHE_HIT"):new JSONObject().put("status","NOT_APPLICABLE").put("reason","complete IL2CPP pair not found"));
+            engines.put("re",new JSONObject().put("status","CACHE_HIT"));
+        }
 
         check();stage(3,6,"embedded evidence + gameplay ownership correlation");JSONObject artifactSummary=readJson("artifact-families.json");JSONObject embeddedSummary=readJson("embedded-analysis.json");manifest.put("artifactFamilies",artifactSummary==null?JSONObject.NULL:new JSONObject().put("total",artifactSummary.optInt("total")).put("familyCounts",artifactSummary.optJSONObject("familyCounts")));manifest.put("embeddedAnalysis",embeddedSummary==null?JSONObject.NULL:embeddedSummary);
 
