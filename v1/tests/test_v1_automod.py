@@ -70,6 +70,7 @@ def test_automod_android_surface_uses_existing_fail_closed_build_pipeline():
     full = (ROOT / "android/app/src/main/java/dev/modkit/mobile/FullModeActivity.java").read_text(encoding="utf-8")
     storage = (ROOT / "android/app/src/main/java/dev/modkit/mobile/AnalysisStorageActivity.java").read_text(encoding="utf-8")
     prep = (ROOT / "android/app/src/main/java/dev/modkit/mobile/TargetPreparationService.java").read_text(encoding="utf-8")
+    evidence = (ROOT / "android/app/src/main/java/dev/modkit/mobile/AutomaticEvidenceService.java").read_text(encoding="utf-8")
     assert '.AutoModActivity" android:exported="false"' in manifest
     assert 'getModule("modkit.mobile.automod")' in activity
     assert '"menu_smart_prepare"' in activity
@@ -78,6 +79,8 @@ def test_automod_android_surface_uses_existing_fail_closed_build_pipeline():
     assert "AutoModActivity.class" in auto
     assert "AutoModActivity.class" in full
     assert "AutoModActivity.class" in storage
+    assert 'getModule("modkit.mobile.automod")' in evidence
+    assert '"automod-plan.json"' in evidence
     assert '"automod-plan.json"' in prep
     assert '"automod-plan.json"' in storage
     assert '"deep-gameplay.json"' in storage
