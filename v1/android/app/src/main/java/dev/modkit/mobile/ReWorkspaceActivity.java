@@ -41,6 +41,7 @@ public class ReWorkspaceActivity extends Activity {
         try{startForegroundService(i);}catch(Exception e){app.busy.set(false);app.revision++;app.progress("RE Workspace: не удалось запустить операцию: "+e.getMessage());toast("Не удалось запустить RE-операцию");}
     }
     private JSONObject readUi(){try{return new JSONObject(Io.readUtf8(app.file("re-analysis.ui.json")));}catch(Exception e){return null;}}
+    private String confidence(JSONObject finding){if(finding==null||!finding.has("confidence")||finding.isNull("confidence"))return "—";return String.format(java.util.Locale.ROOT,"%.2f",finding.optDouble("confidence"));}
     private void addLinesCard(String title,JSONArray lines){
         if(lines==null||lines.length()==0)return;
         StringBuilder b=new StringBuilder();
@@ -58,7 +59,7 @@ public class ReWorkspaceActivity extends Activity {
         findings.removeAllViews();
         if(report==null){
             if(app.file("re-analysis.json").isFile()){
-                summary.setText("Обнаружен полный RE-отчёт без компактного UI-индекса. Это результат dev18/прерванного сохранения. Чтобы не загружать огромный JSON в Java heap и не повторить вылет, этот экран его не открывает. Запустите полный RE-анализ ещё раз в dev19.");
+                summary.setText("Обнаружен полный RE-отчёт без компактного UI-индекса. Это может быть результат прерванного или устаревшего сохранения. Чтобы не загружать большой JSON целиком в Java heap, экран его не открывает. Повторите полный RE-анализ в текущей версии ModKit.");
             }else{
                 summary.setText("Отчёта пока нет. RE-анализ использует выбранный APK и, если доступны, текущие metadata/libil2cpp/Rodroid dump.");
             }
@@ -79,7 +80,7 @@ public class ReWorkspaceActivity extends Activity {
             JSONObject f=arr.optJSONObject(i);if(f==null)continue;
             LinearLayout card=new LinearLayout(this);card.setOrientation(LinearLayout.VERTICAL);card.setPadding(dp(10),dp(8),dp(10),dp(12));
             TextView h=text(f.optString("title"),17);h.setTypeface(null,Typeface.BOLD);card.addView(h);
-            card.addView(text(f.optString("status").toUpperCase()+" · confidence "+String.format(java.util.Locale.ROOT,"%.2f",f.optDouble("confidence"))+"\n"+f.optString("rationale"),12));
+            card.addView(text(f.optString("status").toUpperCase()+" · confidence "+confidence(f)+"\n"+f.optString("rationale"),12));
             JSONArray ev=f.optJSONArray("evidenceLines");if(ev!=null&&ev.length()>0){StringBuilder b=new StringBuilder();for(int j=0;j<ev.length();j++){String line=ev.optString(j,"");if(!line.isEmpty())b.append(line).append("\n");}if(b.length()>0)card.addView(text(b.toString().trim(),12));}
             findings.addView(card);
         }
