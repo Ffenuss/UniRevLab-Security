@@ -44,8 +44,9 @@ def test_patch_lab_build_remains_fail_closed():
 
     assert 'exactPrepareAuditReady()' in source
     assert 'pf.optBoolean("readyForAutoBuild")' in source
-    assert '!audit.optBoolean("promotesBuildability")' in source
-    assert '!audit.optBoolean("addressRecoveryPromotesBuildability")' in source
+    verifier = Path("android/app/src/main/java/dev/modkit/mobile/AutoModAuditVerifier.java").read_text(encoding="utf-8")
+    assert 'audit.optBoolean("promotesBuildability")||audit.optBoolean("addressRecoveryPromotesBuildability")' in verifier
+    assert '"EXACT_INPUT_SHA256".equals(audit.optString("freshnessPolicy"))' in verifier
     assert 'build.setEnabled(idle&&prepareCount>0&&preflightReady&&exactPrepareAuditReady())' in source
 
 

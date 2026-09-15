@@ -44,7 +44,7 @@ def test_report_center_exposes_connected_1_2_deep_coverage_and_streaming_export(
     assert 'getModule("modkit.mobile.connected_report_streaming")' in center
     assert 'optInt("deepEnginesAvailable",0)' in center
     assert "deep backend'ов" in center
-    assert "потоково" in center
+    assert "ExportProgress" in center
     assert "EvidenceBundleExporter.export" in center
 
 

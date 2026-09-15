@@ -119,7 +119,7 @@ def _wanted(workdir: str | Path, gate: _Gate | None = None) -> tuple[set[str], s
     return ids, pairs, names, rvas
 
 
-def _filtered_reader(workdir: str | Path, gate: _Gate) -> tuple[Callable[[Path], Iterator[dict[str, Any]]], dict[str, int]]:
+def _filtered_reader(workdir: str | Path, gate: _Gate | None = None) -> tuple[Callable[[Path], Iterator[dict[str, Any]]], dict[str, int]]:
     ids, pairs, names, rvas = _wanted(workdir, gate)
     retained = {"crosscheck": 0, "identity": 0, "native": 0}
 

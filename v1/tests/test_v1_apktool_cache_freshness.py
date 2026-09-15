@@ -14,8 +14,8 @@ def test_apktool_cache_requires_decoded_workspace_fingerprint():
         assert field in text
     assert "workspaceFingerprint(workspace, cancelled)" in text
     assert 'expectedSha.equals(current.optString("sha256"))' in text
-    assert 'expectedCount == current.optInt("fileCount", -2)' in text
-    assert 'expectedBytes == current.optLong("bytes", -2L)' in text
+    assert 'expectedCount != current.optInt("fileCount", -2)' in text
+    assert 'expectedBytes != current.optLong("bytes", -2L)' in text
 
 
 def test_apktool_cache_miss_clears_stale_workspace_before_decode():

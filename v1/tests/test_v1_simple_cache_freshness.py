@@ -44,7 +44,10 @@ def test_il2cpp_cache_hit_requires_exact_methods_catalog_fingerprint(tmp_path: P
     _write(tmp_path / "metadata.bin", b"metadata")
     _write(tmp_path / "library.so", b"elf-library")
     _write(tmp_path / "analysis.json", b'{"schema":"analysis"}')
+    _write(tmp_path / "analysis.summary.json", b'{"schema":"summary"}')
     _write(tmp_path / "analysis.methods.jsonl", b'{"id":1,"name":"A"}\n')
+    _write(tmp_path / "analysis.gameplay-coverage.json", b'{"schema":"coverage"}')
+    _write(tmp_path / "analysis.evidence-graph.jsonl", b'{"id":1}\n')
     _write(tmp_path / "re-analysis.json", b'{"findingCount":0}')
     _write(tmp_path / "security-surfaces.json", b'{"total":0}')
 

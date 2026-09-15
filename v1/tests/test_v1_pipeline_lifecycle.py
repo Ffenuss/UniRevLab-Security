@@ -294,7 +294,8 @@ def test_process_death_recovers_running_manifest_or_orphan_atomic_part_fail_clos
     assert "boolean pipelineInterrupted=false;" in on_create
     assert "pipelineInterrupted=markInterruptedPipeline();" in on_create
     assert "if(wasRunning||pipelineInterrupted)" in on_create
-    assert "if(wasRunning||targetPreparing||pipelineInterrupted)" in on_create
+    assert "boolean interruptedState=wasRunning||targetPreparing||pipelineInterrupted;" in on_create
+    assert "if(interruptedState)" in on_create
 
 
 def test_target_switch_clears_pipeline_status_temp():

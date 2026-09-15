@@ -74,7 +74,7 @@ def test_automod_android_surface_uses_exact_recovery_prepare_and_fail_closed_bui
     evidence=(ROOT/"android/app/src/main/java/dev/modkit/mobile/AutomaticEvidenceService.java").read_text(encoding="utf-8")
     assert '.AutoModActivity" android:exported="false"' in manifest
     assert '.AutoModPrepareService" android:exported="false"' in manifest
-    assert 'getModule("modkit.mobile.automod")' in activity
+    assert 'getModule("modkit.mobile.automod_cancellable")' in activity
     assert "AutoModPrepareService.class" in activity
     assert '"menu_smart_prepare"' not in activity
     assert '"menu_preflight"' in activity
@@ -84,18 +84,18 @@ def test_automod_android_surface_uses_exact_recovery_prepare_and_fail_closed_bui
     assert 'prepare_workspace' in prepare_service
     assert 'Deep/binding/preflight' in activity
     assert 'pf==null||!pf.optBoolean("readyForAutoBuild")' in activity
-    assert 'build.setEnabled(idle&&prepareCount>0&&preflightReady)' in activity
-    assert 'runtime VA observed' in activity
-    assert 'runtimeVaHex' in activity
-    assert 'metadata identity/no-RVA' in activity
+    assert 'build.setEnabled(idle&&prepareCount>0&&preflightReady&&exactPrepareAuditReady())' in activity
+    assert 'runtime VA ' in activity
+    assert 'runtimeObservation' in activity
+    assert 'metadata/no-RVA' in activity
     assert 'nativeRecoveredLocatorCount' in activity
     assert 'nativeRvaRecovery' in activity
     assert "ProcessLabActivity.class" in activity
     assert "AutoModActivity.class" in auto
     assert "AutoModActivity.class" in full
     assert "AutoModActivity.class" in storage
-    assert 'getModule("modkit.mobile.automod")' in evidence
-    assert 'getModule("modkit.mobile.il2cpp_no_rva_native")' in evidence
+    assert 'getModule("modkit.mobile.automod_cancellable")' in evidence
+    assert 'getModule("modkit.mobile.il2cpp_no_rva_native_release")' in evidence
     assert '"automod-plan.json"' in evidence
     assert '"automod-plan.json"' in prep
     assert '"automod-plan.json"' in storage

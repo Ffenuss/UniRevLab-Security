@@ -15,7 +15,7 @@ def test_deep_script_outputs_are_cleared_when_target_changes():
 
 def test_embedded_pipeline_runs_lua_cocos_and_semantic_gameplay_without_manual_import():
     pipeline = (ROOT / "modkit/mobile/embedded_pipeline.py").read_text(encoding="utf-8")
-    assert "lua_deep.scan_workspace" in pipeline
+    assert "lua_deep_cancellable.scan_workspace" in pipeline
     assert "cocos_deep.scan_workspace" in pipeline
     assert "deep_gameplay.scan_workspace" in pipeline
     assert '"luaReport": "lua-deep.json"' in pipeline

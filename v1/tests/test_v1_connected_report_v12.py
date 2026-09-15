@@ -366,7 +366,7 @@ def test_android_report_center_uses_enriched_connected_report_and_evidence_bundl
     activity = (ROOT / "android/app/src/main/java/dev/modkit/mobile/ReportCenterActivity.java").read_text(encoding="utf-8")
     exporter = (ROOT / "android/app/src/main/java/dev/modkit/mobile/EvidenceBundleExporter.java").read_text(encoding="utf-8")
     automatic = (ROOT / "android/app/src/main/java/dev/modkit/mobile/AutomaticEvidenceService.java").read_text(encoding="utf-8")
-    assert 'getModule("modkit.mobile.connected_report_v12")' in activity
+    assert 'getModule("modkit.mobile.connected_report_streaming")' in activity
     assert "connected-report 1.2" in activity
     assert "runtimeObservedFindings" in activity
     assert "il2cppStructuralFindings" in activity
@@ -375,7 +375,7 @@ def test_android_report_center_uses_enriched_connected_report_and_evidence_bundl
     assert "token conflicts" in activity
     assert "EvidenceBundleExporter.export" in activity
     assert '".jsonl"' in exporter
-    assert 'getModule("modkit.mobile.connected_report_v12")' in automatic
+    assert 'getModule("modkit.mobile.connected_report_streaming")' in automatic
     assert 'app.file("connected-report.json")' in automatic
     assert 'app.file("connected-report.md")' in automatic
     assert '"metadataTokenNoRva"' in automatic

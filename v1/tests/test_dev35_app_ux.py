@@ -68,11 +68,14 @@ def test_discovery_rows_remain_fail_closed_after_legacy_dashboard_removal():
     assert 'ready=cat.optInt("buildable")' in auto
     # AutoMod must be reachable for locator/runtime/review candidates, but the actual signed
     # build remains gated by smart-prepare + preflight inside AutoMod/WorkerService.
-    assert 'mod.setEnabled(!app.busy.get()&&(ready>0||actionable>0||important>0))' in auto
+    assert 'autoModAllowedForRun(run,current)' in auto
+    assert 'mod.setEnabled(!app.busy.get()&&autoModAllowedForRun(run,current)&&(ready>0||actionable>0||important>0))' in auto
     assert 'AutoModActivity.class' in auto
-    assert '"menu_smart_prepare"' in automod
+    assert "AutoModPrepareService.class" in automod
     assert '"menu_preflight"' in automod
-    assert '"menu_smart_build_apk"' in automod
+    assert '"menu_build_apk"' in automod
+    assert '"menu_smart_prepare"' not in automod
+    assert '"menu_smart_build_apk"' not in automod
 
 
 def test_menu_builder_is_context_aware_and_collapses_advanced_tools():

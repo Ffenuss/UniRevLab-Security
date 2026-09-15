@@ -100,5 +100,5 @@ def test_automod_surface_shows_recovered_rva_separately_from_metadata_identity()
     assert "nativeRecoveredLocatorCount" in activity
     assert "nativeRvaRecovery" in activity
     assert "recovered RVA" in activity
-    assert "exact CodeGenModule" in activity
+    assert "exact recovery" in activity
     assert "binding/preflight" in activity

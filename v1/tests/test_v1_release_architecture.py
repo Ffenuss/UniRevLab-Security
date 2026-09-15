@@ -89,7 +89,11 @@ def test_long_running_chain_persists_interruption_marker():
     prep = read("android/app/src/main/java/dev/modkit/mobile/TargetPreparationService.java")
     full = read("android/app/src/main/java/dev/modkit/mobile/FullAnalysisService.java")
     evidence = read("android/app/src/main/java/dev/modkit/mobile/AutomaticEvidenceService.java")
-    for source in (prep, full, evidence):
+    prep_compact = "".join(prep.split())
+    assert 'persistPreparationState(true)' in prep_compact
+    assert 'persistPreparationState(false)' in prep_compact
+    assert '.commit()' in prep_compact
+    for source in (full, evidence):
         compact = "".join(source.split())
         assert 'putBoolean("running",true)' in compact
         assert 'putBoolean("running",false)' in compact

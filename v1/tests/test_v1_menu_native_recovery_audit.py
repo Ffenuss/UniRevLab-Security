@@ -21,22 +21,26 @@ def test_exact_prepare_adapter_persists_fail_closed_audit():
 
 def test_automod_service_requires_completed_exact_prepare_audit_and_cleans_partial_state():
     source = (ROOT / "android/app/src/main/java/dev/modkit/mobile/AutoModPrepareService.java").read_text(encoding="utf-8")
-    assert 'readRequiredAudit()' in source
-    assert 'app.file("menu-native-recovery.json")' in source
-    assert 'if(!audit.optBoolean("completed"))' in source
-    assert 'if(!audit.optBoolean("normalBindingRequired")||!audit.optBoolean("preflightRequired"))' in source
-    assert 'if(audit.optBoolean("promotesBuildability")||audit.optBoolean("addressRecoveryPromotesBuildability"))' in source
+    verifier = (ROOT / "android/app/src/main/java/dev/modkit/mobile/AutoModAuditVerifier.java").read_text(encoding="utf-8")
+    assert 'AutoModAuditVerifier.verifyCurrent' in source
+    assert 'app.file("menu-native-recovery.json")' in verifier
+    assert 'if(!audit.optBoolean("completed"))' in verifier
+    assert 'if(!audit.optBoolean("normalBindingRequired")||!audit.optBoolean("preflightRequired"))' in verifier
+    assert 'if(audit.optBoolean("promotesBuildability")||audit.optBoolean("addressRecoveryPromotesBuildability"))' in verifier
+    assert '"EXACT_INPUT_SHA256".equals(audit.optString("freshnessPolicy"))' in verifier
     assert 'catch(Exception e){\n                String cleanup="";\n                try{invalidatePreparedState();}' in source
     assert '"menu-native-recovery.json"' in source
 
 
 def test_automod_ui_build_gate_requires_exact_prepare_audit_plus_preflight():
     source = (ROOT / "android/app/src/main/java/dev/modkit/mobile/AutoModActivity.java").read_text(encoding="utf-8")
+    verifier = (ROOT / "android/app/src/main/java/dev/modkit/mobile/AutoModAuditVerifier.java").read_text(encoding="utf-8")
     assert 'private boolean exactPrepareAuditReady()' in source
-    assert 'audit.optBoolean("completed")' in source
-    assert 'audit.optBoolean("normalBindingRequired")' in source
-    assert 'audit.optBoolean("preflightRequired")' in source
-    assert '!audit.optBoolean("promotesBuildability")' in source
+    assert 'AutoModAuditVerifier.structurallyReady' in source
+    assert 'audit.optBoolean("completed")' in verifier
+    assert 'audit.optBoolean("normalBindingRequired")' in verifier
+    assert 'audit.optBoolean("preflightRequired")' in verifier
+    assert 'audit.optBoolean("promotesBuildability")||audit.optBoolean("addressRecoveryPromotesBuildability")' in verifier
     assert 'if(!exactPrepareAuditReady())' in source
     assert 'preflightReady&&exactPrepareAuditReady()' in source
     assert '"menu-native-recovery.json"' in source

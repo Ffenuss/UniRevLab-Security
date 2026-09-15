@@ -12,7 +12,7 @@ def test_full_reconstruction_persists_stage_remaining_and_elapsed():
     assert 'put("totalStages",total)' in compact
     assert 'put("remainingStages",Math.max(0,total-index))' in compact
     assert 'put("elapsedMs",elapsed)' in compact
-    assert 'app.file("simple-progress.json")' in source
+    assert 'writeAtomicJson("simple-progress.json",row)' in source
     assert 'stage(1,4,"Inventory:' in source
     assert 'stage(2,4,"JADX:' in source
     assert 'stage(3,4,"Apktool ' in source

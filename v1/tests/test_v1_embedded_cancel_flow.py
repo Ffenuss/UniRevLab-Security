@@ -24,7 +24,7 @@ class CancelAfterArtifactFamilies:
 def test_embedded_pipeline_stops_before_next_backend_on_cancel(tmp_path, monkeypatch):
     calls = {"artifact": 0, "lua": 0}
 
-    def artifact_scan(_root):
+    def artifact_scan(*_args, **_kwargs):
         calls["artifact"] += 1
         return {
             "schema": "test-artifacts",
@@ -39,7 +39,7 @@ def test_embedded_pipeline_stops_before_next_backend_on_cancel(tmp_path, monkeyp
         raise AssertionError("Lua backend must not run after cancellation")
 
     monkeypatch.setattr(embedded_pipeline.artifact_families, "scan_workspace", artifact_scan)
-    monkeypatch.setattr(embedded_pipeline.lua_deep, "scan_workspace", lua_scan)
+    monkeypatch.setattr(embedded_pipeline.lua_deep_cancellable, "scan_workspace", lua_scan)
 
     callback = CancelAfterArtifactFamilies()
     with pytest.raises(embedded_pipeline.Cancelled):

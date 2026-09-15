@@ -9,7 +9,7 @@ def test_automod_plan_and_prepare_invalidate_stale_build_gate():
     service = (ROOT / "android/app/src/main/java/dev/modkit/mobile/AutoModPrepareService.java").read_text(encoding="utf-8")
     worker = (ROOT / "android/app/src/main/java/dev/modkit/mobile/WorkerService.java").read_text(encoding="utf-8")
 
-    assert "invalidatePreparedState();" in activity
+    assert "if(!invalidatePreparedState())" in activity
     assert '"menu-spec.json","menu-preflight.json","menu-validation.json","menu-auto-confirm.json","menu-autopilot.json"' in activity
     assert "invalidatePreparedState();" in service
     assert '"menu-spec.json","menu-preflight.json","menu-validation.json","menu-auto-confirm.json","menu-autopilot.json"' in service

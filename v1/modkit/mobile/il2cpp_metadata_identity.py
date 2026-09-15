@@ -392,7 +392,7 @@ def build_identity_evidence(metadata_path: str | Path, methods_path: str | Path,
                      or (effective_class.rsplit(".", 1)[-1], effective_method) in qualified)
             )
             name_present = bool(effective_method and effective_method in method_names)
-            qualified_confirmed = bool(pair_confirmed or (token_confirmed and token_class))
+            qualified_confirmed = bool(not token_conflict and (pair_confirmed or (token_confirmed and token_class)))
 
             if token_conflict:
                 status = "METADATA_TOKEN_CONFLICT_NO_RVA"
