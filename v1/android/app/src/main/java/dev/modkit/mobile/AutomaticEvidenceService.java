@@ -116,13 +116,13 @@ public class AutomaticEvidenceService extends Service {
 
         check();
         try{
-            PyObject autoMod=Python.getInstance().getModule("modkit.mobile.automod");JSONObject autoPlan=new JSONObject(autoMod.callAttr("build_workspace_plan",getFilesDir().getPath(),app.file("automod-plan.json").getPath()).toString());
+            PyObject autoMod=Python.getInstance().getModule("modkit.mobile.automod_cancellable");JSONObject autoPlan=new JSONObject(autoMod.callAttr("build_workspace_plan",getFilesDir().getPath(),app.file("automod-plan.json").getPath(),new Progress()).toString());
             manifest.put("autoMod",new JSONObject().put("readyToBuild",autoPlan.optInt("readyToBuildCount")).put("readyForPreflight",autoPlan.optInt("readyForPreflightCount")).put("runtimeNeeded",autoPlan.optInt("runtimeNeededCount")).put("review",autoPlan.optInt("reviewCount")).put("auditOnly",autoPlan.optInt("auditOnlyCount")).put("excluded",autoPlan.optInt("excludedCount")).put("metadataIdentityNoRva",autoPlan.optInt("metadataIdentityObservedCount")).put("metadataQualifiedNoRva",autoPlan.optInt("metadataQualifiedNoRvaCount")));
         }catch(Exception e){manifest.put("autoMod",new JSONObject().put("status","PARTIAL").put("error",String.valueOf(e.getMessage())));progress("AutoMod-план частичен: "+e.getMessage()+" · основной Evidence Graph сохранён.");}
 
         check();
         try{
-            PyObject reportModule=Python.getInstance().getModule("modkit.mobile.connected_report_streaming");JSONObject connected=new JSONObject(reportModule.callAttr("build_connected_report",getFilesDir().getPath(),app.file("connected-report.json").getPath(),app.file("connected-report.md").getPath()).toString());
+            PyObject reportModule=Python.getInstance().getModule("modkit.mobile.connected_report_streaming");JSONObject connected=new JSONObject(reportModule.callAttr("build_connected_report",getFilesDir().getPath(),app.file("connected-report.json").getPath(),app.file("connected-report.md").getPath(),new Progress()).toString());
             manifest.put("connectedReport",new JSONObject().put("status","SUCCESS").put("schema",connected.optString("schema")).put("findingCount",connected.optInt("findingCount")).put("exactLinked",connected.optInt("exactLinked")).put("runtimeObserved",connected.optInt("runtimeObservedFindings")).put("il2cppStructural",connected.optInt("il2cppStructuralFindings")).put("metadataIdentityNoRva",connected.optInt("metadataIdentityConfirmedFindings")).put("metadataQualifiedNoRva",connected.optInt("metadataQualifiedIdentityFindings")).put("metadataTokenNoRva",connected.optInt("metadataTokenIdentityFindings")).put("metadataTokenConflicts",connected.optInt("metadataTokenConflictFindings")).put("nativeRvaRecovered",connected.optInt("nativeRvaRecoveredFindings")));
         }catch(Exception e){manifest.put("connectedReport",new JSONObject().put("status","PARTIAL").put("error",String.valueOf(e.getMessage())));progress("Connected report частичен: "+e.getMessage()+" · AutoMod/Evidence Graph сохранены.");}
 
