@@ -5,6 +5,7 @@ import org.json.JSONObject;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
@@ -53,7 +54,8 @@ public class App extends Application {
             catch(Exception malformed){value=new JSONObject().put("schema","modkit-automatic-evidence-1.1").put("status","RUNNING");}
             if(!"RUNNING".equals(value.optString("status")))return;
             value.put("status","FAILED").put("phase","FINISHED").put("complete",false).put("cancelled",false).put("interruptedBySystem",true).put("error","SYSTEM_INTERRUPTED").put("finishedAtMs",System.currentTimeMillis());
-            Files.write(manifest.toPath(),value.toString(2).getBytes(StandardCharsets.UTF_8));
+            try{Files.write(part.toPath(),value.toString(2).getBytes(StandardCharsets.UTF_8));Files.move(part.toPath(),manifest.toPath(),StandardCopyOption.REPLACE_EXISTING);}
+            catch(Exception writeError){Files.deleteIfExists(part.toPath());throw writeError;}
         }catch(Exception ignored){}
     }
     @Override public void onCreate() {
