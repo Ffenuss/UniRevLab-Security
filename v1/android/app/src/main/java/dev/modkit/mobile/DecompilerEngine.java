@@ -9,292 +9,193 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 import java.util.zip.ZipOutputStream;
 
 import jadx.api.JadxArgs;
 import jadx.api.JadxDecompiler;
 import jadx.api.JavaClass;
 import jadx.api.JavaNode;
-import jadx.api.ResourceFile;
 import jadx.api.impl.NoOpCodeCache;
 import jadx.api.impl.SimpleCodeWriter;
 import jadx.api.security.JadxSecurityFlag;
 import jadx.api.security.impl.JadxSecurity;
 import jadx.core.plugins.files.IJadxFilesGetter;
-import jadx.core.xmlgen.ResContainer;
 
 /**
- * ModKit dev36 decompiler backend.
+ * ModKit 1.1 low-memory decompiler backend.
  *
- * Design rules:
- *  - APK/APK-set aware (base + every locally copied split is loaded together)
- *  - lazy Java generation: class index never calls getCode()
- *  - one JADX worker thread on Android to cap memory pressure
- *  - no network dependency at runtime; all analysis is local
- *  - Java source is a decompiler view, not an editable/recompilable source of truth
- *  - Smali view is the bytecode-level representation exposed by JADX
+ * APK sets are never kept in one JADX instance. Every classes*.dex is extracted
+ * and indexed independently; interactive Java/Smali decoding reopens only the
+ * owning DEX and closes it immediately. Resources are indexed directly from APK
+ * ZIPs, so browsing them does not require loading all bytecode into Java heap.
  */
 final class DecompilerEngine implements Closeable {
-    static final String BACKEND = "JADX 1.5.6";
+    static final String BACKEND = "JADX 1.5.6 · bounded DEX";
     static final int MAX_SEARCH_HITS = 100;
     static final int MAX_XREFS = 120;
+    private static final int MAX_RESOURCE_PREVIEW=256*1024;
+    private static final int BUFFER=128*1024;
 
     static final class ClassEntry {
         final String fullName;
         final String shortName;
         ClassEntry(String fullName, String shortName) { this.fullName=fullName; this.shortName=shortName; }
     }
-
     static final class SearchHit {
         final String className;
         final int line;
         final String preview;
         SearchHit(String className, int line, String preview) { this.className=className; this.line=line; this.preview=preview; }
     }
+    private static final class DexUnit {
+        final int id;final File apk,dex;final String apkName,entry;
+        DexUnit(int id,File apk,File dex,String apkName,String entry){this.id=id;this.apk=apk;this.dex=dex;this.apkName=apkName;this.entry=entry;}
+        String label(){return apkName+"!"+entry;}
+    }
+    private static final class IndexedClass {
+        final String fullName,shortName;final DexUnit unit;
+        IndexedClass(String fullName,String shortName,DexUnit unit){this.fullName=fullName;this.shortName=shortName;this.unit=unit;}
+    }
+    private static final class ResourceRef {
+        final String key,entry;final File apk;
+        ResourceRef(String key,String entry,File apk){this.key=key;this.entry=entry;this.apk=apk;}
+    }
 
     private final App app;
-    private final File outDir;
-    private final File configDir;
-    private final File cacheDir;
-    private final File tempDir;
-    private JadxDecompiler jadx;
-    private final LinkedHashMap<String,JavaClass> classes = new LinkedHashMap<>();
-    private List<File> inputs = Collections.emptyList();
+    private final File root,configDir,cacheDir,tempDir,dexDir,exportDir;
+    private final ArrayList<File> inputs=new ArrayList<>();
+    private final ArrayList<DexUnit> dexUnits=new ArrayList<>();
+    private final LinkedHashMap<String,IndexedClass> classes=new LinkedHashMap<>();
+    private final LinkedHashMap<String,ResourceRef> resources=new LinkedHashMap<>();
+    private final ArrayList<String> loadFailures=new ArrayList<>();
+    private boolean open=false;
+    private int jadxErrors=0,jadxWarnings=0,duplicateClasses=0;
 
     DecompilerEngine(Context context) {
         this.app=(App)context.getApplicationContext();
-        File root=app.file("decompiler");
-        this.outDir=new File(root,"export");
-        this.configDir=new File(root,"config");
-        this.cacheDir=new File(root,"cache");
-        this.tempDir=new File(root,"tmp");
+        root=app.file("decompiler");configDir=new File(root,"config");cacheDir=new File(root,"cache");tempDir=new File(root,"tmp");dexDir=new File(tempDir,"dex");exportDir=new File(root,"export");
     }
 
     synchronized void open() throws Exception {
-        close();
-        inputs=resolveTargetInputs(app);
-        if(inputs.isEmpty()) throw new FileNotFoundException("Сначала выберите APK или установленный пакет.");
-        mkdir(configDir); mkdir(cacheDir); mkdir(tempDir); mkdir(outDir);
-
-        JadxArgs args=new JadxArgs();
-        args.setInputFiles(inputs);
-        args.setOutDir(outDir);
-        args.setThreadsCount(1);
-        args.setCodeCache(NoOpCodeCache.INSTANCE);
-        args.setCodeWriterProvider(SimpleCodeWriter::new);
-        Set<JadxSecurityFlag> flags=JadxSecurityFlag.all();
-        flags.remove(JadxSecurityFlag.SECURE_XML_PARSER);
-        args.setSecurity(new JadxSecurity(flags));
-        args.setLoadJadxClsSetFile(false);
-        args.setFilesGetter(new IJadxFilesGetter(){
-            @Override public Path getConfigDir(){return configDir.toPath();}
-            @Override public Path getCacheDir(){return cacheDir.toPath();}
-            @Override public Path getTempDir(){return tempDir.toPath();}
-        });
-
-        JadxDecompiler instance=new JadxDecompiler(args);
-        try {
-            instance.load();
-            ArrayList<JavaClass> ordered=new ArrayList<>(instance.getClasses());
-            ordered.sort(Comparator.comparing(JavaClass::getFullName,String.CASE_INSENSITIVE_ORDER));
-            for(JavaClass cls:ordered) classes.put(cls.getFullName(),cls);
-            jadx=instance;
-        } catch(Throwable t) {
-            try{instance.close();}catch(Throwable ignored){}
-            throw t;
-        }
-    }
-
-    synchronized boolean isOpen(){return jadx!=null;}
-    synchronized int classCount(){return classes.size();}
-    synchronized int resourceCount(){return jadx==null?0:jadx.getResources().size();}
-    synchronized int errorCount(){return jadx==null?0:jadx.getErrorsCount();}
-    synchronized int warnCount(){return jadx==null?0:jadx.getWarnsCount();}
-    synchronized List<File> inputFiles(){return new ArrayList<>(inputs);}
-
-    synchronized List<ClassEntry> classes(String query, int limit) {
-        String q=query==null?"":query.trim().toLowerCase(Locale.ROOT);
-        ArrayList<ClassEntry> out=new ArrayList<>();
-        for(JavaClass cls:classes.values()){
-            String full=cls.getFullName();
-            if(!q.isEmpty()&&!full.toLowerCase(Locale.ROOT).contains(q))continue;
-            out.add(new ClassEntry(full,cls.getName()));
-            if(out.size()>=limit)break;
-        }
-        return out;
-    }
-
-    synchronized String javaCode(String fullName) throws Exception {
-        JavaClass cls=requireClass(fullName);
-        try{return cls.getCode();}
-        catch(Throwable t){throw new Exception("JADX Java decode failed for "+fullName+": "+safeMessage(t),t);}
-    }
-
-    synchronized String smaliCode(String fullName) throws Exception {
-        JavaClass cls=requireClass(fullName);
-        try{return cls.getSmali();}
-        catch(Throwable t){throw new Exception("Smali decode failed for "+fullName+": "+safeMessage(t),t);}
-    }
-
-    synchronized String xrefs(String fullName) throws Exception {
-        JavaClass cls=requireClass(fullName);
-        try {
-            List<JavaNode> useIn=cls.getUseIn();
-            StringBuilder sb=new StringBuilder();
-            sb.append("Uses of ").append(fullName).append(" · ").append(useIn.size()).append('\n');
-            int count=0;
-            for(JavaNode node:useIn){
-                sb.append("• ").append(node.getFullName()).append('\n');
-                if(++count>=MAX_XREFS){sb.append("… truncated at ").append(MAX_XREFS).append("\n");break;}
-            }
-            if(useIn.isEmpty())sb.append("No local incoming references reported by JADX.\n");
-            return sb.toString();
-        } catch(Throwable t){throw new Exception("Xref resolution failed: "+safeMessage(t),t);}
-    }
-
-    List<SearchHit> searchCode(String query, AtomicBoolean cancel) throws Exception {
-        final String q=query==null?"":query.trim().toLowerCase(Locale.ROOT);
-        if(q.length()<2)throw new IllegalArgumentException("Введите минимум 2 символа.");
-        final ArrayList<JavaClass> snapshot;
-        synchronized(this){ snapshot=new ArrayList<>(classes.values()); }
-        ArrayList<SearchHit> hits=new ArrayList<>();
-        for(JavaClass cls:snapshot){
-            if(cancel!=null&&cancel.get())break;
-            String code;
-            synchronized(this){
-                try{code=cls.getCode();}
-                catch(Throwable ignored){continue;}
-            }
-            String[] lines=code.split("\\R",-1);
-            for(int i=0;i<lines.length;i++){
-                if(cancel!=null&&cancel.get())break;
-                if(lines[i].toLowerCase(Locale.ROOT).contains(q)){
-                    String p=lines[i].trim();
-                    if(p.length()>180)p=p.substring(0,180)+"…";
-                    hits.add(new SearchHit(cls.getFullName(),i+1,p));
-                    if(hits.size()>=MAX_SEARCH_HITS)return hits;
+        close();deleteTree(tempDir);deleteTree(exportDir);mkdir(configDir);mkdir(cacheDir);mkdir(tempDir);mkdir(dexDir);mkdir(exportDir);
+        TargetResolver.Target target=TargetResolver.resolve(app);inputs.addAll(target.apkFiles());
+        int id=0;
+        for(File apk:inputs){
+            try(ZipFile zip=new ZipFile(apk)){
+                ArrayList<? extends ZipEntry> entries=Collections.list(zip.entries());entries.sort(Comparator.comparing(ZipEntry::getName,String.CASE_INSENSITIVE_ORDER));
+                for(ZipEntry entry:entries){
+                    if(entry.isDirectory())continue;String name=entry.getName();String lower=name.toLowerCase(Locale.ROOT);
+                    if(lower.matches("(?:^|.*/)classes\\d*\\.dex")){
+                        File dest=new File(dexDir,String.format(Locale.ROOT,"%04d-%s-%s",id,safe(apk.getName()),safe(new File(name).getName())));extract(zip,entry,dest);dexUnits.add(new DexUnit(id++,apk,dest,apk.getName(),name));
+                    }else if(!lower.startsWith("meta-inf/")&&!lower.endsWith(".dex")){
+                        String key=apk.getName()+"!"+name;resources.put(key,new ResourceRef(key,name,apk));
+                    }
                 }
             }
-            synchronized(this){try{cls.unload();}catch(Throwable ignored){}}
+        }
+        for(DexUnit unit:dexUnits){
+            JadxDecompiler jadx=null;
+            try{
+                jadx=createJadx(unit.dex,new File(tempDir,"index-"+unit.id));jadx.load();
+                ArrayList<JavaClass> ordered=new ArrayList<>(jadx.getClasses());ordered.sort(Comparator.comparing(JavaClass::getFullName,String.CASE_INSENSITIVE_ORDER));
+                for(JavaClass cls:ordered){String full=cls.getFullName();if(classes.containsKey(full)){duplicateClasses++;continue;}classes.put(full,new IndexedClass(full,cls.getName(),unit));}
+                jadxErrors+=jadx.getErrorsCount();jadxWarnings+=jadx.getWarnsCount();
+            }catch(Throwable t){loadFailures.add(unit.label()+": "+t.getClass().getSimpleName()+": "+safeMessage(t));AnalysisJournal.exception(app,t instanceof OutOfMemoryError?"DECOMPILER_INDEX_OOM":"DECOMPILER_INDEX_FAILURE",t);}
+            finally{if(jadx!=null)try{jadx.close();}catch(Throwable ignored){}System.gc();}
+        }
+        open=true;
+        AnalysisJournal.append(app,"DECOMPILER_INDEX_READY","Low-memory DEX index ready",new JSONObject().put("apkCount",inputs.size()).put("dexCount",dexUnits.size()).put("classCount",classes.size()).put("resourceCount",resources.size()).put("failures",loadFailures.size()).put("duplicates",duplicateClasses).put("memory",AnalysisJournal.memory()));
+    }
+
+    synchronized boolean isOpen(){return open;}
+    synchronized int classCount(){return classes.size();}
+    synchronized int resourceCount(){return resources.size();}
+    synchronized int errorCount(){return jadxErrors+loadFailures.size();}
+    synchronized int warnCount(){return jadxWarnings+duplicateClasses;}
+    synchronized List<File> inputFiles(){return new ArrayList<>(inputs);}
+
+    synchronized List<ClassEntry> classes(String query,int limit){ensureOpen();String q=query==null?"":query.trim().toLowerCase(Locale.ROOT);ArrayList<ClassEntry> out=new ArrayList<>();for(IndexedClass cls:classes.values()){if(!q.isEmpty()&&!cls.fullName.toLowerCase(Locale.ROOT).contains(q))continue;out.add(new ClassEntry(cls.fullName,cls.shortName));if(out.size()>=limit)break;}return out;}
+
+    String javaCode(String fullName)throws Exception{return decodeClass(fullName,false);}
+    String smaliCode(String fullName)throws Exception{return decodeClass(fullName,true);}
+    private String decodeClass(String fullName,boolean smali)throws Exception{
+        IndexedClass indexed; synchronized(this){ensureOpen();indexed=classes.get(fullName);}if(indexed==null)throw new FileNotFoundException(fullName);
+        JadxDecompiler jadx=null;try{jadx=createJadx(indexed.unit.dex,new File(tempDir,"decode-"+indexed.unit.id));jadx.load();JavaClass cls=findClass(jadx,fullName);if(cls==null)throw new FileNotFoundException(fullName+" in "+indexed.unit.label());String code=smali?cls.getSmali():cls.getCode();return "// Source: "+indexed.unit.label()+"\n"+code;}
+        catch(OutOfMemoryError oom){AnalysisJournal.exception(app,"DECOMPILER_DECODE_OOM",oom);throw new Exception("Недостаточно Java heap для одного DEX: "+indexed.unit.label(),oom);}
+        catch(Exception e){throw e;}catch(Throwable t){throw new Exception((smali?"Smali":"JADX Java")+" decode failed for "+fullName+": "+safeMessage(t),t);}finally{if(jadx!=null)try{jadx.close();}catch(Throwable ignored){}System.gc();}
+    }
+
+    String xrefs(String fullName)throws Exception{
+        IndexedClass indexed; synchronized(this){ensureOpen();indexed=classes.get(fullName);}if(indexed==null)throw new FileNotFoundException(fullName);
+        JadxDecompiler jadx=null;try{jadx=createJadx(indexed.unit.dex,new File(tempDir,"xref-"+indexed.unit.id));jadx.load();JavaClass cls=findClass(jadx,fullName);if(cls==null)throw new FileNotFoundException(fullName);List<JavaNode> useIn=cls.getUseIn();StringBuilder sb=new StringBuilder("Uses of ").append(fullName).append(" · same DEX ").append(indexed.unit.label()).append(" · ").append(useIn.size()).append('\n');int count=0;for(JavaNode node:useIn){sb.append("• ").append(node.getFullName()).append('\n');if(++count>=MAX_XREFS){sb.append("… truncated at ").append(MAX_XREFS).append('\n');break;}}if(useIn.isEmpty())sb.append("No incoming references reported inside this DEX. Cross-DEX relationship evidence is available from RE/Evidence Graph.\n");return sb.toString();}
+        catch(OutOfMemoryError oom){AnalysisJournal.exception(app,"DECOMPILER_XREF_OOM",oom);throw new Exception("Недостаточно heap для xref DEX: "+indexed.unit.label(),oom);}finally{if(jadx!=null)try{jadx.close();}catch(Throwable ignored){}System.gc();}
+    }
+
+    List<SearchHit> searchCode(String query,AtomicBoolean cancel)throws Exception{
+        String q=query==null?"":query.trim().toLowerCase(Locale.ROOT);if(q.length()<2)throw new IllegalArgumentException("Введите минимум 2 символа.");
+        ArrayList<DexUnit> units; synchronized(this){ensureOpen();units=new ArrayList<>(dexUnits);}ArrayList<SearchHit> hits=new ArrayList<>();
+        for(DexUnit unit:units){check(cancel);JadxDecompiler jadx=null;try{jadx=createJadx(unit.dex,new File(tempDir,"search-"+unit.id));jadx.load();for(JavaClass cls:jadx.getClasses()){check(cancel);String code;try{code=cls.getCode();}catch(Throwable ignored){continue;}String[] lines=code.split("\\R",-1);for(int i=0;i<lines.length;i++){check(cancel);if(lines[i].toLowerCase(Locale.ROOT).contains(q)){String p=lines[i].trim();if(p.length()>180)p=p.substring(0,180)+"…";hits.add(new SearchHit(cls.getFullName(),i+1,"["+unit.label()+"] "+p));if(hits.size()>=MAX_SEARCH_HITS)return hits;}}try{cls.unload();}catch(Throwable ignored){}}}
+            catch(OutOfMemoryError oom){AnalysisJournal.exception(app,"DECOMPILER_SEARCH_OOM",oom);}
+            catch(InterruptedIOException cancelled){throw cancelled;}
+            catch(Throwable failure){AnalysisJournal.exception(app,"DECOMPILER_SEARCH_PARTIAL",failure);}
+            finally{if(jadx!=null)try{jadx.close();}catch(Throwable ignored){}System.gc();}
         }
         return hits;
     }
 
-    synchronized List<String> resources(String query, int limit) {
-        ensureOpen();
-        String q=query==null?"":query.trim().toLowerCase(Locale.ROOT);
-        ArrayList<String> out=new ArrayList<>();
-        for(ResourceFile rf:jadx.getResources()){
-            String n=rf.getDeobfName();
-            if(!q.isEmpty()&&!n.toLowerCase(Locale.ROOT).contains(q))continue;
-            out.add(n);
-            if(out.size()>=limit)break;
+    synchronized List<String> resources(String query,int limit){ensureOpen();String q=query==null?"":query.trim().toLowerCase(Locale.ROOT);ArrayList<String> out=new ArrayList<>();for(String key:resources.keySet()){if(!q.isEmpty()&&!key.toLowerCase(Locale.ROOT).contains(q))continue;out.add(key);if(out.size()>=limit)break;}return out;}
+
+    String resourcePreview(String key)throws Exception{
+        ResourceRef ref; synchronized(this){ensureOpen();ref=resources.get(key);}if(ref==null)throw new FileNotFoundException(key);
+        try(ZipFile zip=new ZipFile(ref.apk)){ZipEntry e=zip.getEntry(ref.entry);if(e==null)throw new FileNotFoundException(key);long declared=e.getSize();if(declared>MAX_RESOURCE_PREVIEW)return "Binary/large resource: "+key+" · "+declared+" bytes. Open it in File Workspace for format-aware inspection.";byte[] data;try(InputStream in=zip.getInputStream(e)){data=readLimited(in,MAX_RESOURCE_PREVIEW+1);}if(data.length>MAX_RESOURCE_PREVIEW)return "Resource preview capped at "+MAX_RESOURCE_PREVIEW+" bytes: "+key;if(looksText(data))return new String(data,StandardCharsets.UTF_8);return "Binary resource: "+key+" · "+data.length+" bytes. Open in File Workspace for HEX/format-aware view.";}
+    }
+
+    File exportAllZip(AtomicBoolean cancel)throws Exception{
+        synchronized(this){ensureOpen();}
+        deleteTree(exportDir);mkdir(exportDir);File zipFile=app.file("modkit-decompiled.zip"),tmp=app.file("modkit-decompiled.zip.tmp");Files.deleteIfExists(tmp.toPath());
+        JSONArray unitRows=new JSONArray();int failed=0;
+        for(DexUnit unit:new ArrayList<>(dexUnits)){check(cancel);JadxDecompiler jadx=null;File out=new File(exportDir,String.format(Locale.ROOT,"dex-%04d-%s",unit.id,safe(unit.apkName)));mkdir(out);try{jadx=createJadx(unit.dex,out);jadx.getArgs().setOutDir(out);jadx.load();jadx.save();unitRows.put(new JSONObject().put("source",unit.label()).put("status","SUCCESS").put("classes",jadx.getClasses().size()).put("errors",jadx.getErrorsCount()).put("warnings",jadx.getWarnsCount()));}
+            catch(InterruptedIOException cancelled){throw cancelled;}
+            catch(Throwable t){failed++;unitRows.put(new JSONObject().put("source",unit.label()).put("status","FAILED").put("errorClass",t.getClass().getName()).put("error",safeMessage(t)));AnalysisJournal.exception(app,t instanceof OutOfMemoryError?"DECOMPILER_EXPORT_OOM":"DECOMPILER_EXPORT_PARTIAL",t);}
+            finally{if(jadx!=null)try{jadx.close();}catch(Throwable ignored){}System.gc();}
         }
-        out.sort(String.CASE_INSENSITIVE_ORDER);
-        return out;
-    }
-
-    synchronized String resourcePreview(String name) throws Exception {
-        ensureOpen();
-        ResourceFile found=null;
-        for(ResourceFile rf:jadx.getResources()) if(name.equals(rf.getDeobfName())||name.equals(rf.getOriginalName())){found=rf;break;}
-        if(found==null)throw new FileNotFoundException(name);
-        try {
-            ResContainer c=found.loadContent();
-            StringBuilder sb=new StringBuilder();
-            renderContainer(c,sb,0,256*1024);
-            if(sb.length()==0)return "Binary resource: "+name+" ("+found.getType()+")";
-            return sb.toString();
-        } catch(Throwable t){throw new Exception("Resource decode failed: "+safeMessage(t),t);}
-    }
-
-    /** Save complete JADX output then zip it. Intended for explicit user export only. */
-    synchronized File exportAllZip(AtomicBoolean cancel) throws Exception {
-        ensureOpen();
-        deleteTree(outDir);mkdir(outDir);
-        if(cancel!=null&&cancel.get())throw new InterruptedIOException("cancelled");
-        try{jadx.save();}catch(Throwable t){throw new Exception("JADX export failed: "+safeMessage(t),t);}
-        if(cancel!=null&&cancel.get())throw new InterruptedIOException("cancelled");
-        File zip=app.file("modkit-decompiled.zip");
-        File tmp=new File(zip.getParentFile(),zip.getName()+".tmp");
         try(ZipOutputStream z=new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(tmp)))){
-            zipTree(outDir,outDir,z,cancel);
-            JSONObject manifest=new JSONObject()
-                .put("schema","modkit-decompiler-export-1.0")
-                .put("backend",BACKEND)
-                .put("inputs",new JSONArray(inputNames()))
-                .put("classes",classes.size())
-                .put("errors",jadx.getErrorsCount())
-                .put("warnings",jadx.getWarnsCount());
-            ZipEntry e=new ZipEntry("modkit-decompiler.json");z.putNextEntry(e);z.write(manifest.toString(2).getBytes(StandardCharsets.UTF_8));z.closeEntry();
-        }
-        Files.move(tmp.toPath(),zip.toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-        return zip;
+            zipTree(exportDir,exportDir,z,cancel);
+            streamRawResources(z,cancel);
+            JSONObject manifest=new JSONObject().put("schema","modkit-decompiler-export-2.0").put("backend",BACKEND).put("apkInputs",new JSONArray(inputNames())).put("dexUnits",dexUnits.size()).put("classes",classes.size()).put("resources",resources.size()).put("indexFailures",new JSONArray(loadFailures)).put("exportFailures",failed).put("units",unitRows);
+            ZipEntry e=new ZipEntry("modkit-decompiler.json");e.setTime(0L);z.putNextEntry(e);z.write(manifest.toString(2).getBytes(StandardCharsets.UTF_8));z.closeEntry();
+        }catch(Exception e){Files.deleteIfExists(tmp.toPath());throw e;}catch(Error e){try{Files.deleteIfExists(tmp.toPath());}catch(Exception ignored){}throw e;}
+        Files.move(tmp.toPath(),zipFile.toPath(),StandardCopyOption.REPLACE_EXISTING);return zipFile;
     }
 
+    private void streamRawResources(ZipOutputStream z,AtomicBoolean cancel)throws Exception{
+        byte[] buffer=new byte[BUFFER];for(File apk:new ArrayList<>(inputs)){check(cancel);try(ZipFile input=new ZipFile(apk)){ArrayList<? extends ZipEntry> entries=Collections.list(input.entries());entries.sort(Comparator.comparing(ZipEntry::getName,String.CASE_INSENSITIVE_ORDER));for(ZipEntry entry:entries){check(cancel);if(entry.isDirectory())continue;String low=entry.getName().toLowerCase(Locale.ROOT);if(low.matches("(?:^|.*/)classes\\d*\\.dex")||low.startsWith("meta-inf/"))continue;ZipEntry out=new ZipEntry("raw-resources/"+safe(apk.getName())+"/"+entry.getName());out.setTime(0L);z.putNextEntry(out);try(InputStream in=input.getInputStream(entry)){int n;while((n=in.read(buffer))!=-1){check(cancel);z.write(buffer,0,n);}}z.closeEntry();}}}
+    }
+
+    private JadxDecompiler createJadx(File input,File work)throws Exception{
+        mkdir(work);File config=new File(work,"config"),cache=new File(work,"cache"),tmp=new File(work,"tmp");mkdir(config);mkdir(cache);mkdir(tmp);
+        JadxArgs args=new JadxArgs();args.setInputFiles(Collections.singletonList(input));args.setThreadsCount(1);args.setCodeCache(NoOpCodeCache.INSTANCE);args.setCodeWriterProvider(SimpleCodeWriter::new);Set<JadxSecurityFlag> flags=JadxSecurityFlag.all();flags.remove(JadxSecurityFlag.SECURE_XML_PARSER);args.setSecurity(new JadxSecurity(flags));args.setLoadJadxClsSetFile(false);args.setFilesGetter(new IJadxFilesGetter(){@Override public Path getConfigDir(){return config.toPath();}@Override public Path getCacheDir(){return cache.toPath();}@Override public Path getTempDir(){return tmp.toPath();}});return new JadxDecompiler(args);
+    }
+    private static JavaClass findClass(JadxDecompiler jadx,String fullName){for(JavaClass cls:jadx.getClasses())if(fullName.equals(cls.getFullName()))return cls;return null;}
     private List<String> inputNames(){ArrayList<String> out=new ArrayList<>();for(File f:inputs)out.add(f.getName());return out;}
 
-    static List<File> resolveTargetInputs(App app) throws Exception {
-        ArrayList<File> out=new ArrayList<>();
-        File target=app.file("installed-target.json");
-        if(target.isFile()){
-            JSONObject obj=new JSONObject(Io.readUtf8(target));
-            JSONArray splits=obj.optJSONArray("splits");
-            if(splits!=null){
-                for(int i=0;i<splits.length();i++){
-                    JSONObject row=splits.optJSONObject(i);if(row==null)continue;
-                    File f=new File(row.optString("path",""));
-                    if(f.isFile()&&!containsCanonical(out,f))out.add(f);
-                }
-            }
-        }
-        if(out.isEmpty()){
-            File base=app.file("game.apk");
-            if(base.isFile())out.add(base);
-        }
-        return out;
-    }
+    static List<File> resolveTargetInputs(App app)throws Exception{return TargetResolver.resolve(app).apkFiles();}
 
-    private static boolean containsCanonical(List<File> files,File candidate) throws IOException{
-        String c=candidate.getCanonicalPath();for(File f:files)if(f.getCanonicalPath().equals(c))return true;return false;
-    }
+    private static void extract(ZipFile zip,ZipEntry entry,File dest)throws IOException{try(InputStream in=new BufferedInputStream(zip.getInputStream(entry));FileOutputStream out=new FileOutputStream(dest)){byte[] b=new byte[BUFFER];int n;while((n=in.read(b))!=-1)out.write(b,0,n);}}
+    private static byte[] readLimited(InputStream in,int limit)throws IOException{ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] b=new byte[65536];int n,total=0;while((n=in.read(b))!=-1){if(total+n>limit){out.write(b,0,Math.max(0,limit-total));break;}out.write(b,0,n);total+=n;}return out.toByteArray();}
+    private static boolean looksText(byte[] b){int n=Math.min(b.length,4096),bad=0;if(n==0)return true;for(int i=0;i<n;i++){int v=b[i]&255;if(v==0)return false;if(v<9||(v>13&&v<32))bad++;}return bad<n/20+1;}
+    private static void check(AtomicBoolean cancel)throws InterruptedIOException{if((cancel!=null&&cancel.get())||Thread.currentThread().isInterrupted())throw new InterruptedIOException("cancelled");}
+    private void ensureOpen(){if(!open)throw new IllegalStateException("Decompiler is not loaded");}
+    private static void mkdir(File f)throws IOException{if(!f.isDirectory()&&!f.mkdirs()&&!f.isDirectory())throw new IOException("Cannot create "+f);}
+    private static String safe(String value){String s=value==null?"item":value.replaceAll("[^A-Za-z0-9._-]+","_");return s.isEmpty()?"item":s;}
+    private static String safeMessage(Throwable t){String m=t==null?null:t.getMessage();return m==null?(t==null?"unknown":t.getClass().getSimpleName()):m;}
+    private static void zipTree(File root,File node,ZipOutputStream z,AtomicBoolean cancel)throws Exception{check(cancel);File[] children=node.listFiles();if(children==null)return;Arrays.sort(children,Comparator.comparing(File::getName));byte[] buf=new byte[BUFFER];for(File f:children){check(cancel);if(f.isDirectory()){zipTree(root,f,z,cancel);continue;}String rel=root.toPath().relativize(f.toPath()).toString().replace(File.separatorChar,'/');ZipEntry e=new ZipEntry(rel);e.setTime(0L);z.putNextEntry(e);try(InputStream in=new BufferedInputStream(new FileInputStream(f))){int n;while((n=in.read(buf))!=-1){check(cancel);z.write(buf,0,n);}}z.closeEntry();}}
+    private static void deleteTree(File f)throws IOException{if(f==null||!f.exists())return;if(f.isDirectory()){File[] a=f.listFiles();if(a!=null)for(File c:a)deleteTree(c);}if(!f.delete()&&f.exists())throw new IOException("Cannot delete "+f);}
 
-    private JavaClass requireClass(String name) throws FileNotFoundException {ensureOpen();JavaClass cls=classes.get(name);if(cls==null)throw new FileNotFoundException(name);return cls;}
-    private void ensureOpen(){if(jadx==null)throw new IllegalStateException("Decompiler is not loaded");}
-    private static void mkdir(File f) throws IOException{if(!f.isDirectory()&&!f.mkdirs()&&!f.isDirectory())throw new IOException("Cannot create "+f);}
-    private static String safeMessage(Throwable t){String m=t.getMessage();return m==null?t.getClass().getSimpleName():m;}
-
-    private static void renderContainer(ResContainer c,StringBuilder sb,int depth,int max){
-        if(c==null||sb.length()>=max)return;
-        if(c.getDataType()==ResContainer.DataType.TEXT||c.getDataType()==ResContainer.DataType.RES_TABLE){
-            try{String s=c.getText().getCodeStr();if(s!=null&&!s.isEmpty()){if(depth>0)sb.append("\n// ").append(c.getName()).append('\n');sb.append(s);}}
-            catch(Throwable ignored){}
-        } else if(c.getDataType()==ResContainer.DataType.DECODED_DATA){
-            byte[] data=c.getDecodedData();
-            if(data!=null&&looksText(data))sb.append(new String(data,StandardCharsets.UTF_8));
-        }
-        for(ResContainer child:c.getSubFiles()){if(sb.length()>=max)break;renderContainer(child,sb,depth+1,max);}
-        if(sb.length()>max){sb.setLength(max);sb.append("\n… preview truncated …");}
-    }
-    private static boolean looksText(byte[] b){int n=Math.min(b.length,4096),bad=0;for(int i=0;i<n;i++){int v=b[i]&0xff;if(v==0)return false;if(v<9||(v>13&&v<32))bad++;}return n==0||bad<n/20+1;}
-
-    private static void zipTree(File root,File node,ZipOutputStream z,AtomicBoolean cancel)throws Exception{
-        if(cancel!=null&&cancel.get())throw new InterruptedIOException("cancelled");
-        File[] children=node.listFiles();if(children==null)return;Arrays.sort(children,Comparator.comparing(File::getName));byte[] buf=new byte[128*1024];
-        for(File f:children){
-            if(cancel!=null&&cancel.get())throw new InterruptedIOException("cancelled");
-            if(f.isDirectory()){zipTree(root,f,z,cancel);continue;}
-            String rel=root.toPath().relativize(f.toPath()).toString().replace(File.separatorChar,'/');
-            ZipEntry e=new ZipEntry(rel);z.putNextEntry(e);try(InputStream in=new BufferedInputStream(new FileInputStream(f))){int n;while((n=in.read(buf))!=-1){if(cancel!=null&&cancel.get())throw new InterruptedIOException("cancelled");z.write(buf,0,n);}}z.closeEntry();
-        }
-    }
-    private static void deleteTree(File f)throws IOException{if(!f.exists())return;if(f.isDirectory()){File[] a=f.listFiles();if(a!=null)for(File c:a)deleteTree(c);}if(!f.delete()&&f.exists())throw new IOException("Cannot delete "+f);}
-
-    @Override public synchronized void close(){
-        classes.clear();inputs=Collections.emptyList();
-        if(jadx!=null){try{jadx.close();}catch(Throwable ignored){}jadx=null;}
-    }
+    @Override public synchronized void close(){classes.clear();resources.clear();dexUnits.clear();inputs.clear();loadFailures.clear();open=false;jadxErrors=jadxWarnings=duplicateClasses=0;}
 }
