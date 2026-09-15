@@ -16,9 +16,30 @@ SCHEMA = "modkit-artifact-families-1.1"
 MAX_ENTRY_BYTES = 64 * 1024 * 1024
 MAX_TEXT_BYTES = 8 * 1024 * 1024
 MAX_ITEMS = 5000
+READ_CHUNK_BYTES = 1024 * 1024
 PRINTABLE = re.compile(rb"[\x20-\x7e]{5,}")
 LUA_FN = re.compile(r"(?:^|\s)(?:local\s+)?function\s+([A-Za-z_][\w.:]*)\s*\(", re.M)
 JS_FN = re.compile(r"(?:function\s+([A-Za-z_$][\w$]*)\s*\(|(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>)")
+
+
+class ArtifactScanCancelled(RuntimeError):
+    """Explicit cooperative cancellation; partial inventory is never published."""
+
+
+def _cancelled(cb: Any | None) -> bool:
+    if cb is None:
+        return False
+    checker = getattr(cb, "isCancelled", None)
+    if callable(checker):
+        return bool(checker())
+    if callable(cb):
+        return bool(cb())
+    return False
+
+
+def _check(cb: Any | None) -> None:
+    if _cancelled(cb):
+        raise ArtifactScanCancelled("artifact family scan cancelled")
 
 
 def _workspace_apks(root: Path) -> list[Path]:
@@ -49,15 +70,18 @@ def _sha(apk: str, entry: str, family: str, extra: str = "") -> str:
     return hashlib.sha256(f"{apk}!{entry}!{family}!{extra}".encode("utf-8", "replace")).hexdigest()[:20]
 
 
-def _strings(data: bytes, limit: int = 120) -> list[str]:
+def _strings(data: bytes, limit: int = 120, cb: Any | None = None) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
-    for m in PRINTABLE.finditer(data):
+    for no, m in enumerate(PRINTABLE.finditer(data)):
+        if (no & 0xFF) == 0:
+            _check(cb)
         text = m.group().decode("utf-8", "replace").strip()
         if text and text not in seen:
             seen.add(text); out.append(text[:300])
             if len(out) >= limit:
                 break
+    _check(cb)
     return out
 
 
@@ -98,42 +122,67 @@ def _classify(name: str, data: bytes) -> tuple[str | None, str, str, list[str]]:
     return None, "", "", markers
 
 
-def _source_symbols(family: str, data: bytes) -> list[dict[str, Any]]:
+def _source_symbols(family: str, data: bytes, cb: Any | None = None) -> list[dict[str, Any]]:
     if not data or len(data) > MAX_TEXT_BYTES:
         return []
     try:
         text = data.decode("utf-8", "replace")
     except Exception:
         return []
-    matches: list[tuple[str, int]] = []
-    if family == "lua":
-        matches = [(m.group(1), m.start(1)) for m in LUA_FN.finditer(text)]
-    elif family == "javascript":
-        for m in JS_FN.finditer(text):
-            value = m.group(1) or m.group(2)
-            if value:
-                start = m.start(1) if m.group(1) else m.start(2)
-                matches.append((value, start))
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for name, offset in matches:
-        if name in seen:
+    line_no = 1
+    line_scan_pos = 0
+    regex = LUA_FN if family == "lua" else JS_FN if family == "javascript" else None
+    if regex is None:
+        return out
+    for no, match in enumerate(regex.finditer(text)):
+        if (no & 0x7F) == 0:
+            _check(cb)
+        if family == "lua":
+            value = match.group(1)
+            offset = match.start(1)
+        else:
+            value = match.group(1) or match.group(2)
+            if not value:
+                continue
+            offset = match.start(1) if match.group(1) else match.start(2)
+        if value in seen:
             continue
-        seen.add(name)
-        line = text.count("\n", 0, offset) + 1
-        out.append({"name": name, "line": line, "charOffset": offset})
+        # Regex matches arrive in source order. Count only the text since the
+        # previous accepted symbol, so line mapping is linear rather than O(n²).
+        line_no += text.count("\n", line_scan_pos, offset)
+        line_scan_pos = offset
+        seen.add(value)
+        out.append({"name": value, "line": line_no, "charOffset": offset})
         if len(out) >= 250:
             break
+    _check(cb)
     return out
 
 
-def scan_apk_paths(paths: Iterable[str | Path], output_path: str | Path | None = None) -> dict[str, Any]:
+def _read_entry(zf: zipfile.ZipFile, info: zipfile.ZipInfo, cb: Any | None = None) -> bytes:
+    chunks: list[bytes] = []
+    with zf.open(info, "r") as source:
+        while True:
+            _check(cb)
+            chunk = source.read(READ_CHUNK_BYTES)
+            if not chunk:
+                break
+            chunks.append(chunk)
+    _check(cb)
+    return b"".join(chunks)
+
+
+def scan_apk_paths(paths: Iterable[str | Path], output_path: str | Path | None = None,
+                   cb: Any | None = None) -> dict[str, Any]:
     items: list[dict[str, Any]] = []
     family_counts: dict[str, int] = {}
     recovery_counts: dict[str, int] = {}
     symbol_count = 0
     apk_count = 0
     for raw in paths:
+        _check(cb)
         apk = Path(raw)
         if not apk.is_file():
             continue
@@ -141,6 +190,7 @@ def scan_apk_paths(paths: Iterable[str | Path], output_path: str | Path | None =
         try:
             with zipfile.ZipFile(apk) as z:
                 for info in z.infolist():
+                    _check(cb)
                     if len(items) >= MAX_ITEMS:
                         break
                     if info.is_dir() or info.file_size <= 0 or info.file_size > MAX_ENTRY_BYTES:
@@ -150,15 +200,19 @@ def scan_apk_paths(paths: Iterable[str | Path], output_path: str | Path | None =
                     if not likely:
                         continue
                     try:
-                        data = z.read(info)
+                        data = _read_entry(z, info, cb)
+                    except ArtifactScanCancelled:
+                        raise
                     except Exception:
+                        if _cancelled(cb):
+                            raise ArtifactScanCancelled("artifact family scan cancelled")
                         continue
                     family, representation, recovery, markers = _classify(info.filename, data)
                     if not family:
                         continue
-                    symbol_locs = _source_symbols(family, data) if representation in ("source", "source-or-bundle") else []
+                    symbol_locs = _source_symbols(family, data, cb) if representation in ("source", "source-or-bundle") else []
                     symbols = [item["name"] for item in symbol_locs]
-                    strings = _strings(data, 80) if recovery != "DECOMPILED_SOURCE" else []
+                    strings = _strings(data, 80, cb) if recovery != "DECOMPILED_SOURCE" else []
                     row = {
                         "id": "artifact:" + family + ":" + _sha(apk.name, info.filename, family),
                         "kind": "ARTIFACT_FAMILY",
@@ -183,7 +237,9 @@ def scan_apk_paths(paths: Iterable[str | Path], output_path: str | Path | None =
                     items.append(row)
                     family_counts[family] = family_counts.get(family, 0) + 1
                     recovery_counts[recovery] = recovery_counts.get(recovery, 0) + 1
-                    for symbol in symbol_locs:
+                    for symbol_no, symbol in enumerate(symbol_locs):
+                        if (symbol_no & 0x7F) == 0:
+                            _check(cb)
                         if len(items) >= MAX_ITEMS:
                             break
                         name = str(symbol["name"])
@@ -208,13 +264,19 @@ def scan_apk_paths(paths: Iterable[str | Path], output_path: str | Path | None =
                             "evidenceRole": "script-symbol",
                         })
                         symbol_count += 1
+        except ArtifactScanCancelled:
+            raise
         except Exception:
+            if _cancelled(cb):
+                raise ArtifactScanCancelled("artifact family scan cancelled")
             continue
+    _check(cb)
     artifact_count = sum(family_counts.values())
     out = {
         "schema": SCHEMA,
         "passive": True,
         "executesTargetCode": False,
+        "cancelAware": cb is not None,
         "apkCount": apk_count,
         "total": len(items),
         "artifactCount": artifact_count,
@@ -224,11 +286,13 @@ def scan_apk_paths(paths: Iterable[str | Path], output_path: str | Path | None =
         "artifacts": items,
         "truncated": len(items) >= MAX_ITEMS,
     }
+    _check(cb)
     if output_path:
         Path(output_path).write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
     return out
 
 
-def scan_workspace(workdir: str | Path, output_path: str | Path | None = None) -> dict[str, Any]:
+def scan_workspace(workdir: str | Path, output_path: str | Path | None = None,
+                   cb: Any | None = None) -> dict[str, Any]:
     root = Path(workdir)
-    return scan_apk_paths(_workspace_apks(root), output_path)
+    return scan_apk_paths(_workspace_apks(root), output_path, cb)
