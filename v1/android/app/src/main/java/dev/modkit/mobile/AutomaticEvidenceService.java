@@ -66,7 +66,7 @@ public class AutomaticEvidenceService extends Service {
     @Override public int onStartCommand(Intent intent,int flags,int startId){
         if(intent!=null&&"cancel".equals(intent.getAction())){app.cancelled.set(true);progress("Отмена запрошена — завершаю текущий безопасный шаг…");return START_NOT_STICKY;}
         startForeground(NOTE_ID,note("Подготовка Evidence Graph…"));
-        wake=((PowerManager)getSystemService(POWER_SERVICE)).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"ModKit:auto-evidence");wake.acquire(60L*60L*1000L);
+        wake=((PowerManager)getSystemService(POWER_SERVICE)).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"ModKit:auto-evidence");wake.acquire(2L*60L*60L*1000L);
         getSharedPreferences("state",0).edit().putBoolean("running",true).apply();
         new Thread(()->{
             JSONObject manifest=new JSONObject();
@@ -82,6 +82,20 @@ public class AutomaticEvidenceService extends Service {
         },"modkit-automatic-evidence").start();return START_NOT_STICKY;
     }
 
+    private void invalidateFreshCoreOutputs()throws IOException{
+        for(String name:new String[]{
+                "analysis.json","analysis.summary.json","analysis.summary.json.part","analysis.ui.jsonl",
+                "analysis.methods.jsonl","analysis.methods.jsonl.idx","analysis.methods.jsonl.rva.idx","analysis.methods.jsonl.pages.idx","analysis.methods.meta.json",
+                "analysis.candidates.jsonl","analysis.discoveries.jsonl","analysis.fields.jsonl","analysis.evidence-graph.jsonl","analysis.evidence-graph.jsonl.idx","analysis.evidence-graph.meta.json",
+                "analysis.resolver-index.json","analysis.autopilot-index.jsonl","analysis.gameplay-coverage.json","analysis-deep",
+                "re-analysis.json","re-analysis.ui.json","re-analysis.menu.json","rodroid"})deleteTree(app.file(name));
+    }
+    private void invalidateStage6Outputs()throws IOException{
+        for(String name:new String[]{
+                "il2cpp-no-rva-native.json","il2cpp-no-rva-native.json.part","il2cpp-no-rva-native.methods.jsonl","il2cpp-no-rva-native.methods.jsonl.part","il2cpp-no-rva-native.failures.jsonl","il2cpp-no-rva-native.failures.jsonl.part",
+                "automod-plan.json","automod-plan.json.part","connected-report.json","connected-report.json.part","connected-report.md","connected-report.md.part"})deleteTree(app.file(name));
+    }
+
     private void runPipeline(JSONObject manifest)throws Exception{
         if(!app.file("game.apk").isFile()&&!app.file("installed-target.json").isFile())throw new IOException("Target отсутствует");
         check();if(!Python.isStarted())Python.start(new AndroidPlatform(this));PyObject cache=Python.getInstance().getModule("modkit.mobile.simple_cache");
@@ -92,6 +106,7 @@ public class AutomaticEvidenceService extends Service {
 
         File reTarget=targetForReAnalysis();stage(2,6,unchanged&&haveAnalysis?"cache hit: IL2CPP/DEX/native correlation":"IL2CPP + DEX/native correlation");JSONObject engines=new JSONObject();manifest.put("engines",engines);
         if(!unchanged||!haveAnalysis){
+            invalidateFreshCoreOutputs();
             try{engines.put("il2cpp",runIl2cpp(reTarget));}catch(Exception e){if(app.cancelled.get())check();engines.put("il2cpp",new JSONObject().put("status","PARTIAL").put("error",String.valueOf(e.getMessage())));progress("IL2CPP частичен: "+e.getMessage()+" · продолжаю DEX/native correlation.");}
             check();try{engines.put("re",runReAnalysis(reTarget));}catch(Exception e){if(app.cancelled.get())check();engines.put("re",new JSONObject().put("status","PARTIAL").put("error",String.valueOf(e.getMessage())));progress("DEX/native correlation частична: "+e.getMessage()+" · продолжаю остальные evidence backend'ы.");}
         }else{engines.put("il2cpp",new JSONObject().put("status","CACHE_HIT"));engines.put("re",new JSONObject().put("status","CACHE_HIT"));}
@@ -115,7 +130,7 @@ public class AutomaticEvidenceService extends Service {
 
         check();stage(5,6,"Evidence Graph: ownership + confirmation ladder + exact locators + ranking");PyObject simple=Python.getInstance().getModule("modkit.mobile.simple_mode_cancellable");JSONObject catalog=new JSONObject(simple.callAttr("build_catalog",getFilesDir().getPath(),app.file("simple-catalog.json").getPath(),new Progress()).toString());manifest.put("catalog",new JSONObject().put("total",catalog.optInt("total")).put("important",catalog.optInt("important")).put("buildable",catalog.optInt("buildable")).put("actionable",catalog.optInt("actionable")).put("serverAudit",catalog.optInt("serverAudit")));
 
-        check();stage(6,6,"no-RVA native recovery + AutoMod + connected report + cache");
+        check();stage(6,6,"no-RVA native recovery + AutoMod + connected report + cache");invalidateStage6Outputs();
         File meta=app.file("metadata.bin"),lib=app.file("library.so"),methods=app.file("analysis.methods.jsonl");
         if(meta.isFile()&&lib.isFile()&&methods.isFile()){
             try{
