@@ -57,7 +57,11 @@ public class AutoModPrepareService extends Service {
         getSharedPreferences("state",0).edit().putBoolean("running",true).apply();
         new Thread(()->{
             try{prepare();}
-            catch(Exception e){progress(app.cancelled.get()?"AutoMod prepare отменён.":"AutoMod prepare: "+String.valueOf(e.getMessage()));}
+            catch(Exception e){
+                String cleanup="";
+                try{invalidatePreparedState();}catch(Exception cleanupError){cleanup=" · очистка partial prepare: "+String.valueOf(cleanupError.getMessage());}
+                progress((app.cancelled.get()?"AutoMod prepare отменён.":"AutoMod prepare заблокирован: "+String.valueOf(e.getMessage()))+cleanup);
+            }
             finally{if(wake!=null&&wake.isHeld())wake.release();getSharedPreferences("state",0).edit().putBoolean("running",false).apply();app.busy.set(false);app.revision++;stopForeground(true);stopSelf();}
         },"modkit-automod-prepare").start();
         return START_NOT_STICKY;
@@ -73,13 +77,24 @@ public class AutoModPrepareService extends Service {
         if(!Python.isStarted())Python.start(new AndroidPlatform(this));
         PyObject result=Python.getInstance().getModule("modkit.mobile.menu_native_recovery").callAttr("prepare_workspace",getFilesDir().getPath(),source.getPath(),new Progress());
         check();
+        JSONObject audit=readRequiredAudit();
         JSONObject obj=new JSONObject(result.toString());JSONObject confirm=obj.optJSONObject("confirm"),pre=obj.optJSONObject("preflight");JSONArray promoted=confirm==null?null:confirm.optJSONArray("promoted"),rejected=confirm==null?null:confirm.optJSONArray("rejected");
         int promotedCount=promoted==null?0:promoted.length(),rejectedCount=rejected==null?0:rejected.length();boolean ready=pre!=null&&pre.optBoolean("readyForAutoBuild");
-        progress("AutoMod prepare: подтверждено bindings "+promotedCount+", отклонено "+rejectedCount+", auto-build "+(ready?"READY":"BLOCK/REVIEW")+". Recovered RVA не обходит preflight.");
+        progress("AutoMod prepare: exact audit calls "+audit.optInt("calls")+", подтверждено bindings "+promotedCount+", отклонено "+rejectedCount+", auto-build "+(ready?"READY":"BLOCK/REVIEW")+". Recovered RVA не обходит preflight.");
+    }
+
+    private JSONObject readRequiredAudit()throws Exception{
+        File file=app.file("menu-native-recovery.json");
+        if(!file.isFile())throw new IOException("Exact recovery audit отсутствует; prepare заблокирован");
+        JSONObject audit=new JSONObject(Io.readUtf8(file));
+        if(!audit.optBoolean("completed"))throw new IOException("Exact recovery audit не завершён; prepare заблокирован");
+        if(!audit.optBoolean("normalBindingRequired")||!audit.optBoolean("preflightRequired"))throw new IOException("Exact recovery audit нарушает обязательные binding/preflight gates");
+        if(audit.optBoolean("promotesBuildability")||audit.optBoolean("addressRecoveryPromotesBuildability"))throw new IOException("Exact recovery audit попытался повысить buildability без preflight");
+        return audit;
     }
 
     private void invalidatePreparedState()throws IOException{
-        for(String name:new String[]{"menu-spec.json","menu-preflight.json","menu-validation.json","menu-auto-confirm.json","menu-autopilot.json"}){
+        for(String name:new String[]{"menu-spec.json","menu-preflight.json","menu-validation.json","menu-auto-confirm.json","menu-autopilot.json","menu-native-recovery.json"}){
             File file=app.file(name);if(file.exists()&&!file.delete())throw new IOException("Не удалось инвалидировать старый AutoMod artifact: "+name);
         }
     }
