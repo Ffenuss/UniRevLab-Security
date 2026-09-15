@@ -27,6 +27,7 @@
 <service android:name=".AutomaticEvidenceService" android:exported="false" android:foregroundServiceType="dataSync"/>
 <service android:name=".ReAnalysisService" android:exported="false" android:foregroundServiceType="dataSync"/>
 <service android:name=".NativeTargetImportService" android:exported="false" android:foregroundServiceType="dataSync"/>
+<service android:name=".WorkspaceBuildGuardService" android:exported="false" android:foregroundServiceType="dataSync"/>
 <service android:name=".AutoModPrepareService" android:exported="false" android:foregroundServiceType="dataSync"/>
 <service android:name=".AutoModBuildGuardService" android:exported="false" android:foregroundServiceType="dataSync"/>
 <service android:name=".WorkerService" android:exported="false" android:foregroundServiceType="dataSync"/>
