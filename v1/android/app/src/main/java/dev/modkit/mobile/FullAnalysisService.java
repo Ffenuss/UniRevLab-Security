@@ -47,12 +47,13 @@ public class FullAnalysisService extends Service {
         }catch(Exception ignored){}
         progress("Реконструкция ["+index+"/"+total+"]: "+name);
     }
-    private void pipelineState(String status,String phase,boolean complete,boolean cancelled,String error){
-        try{
-            JSONObject state=new JSONObject().put("schema","modkit-automatic-evidence-1.1").put("status",status).put("phase",phase).put("complete",complete).put("cancelled",cancelled).put("startedAtMs",startedAt).put("updatedAtMs",System.currentTimeMillis());
-            if(error!=null&&!error.isEmpty())state.put("error",error);
-            writeAtomicJson("automatic-evidence.json",state);
-        }catch(Exception ignored){}
+    private void writePipelineState(String status,String phase,boolean complete,boolean cancelled,String error)throws Exception{
+        JSONObject state=new JSONObject().put("schema","modkit-automatic-evidence-1.1").put("status",status).put("phase",phase).put("complete",complete).put("cancelled",cancelled).put("startedAtMs",startedAt).put("updatedAtMs",System.currentTimeMillis());
+        if(error!=null&&!error.isEmpty())state.put("error",error);
+        writeAtomicJson("automatic-evidence.json",state);
+    }
+    private boolean bestEffortPipelineState(String status,String phase,boolean complete,boolean cancelled,String error){
+        try{writePipelineState(status,phase,complete,cancelled,error);return true;}catch(Exception ignored){return false;}
     }
     private void invalidatePreparedAutoModState()throws Exception{
         for(String name:new String[]{"automod-plan.json","automod-plan.json.part","menu-spec.json","menu-preflight.json","menu-validation.json","menu-auto-confirm.json","menu-autopilot.json","menu-native-recovery.json","menu-native-recovery.json.tmp"}){
@@ -89,12 +90,13 @@ public class FullAnalysisService extends Service {
         getSharedPreferences("state",0).edit().putBoolean("running",true).apply();
         new Thread(()->{
             boolean chain=true;
+            boolean pipelineStarted=false;
             boolean runStateInvalidated=false;
             String handoffFailure=null;
             String reconstructionFailure=null;
             startedAt=System.currentTimeMillis();
-            pipelineState("RUNNING","RECONSTRUCTION",false,false,null);
             try{
+                writePipelineState("RUNNING","RECONSTRUCTION",false,false,null);pipelineStarted=true;
                 invalidatePreparedAutoModState();
                 invalidatePerRunEvidenceState();
                 runStateInvalidated=true;
@@ -170,7 +172,8 @@ public class FullAnalysisService extends Service {
                 if(app.cancelled.get()){chain=false;progress("Полный анализ отменён пользователем.");}
             }catch(Exception e){
                 chain=false;
-                if(!runStateInvalidated)reconstructionFailure="RUN_EPOCH_INVALIDATION_FAILED: "+String.valueOf(e.getMessage());
+                if(!pipelineStarted)reconstructionFailure="PIPELINE_MANIFEST_WRITE_FAILED: "+String.valueOf(e.getMessage());
+                else if(!runStateInvalidated)reconstructionFailure="RUN_EPOCH_INVALIDATION_FAILED: "+String.valueOf(e.getMessage());
                 else if(!app.cancelled.get())reconstructionFailure="RECONSTRUCTION_FAILED: "+String.valueOf(e.getMessage());
                 progress(app.cancelled.get()?"Полный анализ отменён.":"Полный анализ остановлен: "+e.getMessage()+" · Evidence Graph не будет запущен на неполной реконструкции.");
             }finally{
@@ -186,9 +189,13 @@ public class FullAnalysisService extends Service {
                     }
                 }
                 if(!handedOff){
-                    if(app.cancelled.get())pipelineState("CANCELLED","RECONSTRUCTION",false,true,"USER_CANCELLED");
-                    else if(reconstructionFailure!=null)pipelineState("FAILED","RECONSTRUCTION",false,false,reconstructionFailure);
-                    else pipelineState("FAILED","HANDOFF",false,false,handoffFailure==null?"EVIDENCE_HANDOFF_NOT_STARTED":handoffFailure);
+                    if(pipelineStarted){
+                        if(app.cancelled.get())bestEffortPipelineState("CANCELLED","RECONSTRUCTION",false,true,"USER_CANCELLED");
+                        else if(reconstructionFailure!=null)bestEffortPipelineState("FAILED","RECONSTRUCTION",false,false,reconstructionFailure);
+                        else bestEffortPipelineState("FAILED","HANDOFF",false,false,handoffFailure==null?"EVIDENCE_HANDOFF_NOT_STARTED":handoffFailure);
+                    }else{
+                        try{Files.deleteIfExists(app.file("automatic-evidence.json").toPath());Files.deleteIfExists(app.file("automatic-evidence.json.part").toPath());}catch(Exception ignored){}
+                    }
                     getSharedPreferences("state",0).edit().putBoolean("running",false).apply();
                     app.busy.set(false);app.revision++;
                 }
