@@ -112,3 +112,23 @@ def test_android_automod_surface_separates_lanes_and_requires_phase7_audit():
     assert "automod_cancellable.build_workspace_plan" in recovery
     assert "_phase7_allowed_rvas(plan)" in recovery
     assert "_validate_phase7_menu(root, plan, allowed_rvas, cb)" in recovery
+
+
+def test_legacy_menu_builder_cannot_launch_signed_build_or_auto_prepare_for_il2cpp():
+    source = (ROOT / "android/app/src/main/java/dev/modkit/mobile/MenuBuilderActivity.java").read_text(encoding="utf-8")
+
+    assert 'if(il2cpp){startActivity(new Intent(this,AutoModActivity.class));return;}' in source
+    assert 'if(!il2cpp&&!app.file("menu-spec.json").isFile()' in source
+    assert 'private boolean signedBuildOp(String op)' in source
+    for op in (
+        "menu_build_apk",
+        "menu_auto_build_apk",
+        "menu_auto_build_apk_deep",
+        "menu_autopilot_build_apk",
+        "menu_probe_build_apk",
+        "menu_smart_build_apk",
+    ):
+        assert f'"{op}".equals(op)' in source
+    assert 'if(signedBuildOp(op)){deleteCreatedDocument(i);toast("Подписанная сборка выполняется только через AutoMod Phase 7")' in source
+    assert 'button("Проверить готовность через AutoMod"' in source
+    assert 'button("Собрать подписанный APK / APK-set через AutoMod"' in source
