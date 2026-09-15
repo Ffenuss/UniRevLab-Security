@@ -22,23 +22,27 @@ def test_prepare_fingerprint_changes_on_same_size_same_mtime_mutation(tmp_path):
     assert first["sha256"] != second["sha256"]
 
 
-def test_prepare_audit_binds_all_exact_inputs_and_never_uses_mtime():
+def test_prepare_audit_binds_all_exact_inputs_and_generated_menu_spec():
     source = Path("modkit/mobile/menu_native_recovery.py").read_text(encoding="utf-8")
 
     assert '"freshnessPolicy": "EXACT_INPUT_SHA256"' in source
     assert '"inputFingerprints": input_fingerprints' in source
+    assert '"outputFingerprints": []' in source
     for role in ("metadata", "library", "catalog", "sourceApk"):
         assert f'_fingerprint("{role}"' in source
+    assert 'audit["outputFingerprints"] = [_fingerprint("menuSpec", menu_json_path, cb)]' in source
     assert "engine.digest(file, cb)" in source
     assert "mtime" not in source.lower()
 
 
-def test_java_verifier_rehashes_all_inputs_and_is_cancellable():
+def test_java_verifier_rehashes_all_inputs_and_menu_spec_and_is_cancellable():
     source = (ANDROID / "AutoModAuditVerifier.java").read_text(encoding="utf-8")
 
     assert '"EXACT_INPUT_SHA256".equals(audit.optString("freshnessPolicy"))' in source
     for role in ("metadata", "library", "catalog", "sourceApk"):
         assert f'verify(rows,"{role}"' in source
+    assert 'verify(outputs,"menuSpec",app.file("menu-spec.json"),gate)' in source
+    assert 'validFingerprint(fingerprint(outputs,"menuSpec"))' in source
     assert 'expectedSha.equalsIgnoreCase(actual)' in source
     assert 'Thread' not in source  # cancellation is injected by the caller, not global process state
     assert 'gate.isCancelled()' in source
