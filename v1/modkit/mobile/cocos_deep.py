@@ -19,8 +19,9 @@ MAX_CORRELATIONS = 1200
 MAX_BRIDGES = 800
 
 _GENERIC = {"init", "start", "update", "main", "load", "create", "destroy", "ctor", "awake", "enable", "disable"}
-_BRIDGE_MARKERS = ("jsb_", "register_all_", "scriptingcore", "tolua_", "luaopen_", "cocos2d", "_zn2se", "se::")
+_BRIDGE_MARKERS = ("jsb_", "js_", "register_all_", "scriptingcore", "tolua_", "luaopen_", "cocos2d", "_zn2se", "se::")
 _SCRIPT_MARKERS = ("project.js", "settings.js", "main.js", "jsb-adapter", "/src/", "/scripts/", "cocos")
+_SCRIPT_SUFFIXES = (".js", ".mjs", ".cjs", ".jsc", ".lua", ".luac", ".luae", ".json")
 
 
 def _id(*parts: object) -> str:
@@ -35,7 +36,8 @@ def _is_script(row: dict[str, Any], have_native_cocos: bool) -> bool:
     family = str(row.get("family") or "").casefold()
     entry = "/" + str(row.get("entry") or "").casefold()
     if family == "cocos":
-        return True
+        # Native engine artifacts are Cocos evidence but are not script assets.
+        return entry.endswith(_SCRIPT_SUFFIXES) or any(marker in entry for marker in _SCRIPT_MARKERS)
     if family == "javascript":
         return any(marker in entry for marker in _SCRIPT_MARKERS) or entry.endswith(("/project.js", "/settings.js", "/main.jsc"))
     if family == "lua" and have_native_cocos:
