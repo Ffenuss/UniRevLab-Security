@@ -45,7 +45,22 @@ final class EvidenceBundleExporter {
         if (app.busy.get() || (pipeline != null && "RUNNING".equals(pipeline.optString("status")))) {
             throw new java.io.IOException("Анализ ещё выполняется. Экспорт доступен после завершения или отмены текущего прогона.");
         }
-        if (pipeline == null) throw new java.io.IOException("Нет завершённого pipeline manifest. Сначала запустите полный анализ.");
+        if (pipeline == null) {
+            File journal=new File(app.getFilesDir(),AnalysisJournal.FILE_NAME);
+            if(!journal.isFile()||journal.length()<=0)throw new java.io.IOException("Нет завершённого pipeline manifest и диагностического журнала текущей сессии.");
+            long marker=Math.max(journal.lastModified(),1L);
+            return new JSONObject()
+                    .put("schema","modkit-automatic-evidence-1.1")
+                    .put("status","FAILED")
+                    .put("phase","DIAGNOSTIC")
+                    .put("complete",false)
+                    .put("cancelled",false)
+                    .put("syntheticDiagnostic",true)
+                    .put("startedAtMs",0L)
+                    .put("updatedAtMs",marker)
+                    .put("finishedAtMs",marker)
+                    .put("error","PIPELINE_MANIFEST_MISSING");
+        }
         String status = pipeline.optString("status", "");
         if (!("SUCCESS".equals(status) || "PARTIAL".equals(status) || "FAILED".equals(status) || "CANCELLED".equals(status))) {
             throw new java.io.IOException("Pipeline state не является terminal: " + (status.isEmpty() ? "UNKNOWN" : status));
@@ -56,10 +71,11 @@ final class EvidenceBundleExporter {
     private static String pipelineEpoch(JSONObject pipeline) {
         return pipeline.optString("schema", "") + "|" + pipeline.optString("status", "") + "|" +
                 pipeline.optLong("startedAtMs", -1L) + "|" + pipeline.optLong("finishedAtMs", -1L) + "|" +
-                pipeline.optLong("updatedAtMs", -1L);
+                pipeline.optLong("updatedAtMs", -1L) + "|" + pipeline.optBoolean("syntheticDiagnostic",false);
     }
 
     private static boolean diagnosticFreshOnly(JSONObject pipeline) {
+        if(pipeline.optBoolean("syntheticDiagnostic",false))return false;
         String status = pipeline.optString("status", "");
         return "FAILED".equals(status) || "CANCELLED".equals(status);
     }
@@ -72,7 +88,9 @@ final class EvidenceBundleExporter {
     static void ensureExportable(Context context) throws Exception { terminalPipeline(context); }
     static String exportEpoch(Context context) throws Exception { return pipelineEpoch(terminalPipeline(context)); }
     static boolean shouldBuildConnectedReport(Context context) throws Exception {
-        String status = terminalPipeline(context).optString("status", "");
+        JSONObject pipeline=terminalPipeline(context);
+        if(pipeline.optBoolean("syntheticDiagnostic",false))return false;
+        String status = pipeline.optString("status", "");
         return "SUCCESS".equals(status) || "PARTIAL".equals(status);
     }
 
@@ -80,6 +98,7 @@ final class EvidenceBundleExporter {
         JSONObject initialPipeline = terminalPipeline(context);
         String initialEpoch = pipelineEpoch(initialPipeline);
         boolean freshOnly = diagnosticFreshOnly(initialPipeline);
+        boolean syntheticDiagnostic=initialPipeline.optBoolean("syntheticDiagnostic",false);
         App app = (App)context.getApplicationContext();
         List<File> candidates = collect(app.getFilesDir());
         JSONArray entries = new JSONArray();
@@ -95,6 +114,7 @@ final class EvidenceBundleExporter {
                         if (!file.isFile() || file.length() <= 0 || file.length() > MAX_SINGLE_FILE) continue;
                         String relative = app.getFilesDir().toPath().relativize(file.toPath()).toString().replace(File.separatorChar, '/');
                         if (!isEvidenceFile(relative)) continue;
+                        if(syntheticDiagnostic&&!isSyntheticDiagnosticFile(relative))continue;
                         if (freshOnly && !belongsToFailureEpoch(file, initialPipeline)) { staleExcluded[0]++; continue; }
                         if (total[0] + file.length() > MAX_TEXT_TOTAL) { budgetExcluded[0]++; continue; }
                         String hash = sha256(file);
@@ -128,11 +148,14 @@ final class EvidenceBundleExporter {
                             .put("pipelineDegraded", pipeline.optBoolean("degraded", false))
                             .put("pipelineDegradedReasons", degradedReasons)
                             .put("diagnosticFreshOnly", freshOnly)
+                            .put("syntheticDiagnostic",syntheticDiagnostic)
                             .put("staleEvidenceFilesExcluded", staleExcluded[0])
                             .put("budgetEvidenceFilesExcluded", budgetExcluded[0])
                             .put("rawTargetBinariesIncluded", false)
                             .put("historicalProjectTreesIncluded", false)
-                            .put("note", freshOnly
+                            .put("note", syntheticDiagnostic
+                                    ? "Pipeline manifest was unavailable. This diagnostic-only bundle is intentionally limited to current-session diagnostic files and does not reuse old analysis evidence."
+                                    : freshOnly
                                     ? "FAILED/CANCELLED diagnostic bundle contains only evidence modified in the current pipeline epoch; older cache evidence is excluded. Historical projects and generated Menu Builder source trees are never traversed."
                                     : "Target APK/SO/metadata are intentionally not duplicated; hashes/locators remain in analysis evidence. Historical projects and generated Menu Builder source trees are never traversed.");
                     if (!pipeline.optString("error", "").isEmpty()) manifest.put("pipelineError", pipeline.optString("error"));
@@ -154,6 +177,15 @@ final class EvidenceBundleExporter {
             clearFailedOutput(context, output);
             throw error;
         }
+    }
+
+    private static boolean isSyntheticDiagnosticFile(String relative){
+        String lower=relative.toLowerCase(Locale.ROOT);
+        return lower.equals(AnalysisJournal.FILE_NAME.toLowerCase(Locale.ROOT))||
+                lower.equals("automatic-evidence.json.part")||
+                lower.equals("simple-progress.json")||
+                lower.equals("simple-progress.json.part")||
+                lower.equals("full-reconstruction.json.part");
     }
 
     private static void clearFailedOutput(Context context, Uri output) {
