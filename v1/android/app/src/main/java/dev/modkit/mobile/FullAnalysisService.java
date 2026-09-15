@@ -7,6 +7,7 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
 import android.os.IBinder;
+import android.os.PowerManager;
 
 import com.chaquo.python.PyObject;
 import com.chaquo.python.Python;
@@ -27,6 +28,7 @@ import java.util.Locale;
 /** Runs reconstruction backends, then hands off to the isolated automatic evidence service. */
 public class FullAnalysisService extends Service {
     private App app;
+    private PowerManager.WakeLock wake;
     private volatile long startedAt;
     @Override public void onCreate(){super.onCreate();app=(App)getApplication();((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).createNotificationChannel(new NotificationChannel("full-analysis","Полный анализ",NotificationManager.IMPORTANCE_LOW));}
     @Override public IBinder onBind(Intent intent){return null;}
@@ -68,6 +70,7 @@ public class FullAnalysisService extends Service {
     @Override public int onStartCommand(Intent intent,int flags,int startId){
         if(intent!=null&&"cancel".equals(intent.getAction())){app.cancelled.set(true);progress("Отмена запрошена — завершаю текущий безопасный шаг…");return START_NOT_STICKY;}
         startForeground(91,note("Подготовка полного анализа…"));
+        if(wake==null||!wake.isHeld()){wake=((PowerManager)getSystemService(POWER_SERVICE)).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"ModKit:full-analysis");wake.acquire(2L*60L*60L*1000L);}
         getSharedPreferences("state",0).edit().putBoolean("running",true).apply();
         new Thread(()->{
             boolean chain=true;
@@ -171,6 +174,7 @@ public class FullAnalysisService extends Service {
                     getSharedPreferences("state",0).edit().putBoolean("running",false).apply();
                     app.busy.set(false);app.revision++;
                 }
+                if(wake!=null&&wake.isHeld())wake.release();
                 stopForeground(true);stopSelf();
             }
         },"modkit-full-analysis").start();
