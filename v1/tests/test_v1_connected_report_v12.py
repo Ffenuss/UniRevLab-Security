@@ -5,6 +5,8 @@ from pathlib import Path
 
 from modkit.mobile.connected_report_v12 import build_connected_report
 
+ROOT = Path(__file__).resolve().parents[1]
+
 
 def _write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value), encoding="utf-8")
@@ -139,3 +141,14 @@ def test_connected_report_runtime_rva_fallback_requires_unique_observation(tmp_p
     report = build_connected_report(tmp_path)
     assert report["findings"][0].get("runtimeObservation") is None
     assert report["runtimeObservedFindings"] == 0
+
+
+def test_android_report_center_uses_enriched_connected_report_and_evidence_bundle():
+    activity = (ROOT / "android/app/src/main/java/dev/modkit/mobile/ReportCenterActivity.java").read_text(encoding="utf-8")
+    exporter = (ROOT / "android/app/src/main/java/dev/modkit/mobile/EvidenceBundleExporter.java").read_text(encoding="utf-8")
+    assert 'getModule("modkit.mobile.connected_report_v12")' in activity
+    assert "connected-report 1.2" in activity
+    assert "runtimeObservedFindings" in activity
+    assert "il2cppStructuralFindings" in activity
+    assert "EvidenceBundleExporter.export" in activity
+    assert '".jsonl"' in exporter
