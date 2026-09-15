@@ -4,7 +4,7 @@ import json
 import os
 from pathlib import Path
 
-from modkit.mobile.connected_report_v12 import build_connected_report, _fresh
+from modkit.mobile.connected_report_v12 import build_connected_report, _fresh, _ensure_metadata_identity
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -329,9 +329,43 @@ def test_connected_report_freshness_guard_invalidates_outputs_after_method_catal
     assert _fresh([summary, rows], [metadata, methods]) is False
 
 
+def test_connected_report_rebuilds_fresh_but_old_metadata_identity_schema(tmp_path: Path, monkeypatch):
+    metadata = tmp_path / "metadata.bin"
+    methods = tmp_path / "analysis.methods.jsonl"
+    summary = tmp_path / "il2cpp-metadata-identity.json"
+    rows = tmp_path / "il2cpp-metadata-identity.methods.jsonl"
+    metadata.write_bytes(b"raw-metadata")
+    methods.write_text("{}\n", encoding="utf-8")
+    _write_json(summary, {"schema": "modkit-il2cpp-metadata-identity-1.0", "engine": "old"})
+    rows.write_text("{}\n", encoding="utf-8")
+    newer = max(summary.stat().st_mtime_ns, rows.stat().st_mtime_ns)
+    older = newer - 10_000_000
+    os.utime(metadata, ns=(older, older))
+    os.utime(methods, ns=(older, older))
+    assert _fresh([summary, rows], [metadata, methods]) is True
+
+    called = {"value": False}
+    import modkit.mobile.il2cpp_metadata_identity as identity_module
+
+    def fake_build(workspace, output_path):
+        called["value"] = True
+        Path(workspace, "il2cpp-metadata-identity.methods.jsonl").write_text("{}\n", encoding="utf-8")
+        value = {"schema": "modkit-il2cpp-metadata-identity-1.1", "engine": "new", "counts": {}}
+        Path(output_path).write_text(json.dumps(value), encoding="utf-8")
+        return value
+
+    monkeypatch.setattr(identity_module, "build_workspace_identity", fake_build)
+    result = _ensure_metadata_identity(tmp_path)
+    assert called["value"] is True
+    assert result["schema"] == "modkit-il2cpp-metadata-identity-1.1"
+    assert result["freshnessVerified"] is True
+    assert result["sourceInputsAvailable"] is True
+
+
 def test_android_report_center_uses_enriched_connected_report_and_evidence_bundle():
     activity = (ROOT / "android/app/src/main/java/dev/modkit/mobile/ReportCenterActivity.java").read_text(encoding="utf-8")
     exporter = (ROOT / "android/app/src/main/java/dev/modkit/mobile/EvidenceBundleExporter.java").read_text(encoding="utf-8")
+    automatic = (ROOT / "android/app/src/main/java/dev/modkit/mobile/AutomaticEvidenceService.java").read_text(encoding="utf-8")
     assert 'getModule("modkit.mobile.connected_report_v12")' in activity
     assert "connected-report 1.2" in activity
     assert "runtimeObservedFindings" in activity
@@ -341,3 +375,8 @@ def test_android_report_center_uses_enriched_connected_report_and_evidence_bundl
     assert "token conflicts" in activity
     assert "EvidenceBundleExporter.export" in activity
     assert '".jsonl"' in exporter
+    assert 'getModule("modkit.mobile.connected_report_v12")' in automatic
+    assert 'app.file("connected-report.json")' in automatic
+    assert 'app.file("connected-report.md")' in automatic
+    assert '"metadataTokenNoRva"' in automatic
+    assert '"metadataTokenConflicts"' in automatic
