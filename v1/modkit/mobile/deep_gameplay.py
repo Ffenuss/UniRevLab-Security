@@ -67,13 +67,32 @@ _COMPACT_PREFIXES = (
 )
 
 
+class GameplayScanCancelled(RuntimeError):
+    """Explicit cooperative cancellation for semantic correlation."""
+
+
+def _cancelled(cb: Any | None) -> bool:
+    if cb is None:
+        return False
+    checker = getattr(cb, "isCancelled", None)
+    if callable(checker):
+        return bool(checker())
+    if callable(cb):
+        return bool(cb())
+    return False
+
+
+def _check(cb: Any | None) -> None:
+    if _cancelled(cb):
+        raise GameplayScanCancelled("gameplay correlation cancelled")
+
+
 def _id(*parts: object) -> str:
     return hashlib.sha256("!".join(str(x) for x in parts).encode("utf-8", "replace")).hexdigest()[:20]
 
 
 def _words(value: object) -> tuple[set[str], str]:
     text = str(value or "")
-    # Preserve acronym boundaries: GetHP -> Get HP, AddXP -> Add XP, MaxHealth -> Max Health.
     text = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", text)
     text = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", text)
     low = text.casefold()
@@ -83,14 +102,7 @@ def _words(value: object) -> tuple[set[str], str]:
 
 
 def _single_alias_hit(alias_compact: str, tokens: set[str], compact: str) -> bool:
-    """Match a single semantic word only at a real semantic boundary.
-
-    Arbitrary substring matching caused false positives such as ``mana`` inside
-    ``ShippingManager``. CamelCase/snake_case names are already tokenized by
-    ``_words``. For fully-lowercase compact symbols (``gethealth``), allow only
-    a small set of explicit semantic prefixes rather than an unrestricted
-    substring search.
-    """
+    """Match a single semantic word only at a real semantic boundary."""
     if alias_compact in tokens or compact == alias_compact:
         return True
     return any(compact == prefix + alias_compact for prefix in _COMPACT_PREFIXES)
@@ -206,12 +218,16 @@ def _finding_from_artifact(row: dict[str, Any]) -> dict[str, Any] | None:
     return {k: v for k, v in out.items() if v is not None}
 
 
-def analyze(artifact_report: dict[str, Any], native_report: dict[str, Any]) -> dict[str, Any]:
+def analyze(artifact_report: dict[str, Any], native_report: dict[str, Any],
+            cb: Any | None = None) -> dict[str, Any]:
+    _check(cb)
     findings: list[dict[str, Any]] = []
     seen: set[str] = set()
     existing_native: set[tuple[str, int]] = set()
     artifacts = artifact_report.get("artifacts", []) if isinstance(artifact_report, dict) else []
-    for row in artifacts if isinstance(artifacts, list) else []:
+    for row_no, row in enumerate(artifacts if isinstance(artifacts, list) else []):
+        if (row_no & 0xFF) == 0:
+            _check(cb)
         if not isinstance(row, dict) or not row.get("gameplayDomain"):
             continue
         rva = row.get("rva")
@@ -229,11 +245,16 @@ def analyze(artifact_report: dict[str, Any], native_report: dict[str, Any]) -> d
         seen.add(rid)
         findings.append(row)
 
+    checked = 0
     for lib in native_report.get("libraries", []) if isinstance(native_report, dict) else []:
+        _check(cb)
         if not isinstance(lib, dict):
             continue
         entry = str(lib.get("entry") or "")
         for fn in lib.get("functions", []) if isinstance(lib.get("functions"), list) else []:
+            checked += 1
+            if (checked & 0xFF) == 0:
+                _check(cb)
             if not isinstance(fn, dict):
                 continue
             rva = fn.get("rva")
@@ -241,10 +262,13 @@ def analyze(artifact_report: dict[str, Any], native_report: dict[str, Any]) -> d
                 continue
             add(_finding_from_native(lib, fn))
 
-    for row in artifacts if isinstance(artifacts, list) else []:
+    for row_no, row in enumerate(artifacts if isinstance(artifacts, list) else []):
+        if (row_no & 0xFF) == 0:
+            _check(cb)
         if isinstance(row, dict):
             add(_finding_from_artifact(row))
 
+    _check(cb)
     coverage = Counter(str(row.get("gameplayDomain") or "") for row in findings if row.get("gameplayDomain"))
     locator_count = sum(1 for row in findings if isinstance(row.get("rva"), int) or (row.get("entry") and row.get("function")))
     return {
@@ -254,6 +278,7 @@ def analyze(artifact_report: dict[str, Any], native_report: dict[str, Any]) -> d
         "manualImportRequired": False,
         "passive": True,
         "executesTargetCode": False,
+        "cancelAware": cb is not None,
         "runtimeTruth": "not-observed-by-static-analysis",
         "findingCount": len(findings),
         "locatorCount": locator_count,
@@ -265,8 +290,10 @@ def analyze(artifact_report: dict[str, Any], native_report: dict[str, Any]) -> d
 
 def scan_workspace(workdir: str | Path, artifact_report: dict[str, Any] | None = None,
                    native_report: dict[str, Any] | None = None,
-                   output_path: str | Path | None = None) -> dict[str, Any]:
+                   output_path: str | Path | None = None,
+                   cb: Any | None = None) -> dict[str, Any]:
     root = Path(workdir)
+    _check(cb)
     if artifact_report is None:
         path = root / "artifact-families.json"
         try:
@@ -279,7 +306,8 @@ def scan_workspace(workdir: str | Path, artifact_report: dict[str, Any] | None =
             native_report = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
         except Exception:
             native_report = {}
-    out = analyze(artifact_report or {}, native_report or {})
+    out = analyze(artifact_report or {}, native_report or {}, cb)
+    _check(cb)
     if output_path:
         Path(output_path).write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
     return out
