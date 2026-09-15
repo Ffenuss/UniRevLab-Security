@@ -133,10 +133,11 @@ public class DecompilerActivity extends androidx.appcompat.app.AppCompatActivity
             catch(Throwable t){ui.post(()->{progress.setVisibility(View.GONE);setControls(true);status.setText(getString(R.string.decompiler_error,msg(t)));});}});
     }
 
+    private void deleteCreatedDocument(Uri uri){if(uri==null)return;try{android.provider.DocumentsContract.deleteDocument(getContentResolver(),uri);}catch(Exception ignored){}}
     private void exportTo(Uri uri){
         pendingExportUri=uri;cancelSearch.set(false);progress.setVisibility(View.VISIBLE);setControls(false);status.setText(R.string.decompiler_export_running);
-        worker.execute(()->{try{File zip=engine.exportAllZip(cancelSearch);try(InputStream in=new BufferedInputStream(new FileInputStream(zip));OutputStream out=getContentResolver().openOutputStream(uri,"w")){if(out==null)throw new IOException("openOutputStream returned null");byte[] b=new byte[128*1024];int n;while((n=in.read(b))!=-1)out.write(b,0,n);}ui.post(()->{progress.setVisibility(View.GONE);setControls(true);status.setText(R.string.decompiler_export_done);});}
-            catch(Throwable t){ui.post(()->{progress.setVisibility(View.GONE);setControls(true);status.setText(getString(R.string.decompiler_error,msg(t)));});}});
+        worker.execute(()->{try{File zip=engine.exportAllZip(cancelSearch);try(InputStream in=new BufferedInputStream(new FileInputStream(zip));OutputStream out=getContentResolver().openOutputStream(uri,"w")){if(out==null)throw new IOException("openOutputStream returned null");byte[] b=new byte[128*1024];int n;while((n=in.read(b))!=-1){if(cancelSearch.get()||Thread.currentThread().isInterrupted())throw new InterruptedIOException("export cancelled");out.write(b,0,n);}}ui.post(()->{progress.setVisibility(View.GONE);setControls(true);status.setText(R.string.decompiler_export_done);});}
+            catch(Throwable t){deleteCreatedDocument(uri);ui.post(()->{progress.setVisibility(View.GONE);setControls(true);status.setText(getString(R.string.decompiler_error,msg(t)));});}});
     }
 
     private void setControls(boolean enabled){for(MaterialButton b:new MaterialButton[]{javaBtn,smaliBtn,resBtn,searchCodeBtn,xrefsBtn,exportBtn})if(b!=null)b.setEnabled(enabled);if(cancelBtn!=null)cancelBtn.setEnabled(true);}
