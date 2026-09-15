@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any
 
 SCHEMA = "modkit-automod-plan-1.3"
+_IL2CPP_CROSSCHECK_SCHEMA = "modkit-il2cpp-crosscheck-1.0"
+_METADATA_IDENTITY_SCHEMA = "modkit-il2cpp-metadata-identity-1.1"
 
 _BUILD = "READY_TO_BUILD"
 _PREFLIGHT = "READY_FOR_PREFLIGHT"
@@ -179,7 +181,7 @@ def _ensure_il2cpp_crosscheck(root: Path) -> dict[str, Any]:
     if not all(path.is_file() for path in inputs):
         return {}
     existing = _load(output)
-    if existing and not existing.get("error") and _fresh([output, rows], inputs):
+    if existing.get("schema") == _IL2CPP_CROSSCHECK_SCHEMA and not existing.get("error") and _fresh([output, rows], inputs):
         return existing
     if existing.get("error") and _fresh([output], inputs):
         return existing
@@ -212,7 +214,7 @@ def _ensure_metadata_identity(root: Path) -> dict[str, Any]:
     if not all(path.is_file() for path in inputs):
         return {}
     existing = _load(output)
-    if existing and not existing.get("error") and _fresh([output, rows], inputs):
+    if existing.get("schema") == _METADATA_IDENTITY_SCHEMA and not existing.get("error") and _fresh([output, rows], inputs):
         return existing
     if existing.get("error") and _fresh([output], inputs):
         return existing
@@ -285,6 +287,9 @@ def _identity_indexes(rows: list[dict[str, Any]]) -> tuple[dict[str, dict[str, A
             continue
         if bool(row.get("addressConfirmed")) or bool(row.get("actionable")) or bool(row.get("buildable")):
             continue
+        status = str(row.get("status") or "UNRESOLVED_NO_RVA")
+        if status in {"UNRESOLVED_NO_RVA", "METADATA_TOKEN_CONFLICT_NO_RVA"}:
+            continue
         row_id = row.get("id")
         if row_id not in (None, ""):
             by_id[str(row_id)] = row
@@ -326,7 +331,7 @@ def _identity_view(row: dict[str, Any] | None) -> dict[str, Any] | None:
     if not isinstance(row, dict):
         return None
     status = str(row.get("status") or "UNRESOLVED_NO_RVA")
-    if status == "UNRESOLVED_NO_RVA":
+    if status in {"UNRESOLVED_NO_RVA", "METADATA_TOKEN_CONFLICT_NO_RVA"}:
         return None
     return {
         "engine": "il2cpp.metadata-identity-embedded",
@@ -335,6 +340,10 @@ def _identity_view(row: dict[str, Any] | None) -> dict[str, Any] | None:
         "methodName": row.get("methodName"),
         "metadataMethodNamePresent": bool(row.get("metadataMethodNamePresent")),
         "metadataQualifiedMethodPresent": bool(row.get("metadataQualifiedMethodPresent")),
+        "metadataToken": row.get("metadataToken"),
+        "metadataTokenConfirmed": bool(row.get("metadataTokenConfirmed")),
+        "metadataResolvedClass": row.get("metadataResolvedClass"),
+        "metadataResolvedMethodName": row.get("metadataResolvedMethodName"),
         "addressConfirmed": False,
         "rva": None,
         "actionable": False,
@@ -384,7 +393,9 @@ def _candidate(card: dict[str, Any], runtime_by_id: dict[str, dict[str, Any]],
     if il2cpp and il2cpp.get("status") == "STRUCTURAL_BOTH_PRESENT":
         reason += " IL2CPP cross-check отдельно подтвердил metadata method name и executable ELF range; их ассоциация этим backend'ом не считается доказанной."
     if identity:
-        if identity.get("metadataQualifiedMethodPresent"):
+        if identity.get("metadataTokenConfirmed"):
+            reason += " Global metadata подтверждает method token и identity, но native RVA отсутствует и остаётся unresolved."
+        elif identity.get("metadataQualifiedMethodPresent"):
             reason += " Global metadata независимо подтверждает точный Class::Method, но native RVA отсутствует и остаётся unresolved."
         else:
             reason += " Global metadata подтверждает имя метода, но без уникального Class::Method и без native RVA."
@@ -434,6 +445,7 @@ def build_plan(catalog: dict[str, Any], runtime_correlation: dict[str, Any] | No
     il2cpp_both = sum(1 for row in candidates if isinstance(row.get("il2cppStructural"), dict) and row["il2cppStructural"].get("status") == "STRUCTURAL_BOTH_PRESENT")
     metadata_observed = sum(1 for row in candidates if row.get("metadataIdentityObserved"))
     metadata_qualified = sum(1 for row in candidates if isinstance(row.get("metadataIdentity"), dict) and row["metadataIdentity"].get("metadataQualifiedMethodPresent"))
+    metadata_token = sum(1 for row in candidates if isinstance(row.get("metadataIdentity"), dict) and row["metadataIdentity"].get("metadataTokenConfirmed"))
     return {
         "schema": SCHEMA,
         "source": "simple-catalog.json",
@@ -455,6 +467,7 @@ def build_plan(catalog: dict[str, Any], runtime_correlation: dict[str, Any] | No
         "il2cppStructuralBothCount": il2cpp_both,
         "metadataIdentityObservedCount": metadata_observed,
         "metadataQualifiedNoRvaCount": metadata_qualified,
+        "metadataTokenNoRvaCount": metadata_token,
         "readyToBuildCount": int(counts.get(_BUILD, 0)),
         "readyForPreflightCount": int(counts.get(_PREFLIGHT, 0)),
         "runtimeNeededCount": int(counts.get(_RUNTIME, 0)),
@@ -501,6 +514,7 @@ def build_workspace_plan(workdir: str | Path, output_path: str | Path | None = N
             "engine": identity_summary.get("engine"),
             "error": identity_summary.get("error"),
             "typeLayout": identity_summary.get("typeLayout"),
+            "uniqueMethodTokenCount": int(identity_summary.get("uniqueMethodTokenCount") or 0),
             "counts": identity_summary.get("counts"),
             "addressResolver": False,
             "actionable": False,
