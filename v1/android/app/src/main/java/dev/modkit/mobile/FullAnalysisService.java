@@ -107,7 +107,7 @@ public class FullAnalysisService extends Service {
                 else{
                     stage(2,4,"JADX: все classes*.dex и resources во всех split APK");
                     JSONObject state=new JSONObject().put("schema","modkit-full-reconstruction-1.1").put("targetDigest",digest).put("complete",false).put("startedAtMs",System.currentTimeMillis());
-                    Files.write(manifest.toPath(),state.toString(2).getBytes(StandardCharsets.UTF_8));
+                    writeAtomicJson("full-reconstruction.json",state);
                     try(DecompilerEngine dec=new DecompilerEngine(this)){
                         dec.open();if(app.cancelled.get())throw new java.io.InterruptedIOException("cancelled");
                         File zip=dec.exportAllZip(app.cancelled);if(app.cancelled.get())throw new java.io.InterruptedIOException("cancelled");
@@ -119,18 +119,18 @@ public class FullAnalysisService extends Service {
                         state.put("complete",false).put("cancelled",app.cancelled.get()).put("error",String.valueOf(e.getMessage())).put("finishedAtMs",System.currentTimeMillis());
                         if(!app.cancelled.get())progress("JADX частичен: "+e.getMessage()+" · продолжаю остальные backend'ы.");
                     }
-                    Files.write(manifest.toPath(),state.toString(2).getBytes(StandardCharsets.UTF_8));
+                    writeAtomicJson("full-reconstruction.json",state);
                 }
 
                 if(app.cancelled.get()){chain=false;progress("Полный анализ отменён пользователем.");return;}
                 stage(3,4,"Apktool "+ApktoolEngine.APKTOOL_VERSION+": resources + manifest + полный smali workspace");
                 try{
                     JSONObject apktool=ApktoolEngine.analyze(this,inputs,app.cancelled);
-                    Files.write(app.file("apktool-analysis.json").toPath(),apktool.toString(2).getBytes(StandardCharsets.UTF_8));
+                    writeAtomicJson("apktool-analysis.json",apktool);
                     int failed=apktool.optInt("failed");progress("Apktool: decoded="+apktool.optInt("decoded")+" · cache="+apktool.optInt("cached")+(failed>0?" · errors="+failed:"")+".");
                 }catch(Throwable e){
                     JSONObject error=new JSONObject().put("schema","modkit-apktool-analysis-1.0").put("engineId",ApktoolEngine.ENGINE_ID).put("bundled",true).put("status","FAILED").put("error",String.valueOf(e.getMessage()));
-                    Files.write(app.file("apktool-analysis.json").toPath(),error.toString(2).getBytes(StandardCharsets.UTF_8));
+                    writeAtomicJson("apktool-analysis.json",error);
                     if(app.cancelled.get()){chain=false;progress("Полный анализ отменён пользователем.");return;}
                     progress("Apktool частичен: "+e.getMessage()+" · остальные backend'ы продолжаются.");
                 }
