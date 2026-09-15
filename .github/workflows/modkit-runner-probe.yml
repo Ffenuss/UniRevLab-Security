@@ -1,0 +1,21 @@
+name: ModKit Runner Probe
+
+on:
+  push:
+    branches: [ Modkit1 ]
+    paths:
+      - '.github/workflows/modkit-runner-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Hosted runner heartbeat
+        run: |
+          set -euo pipefail
+          echo "runner-ok"
+          uname -a
