@@ -277,8 +277,9 @@ def build_connected_report(
     """Build Connected Report 1.2 with exact-fresh streamed evidence and cooperative cancel."""
     gate = _Gate(cb)
     gate.force()
+    root = Path(workdir)
     try:
-        secondary = _secondary.ensure_workspace(workdir, cb)
+        secondary = _secondary.ensure_workspace(root, cb)
     except Exception as exc:
         if _cancelled(cb):
             raise ReportCancelled("Connected Report cancelled while refreshing IL2CPP evidence") from exc
@@ -287,8 +288,16 @@ def build_connected_report(
     exact_crosscheck = _exact_secondary_summary(secondary, "crosscheck")
     exact_identity = _exact_secondary_summary(secondary, "metadataIdentity")
     exact_native = _exact_secondary_summary(secondary, "nativeRecovery")
-    native_current = bool(exact_native) and not bool(exact_native.get("error"))
-    reader, retained = _filtered_reader(workdir, gate)
+    failures_path = root / "il2cpp-no-rva-native.failures.jsonl"
+    native_blockers_current = bool(
+        exact_native
+        and not exact_native.get("error")
+        and exact_native.get("freshnessPolicy") == "EXACT_INPUT_SHA256"
+        and bool(exact_native.get("failuresAreFileBacked"))
+        and exact_native.get("failureRowsFile") == failures_path.name
+        and failures_path.is_file()
+    )
+    reader, retained = _filtered_reader(root, gate)
     json_part = _part(output_json)
     md_part = _part(output_md)
     for temporary in (json_part, md_part):
@@ -314,9 +323,9 @@ def build_connected_report(
 
         def wrapped_stream_blockers(path, findings):
             gate.force()
-            if not native_current:
+            if not native_blockers_current or Path(path).name != failures_path.name:
                 return {}, {}
-            return _stream_native_blockers(path, findings, gate)
+            return _stream_native_blockers(failures_path, findings, gate)
 
         def wrapped_finding_rva(finding):
             gate.tick()
@@ -340,7 +349,7 @@ def build_connected_report(
         _v12._ensure_metadata_identity = wrapped_identity
         _v12._ensure_native_recovery = wrapped_native
         try:
-            report = _v12.build_connected_report(workdir, json_part, md_part)
+            report = _v12.build_connected_report(root, json_part, md_part)
         except Exception:
             for temporary in (json_part, md_part):
                 if temporary is not None:
@@ -379,6 +388,7 @@ def build_connected_report(
             "mtimeTrustedAsIdentity": False,
             "standaloneReportRefreshesEvidence": True,
             "legacyMtimeFallbackUsed": False,
+            "nativeBlockerRowsExactCurrent": native_blockers_current,
         }
         if json_part is not None:
             gate.force()
