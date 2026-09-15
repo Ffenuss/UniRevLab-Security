@@ -194,7 +194,7 @@ def run_workspace(
 
     _check(cb, "Embedded 6/7 · Flutter/Dart AOT…")
     try:
-        flutter_report = flutter_deep.scan_workspace(root, native_report, root / "flutter-deep.json")
+        flutter_report = flutter_deep.scan_workspace(root, native_report, root / "flutter-deep.json", cb)
         runs.append({
             "engineId": flutter_deep.ENGINE_ID,
             "status": "SUCCESS" if flutter_report.get("detected") else "UNAVAILABLE",
@@ -205,6 +205,8 @@ def run_workspace(
         _merge_findings(static_report, flutter_report, summary_key="deepFlutter",
                         default_engine=flutter_deep.ENGINE_ID, default_kind="FLUTTER_AOT_EVIDENCE",
                         default_category="Flutter/Dart AOT")
+    except flutter_deep.FlutterScanCancelled as exc:
+        raise Cancelled(str(exc)) from exc
     except Cancelled:
         raise
     except Exception as exc:
