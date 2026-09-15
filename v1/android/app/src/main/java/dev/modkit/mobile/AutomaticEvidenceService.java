@@ -35,7 +35,7 @@ import java.util.zip.ZipOutputStream;
  * This coordinator is deliberately separate from WorkerService: the normal automatic flow no
  * longer enters the legacy multi-tool backend. It consumes reconstruction artifacts produced by
  * FullAnalysisService, runs IL2CPP/DEX/native/security correlation, writes the ranked catalog,
- * and creates the fail-closed AutoMod readiness plan.
+ * creates the fail-closed AutoMod readiness plan, and persists the connected report.
  */
 public class AutomaticEvidenceService extends Service {
     private static final int NOTE_ID=95;
@@ -153,7 +153,7 @@ public class AutomaticEvidenceService extends Service {
         JSONObject catalog=new JSONObject(simple.callAttr("build_catalog",getFilesDir().getPath(),app.file("simple-catalog.json").getPath()).toString());
         manifest.put("catalog",new JSONObject().put("total",catalog.optInt("total")).put("important",catalog.optInt("important")).put("buildable",catalog.optInt("buildable")).put("actionable",catalog.optInt("actionable")).put("serverAudit",catalog.optInt("serverAudit")));
 
-        check();stage(6,6,"AutoMod readiness + сохранение кэша");
+        check();stage(6,6,"AutoMod readiness + connected report + сохранение кэша");
         try{
             PyObject autoMod=Python.getInstance().getModule("modkit.mobile.automod");
             JSONObject autoPlan=new JSONObject(autoMod.callAttr("build_workspace_plan",getFilesDir().getPath(),app.file("automod-plan.json").getPath()).toString());
@@ -163,16 +163,45 @@ public class AutomaticEvidenceService extends Service {
                     .put("runtimeNeeded",autoPlan.optInt("runtimeNeededCount"))
                     .put("review",autoPlan.optInt("reviewCount"))
                     .put("auditOnly",autoPlan.optInt("auditOnlyCount"))
-                    .put("excluded",autoPlan.optInt("excludedCount")));
+                    .put("excluded",autoPlan.optInt("excludedCount"))
+                    .put("metadataIdentityNoRva",autoPlan.optInt("metadataIdentityObservedCount"))
+                    .put("metadataQualifiedNoRva",autoPlan.optInt("metadataQualifiedNoRvaCount")));
         }catch(Exception e){
             manifest.put("autoMod",new JSONObject().put("status","PARTIAL").put("error",String.valueOf(e.getMessage())));
             progress("AutoMod-план частичен: "+e.getMessage()+" · основной Evidence Graph сохранён.");
         }
+
+        check();
+        try{
+            PyObject reportModule=Python.getInstance().getModule("modkit.mobile.connected_report_v12");
+            JSONObject connected=new JSONObject(reportModule.callAttr(
+                    "build_connected_report",
+                    getFilesDir().getPath(),
+                    app.file("connected-report.json").getPath(),
+                    app.file("connected-report.md").getPath()).toString());
+            manifest.put("connectedReport",new JSONObject()
+                    .put("status","SUCCESS")
+                    .put("schema",connected.optString("schema"))
+                    .put("findingCount",connected.optInt("findingCount"))
+                    .put("exactLinked",connected.optInt("exactLinked"))
+                    .put("runtimeObserved",connected.optInt("runtimeObservedFindings"))
+                    .put("il2cppStructural",connected.optInt("il2cppStructuralFindings"))
+                    .put("metadataIdentityNoRva",connected.optInt("metadataIdentityConfirmedFindings"))
+                    .put("metadataQualifiedNoRva",connected.optInt("metadataQualifiedIdentityFindings"))
+                    .put("metadataTokenNoRva",connected.optInt("metadataTokenIdentityFindings"))
+                    .put("metadataTokenConflicts",connected.optInt("metadataTokenConflictFindings")));
+        }catch(Exception e){
+            manifest.put("connectedReport",new JSONObject().put("status","PARTIAL").put("error",String.valueOf(e.getMessage())));
+            progress("Connected report частичен: "+e.getMessage()+" · AutoMod/Evidence Graph сохранены.");
+        }
+
         cache.callAttr("record_workspace",getFilesDir().getPath(),app.file("simple-cache.json").getPath(),plan.toString());
         app.result=readJson("analysis.summary.json");
         JSONObject autoPlan=readJson("automod-plan.json");
+        JSONObject connected=readJson("connected-report.json");
         String autoText=autoPlan==null?"":" · AutoMod build "+autoPlan.optInt("readyToBuildCount")+" / preflight "+autoPlan.optInt("readyForPreflightCount");
-        progress("Готово. Найдено "+catalog.optInt("total")+", важных "+catalog.optInt("important")+", точных locator "+catalog.optInt("actionable")+", PATCH_READY "+catalog.optInt("buildable")+", server/trust audit "+catalog.optInt("serverAudit")+autoText+(unchanged?" · cache hit":" · fresh target")+".");
+        String reportText=connected==null?"":" · report links "+connected.optInt("exactLinked")+" / token-no-RVA "+connected.optInt("metadataTokenIdentityFindings")+" / conflicts "+connected.optInt("metadataTokenConflictFindings");
+        progress("Готово. Найдено "+catalog.optInt("total")+", важных "+catalog.optInt("important")+", точных locator "+catalog.optInt("actionable")+", PATCH_READY "+catalog.optInt("buildable")+", server/trust audit "+catalog.optInt("serverAudit")+autoText+reportText+(unchanged?" · cache hit":" · fresh target")+".");
     }
 
     private JSONObject runIl2cpp(File reTarget)throws Exception{
