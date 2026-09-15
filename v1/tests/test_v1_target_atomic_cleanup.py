@@ -22,6 +22,7 @@ def test_target_reset_clears_atomic_output_orphans_and_progress():
         '"installed-apk-set.zip.tmp"',
         '"installed-target.json.part"',
         '"menu-native-recovery.json.tmp"',
+        '"runtime-session.json.part"',
         '"simple-progress.json"',
         '"simple-progress.json.part"',
         '"automatic-evidence.json"',
@@ -33,6 +34,29 @@ def test_target_reset_clears_atomic_output_orphans_and_progress():
     cleanup = source.split("private void cleanupFailedPreparation()", 1)[1]
     assert '"installed-apk-set.zip.tmp"' in cleanup
     assert '"installed-target.json.part"' in cleanup
+
+
+def test_target_switch_invalidates_target_bound_manual_build_state_but_keeps_imported_patchpack():
+    source = (ANDROID / "TargetPreparationService.java").read_text(encoding="utf-8")
+    cleanup = source.split("private void clearTargetDependentOutputs()", 1)[1].split("private void cleanupFailedPreparation()", 1)[0]
+
+    for name in (
+        "patchpack-report.json",
+        "patchpack-unsigned.apk",
+        "workspace-patch.zip",
+        "workspace-patch.zip.tmp",
+        "workspace-source.json",
+        "workspace-report.json",
+        "workspace-edit.bin",
+        "workspace-unsigned.apk",
+        "menu-auto-prepare-deep.json",
+        "menu-probe-prepare.json",
+        "menu-spec.simple-source.json",
+    ):
+        assert f'"{name}"' in cleanup
+
+    # User-provided Patch Pack may be reused, but its compatibility proof is target-specific.
+    assert '"patchpack.zip"' not in cleanup
 
 
 def test_target_preparation_publishes_installed_manifest_atomically():
