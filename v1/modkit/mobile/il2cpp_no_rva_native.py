@@ -63,6 +63,13 @@ def _class(value: Any) -> str:
     return str(value or "").strip().replace("/", ".")
 
 
+def _class_identity_match(catalog_class: Any, metadata_class: Any) -> bool:
+    """Require the complete canonical declaring type, never a short-name fallback."""
+    catalog = _class(catalog_class)
+    metadata = _class(metadata_class)
+    return bool(catalog and metadata and catalog == metadata)
+
+
 def _catalog_identity(row: dict[str, Any]) -> tuple[int | None, int | None, str, str, str]:
     mid = _number(row.get("metadata_method_id"))
     if mid is None:
@@ -290,7 +297,7 @@ def recover_no_rva(metadata_path: str | Path, library_path: str | Path, catalog_
                 metadata_image = _image_for_type(int(md["declaringTypeIndex"]), starts, image_ranges)
                 token_match = int(md.get("token") or 0) == int(token)
                 image_match = bool(image and metadata_image and image == metadata_image)
-                class_match = bool(cls and metadata_class and (cls == metadata_class or cls.rsplit(".", 1)[-1] == metadata_class.rsplit(".", 1)[-1]))
+                class_match = _class_identity_match(cls, metadata_class)
                 method_match = bool(method and str(md.get("name") or "") == method)
                 if not (token_match and image_match and class_match and method_match):
                     counts["identityMismatch"] += 1
