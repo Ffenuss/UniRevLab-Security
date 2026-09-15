@@ -23,8 +23,8 @@ public class ReWorkspaceActivity extends Activity {
         super.onCreate(state); app=(App)getApplication();
         ScrollView scroll=new ScrollView(this);root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(dp(18),dp(20),dp(18),dp(24));root.setBackgroundColor(getColor(R.color.mk_background));scroll.addView(root);setContentView(scroll);
         TextView title=text("RE Workspace",28);title.setTypeface(null,Typeface.BOLD);root.addView(title);
-        root.addView(text("DEX + global-metadata + Rodroid dump + все ELF/.so + Unity/Addressables. Полный отчёт хранится отдельно; экран читает компактный UI-индекс, чтобы большие IL2CPP-проекты не переполняли Java heap.",14));
-        run=button("Полный RE-анализ выбранного APK",v->startWork(new Intent().putExtra("op","re_analyze")));
+        root.addView(text("DEX + global-metadata + Rodroid dump + все ELF/.so + Unity/Addressables. Для APK-set используются base и все split APK через единый TargetResolver. Полный отчёт хранится отдельно; экран читает компактный UI-индекс, чтобы большие IL2CPP-проекты не переполняли Java heap.",14));
+        run=button("Полный RE-анализ выбранного APK / APK-set",v->startWork(new Intent().putExtra("op","re_analyze")));
         menu=button("Создать Menu Builder из подтверждённых находок",v->{
             if(!app.file("re-analysis.json").isFile()){toast("Сначала выполните RE-анализ");return;}
             startWork(new Intent().putExtra("op","menu_seed"));
@@ -36,8 +36,10 @@ public class ReWorkspaceActivity extends Activity {
     private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
     private void startWork(Intent i){
         if(app.busy.get()){toast("Сейчас выполняется другая операция");return;}
-        if(!app.file("game.apk").isFile() && "re_analyze".equals(i.getStringExtra("op"))){toast("Сначала выберите исходный APK на главном экране");return;}
-        app.cancelled.set(false);app.busy.set(true);app.progress("Подготовка…");i.setClass(this,WorkerService.class);
+        boolean re="re_analyze".equals(i.getStringExtra("op"));
+        if(re&&!app.file("game.apk").isFile()&&!app.file("installed-target.json").isFile()){toast("Сначала выберите APK или установленное приложение");return;}
+        app.cancelled.set(false);app.busy.set(true);app.progress(re?"RE Workspace: подготовка полного target…":"Подготовка…");
+        i.setClass(this,re?ReAnalysisService.class:WorkerService.class);
         try{startForegroundService(i);}catch(Exception e){app.busy.set(false);app.revision++;app.progress("RE Workspace: не удалось запустить операцию: "+e.getMessage());toast("Не удалось запустить RE-операцию");}
     }
     private JSONObject readUi(){try{return new JSONObject(Io.readUtf8(app.file("re-analysis.ui.json")));}catch(Exception e){return null;}}
@@ -51,8 +53,8 @@ public class ReWorkspaceActivity extends Activity {
         TextView h=text(title,17);h.setTypeface(null,Typeface.BOLD);card.addView(h);card.addView(text(b.toString().trim(),12));findings.addView(card);
     }
     private void refresh(){
-        if(revision==app.revision)return;revision=app.revision;status.setText(app.status);
-        run.setEnabled(!app.busy.get()&&app.file("game.apk").isFile());
+        if(revision==app.revision)return;revision=app.revision;status.setText(app.status==null?"":app.status);
+        run.setEnabled(!app.busy.get()&&(app.file("game.apk").isFile()||app.file("installed-target.json").isFile()));
         JSONObject report=readUi();
         boolean complete=report!=null&&"complete".equals(report.optString("reportState"));
         menu.setEnabled(!app.busy.get()&&complete&&app.file("re-analysis.json").isFile());
@@ -61,7 +63,7 @@ public class ReWorkspaceActivity extends Activity {
             if(app.file("re-analysis.json").isFile()){
                 summary.setText("Обнаружен полный RE-отчёт без компактного UI-индекса. Это может быть результат прерванного или устаревшего сохранения. Чтобы не загружать большой JSON целиком в Java heap, экран его не открывает. Повторите полный RE-анализ в текущей версии ModKit.");
             }else{
-                summary.setText("Отчёта пока нет. RE-анализ использует выбранный APK и, если доступны, текущие metadata/libil2cpp/Rodroid dump.");
+                summary.setText("Отчёта пока нет. RE-анализ использует весь выбранный APK/APK-set и автоматически ищет metadata/libil2cpp во всех split APK.");
             }
             return;
         }
