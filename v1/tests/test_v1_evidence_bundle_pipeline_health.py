@@ -61,6 +61,23 @@ def test_failed_or_cancelled_bundle_excludes_evidence_older_than_current_epoch()
     assert "FAILED/CANCELLED diagnostic bundle contains only evidence modified in the current pipeline epoch" in source
 
 
+def test_connected_report_synthesis_only_runs_for_success_or_partial_pipeline():
+    exporter = Path(
+        "android/app/src/main/java/dev/modkit/mobile/EvidenceBundleExporter.java"
+    ).read_text(encoding="utf-8")
+    report = Path(
+        "android/app/src/main/java/dev/modkit/mobile/ReportCenterActivity.java"
+    ).read_text(encoding="utf-8")
+
+    helper = exporter.split("static boolean shouldBuildConnectedReport", 1)[1].split("static JSONObject export", 1)[0]
+    assert 'return "SUCCESS".equals(status) || "PARTIAL".equals(status);' in helper
+    assert "boolean buildConnected=EvidenceBundleExporter.shouldBuildConnectedReport(this);" in report
+    assert "JSONObject connected=buildConnected?buildConnected():null;" in report
+    assert "if(connected==null)" in report
+    assert "diagnostic bundle" in report
+    assert "staleEvidenceFilesExcluded" in report
+
+
 def test_bundle_export_is_bound_to_one_pipeline_epoch():
     source = Path(
         "android/app/src/main/java/dev/modkit/mobile/EvidenceBundleExporter.java"
@@ -99,17 +116,18 @@ def test_failed_bundle_export_clears_partial_destination():
     assert "throw error;" in source
 
 
-def test_report_center_binds_connected_report_to_same_pipeline_epoch_before_export():
+def test_report_center_binds_report_preparation_to_same_pipeline_epoch_before_export():
     source = Path(
         "android/app/src/main/java/dev/modkit/mobile/ReportCenterActivity.java"
     ).read_text(encoding="utf-8")
 
     first_epoch = source.index("String epoch=EvidenceBundleExporter.exportEpoch(this)")
-    connected = source.index("JSONObject connected=buildConnected()", first_epoch)
+    gate = source.index("EvidenceBundleExporter.shouldBuildConnectedReport(this)", first_epoch)
+    connected = source.index("JSONObject connected=buildConnected?buildConnected():null", gate)
     second_epoch = source.index("EvidenceBundleExporter.exportEpoch(this)", connected)
     export = source.index("EvidenceBundleExporter.export(this,uri)", second_epoch)
-    assert first_epoch < connected < second_epoch < export
-    assert "Pipeline изменился во время построения connected report" in source
+    assert first_epoch < gate < connected < second_epoch < export
+    assert "Pipeline изменился во время подготовки отчёта" in source
     assert 'manifest.optString("pipelineStatus","UNKNOWN")' in source
 
 
