@@ -59,6 +59,65 @@ def test_embedded_outputs_are_invalidated_before_same_target_rerun_backend_execu
     assert stage < invalidate < backend
 
 
+def test_fresh_evidence_core_outputs_are_invalidated_before_il2cpp_and_re_backends():
+    source = _read("AutomaticEvidenceService.java")
+    helper = source.split("private void invalidateFreshCoreOutputs()", 1)[1].split("private void invalidateStage6Outputs()", 1)[0]
+    for name in (
+        "analysis.json",
+        "analysis.summary.json",
+        "analysis.summary.json.part",
+        "analysis.methods.jsonl",
+        "analysis.evidence-graph.jsonl",
+        "analysis.gameplay-coverage.json",
+        "analysis-deep",
+        "re-analysis.json",
+        "re-analysis.ui.json",
+        "re-analysis.menu.json",
+        "rodroid",
+    ):
+        assert f'"{name}"' in helper
+
+    fresh_gate = source.index("if(!unchanged||!haveAnalysis){")
+    invalidate = source.index("invalidateFreshCoreOutputs();", fresh_gate)
+    il2cpp = source.index("runIl2cpp(reTarget)", invalidate)
+    re_backend = source.index("runReAnalysis(reTarget)", il2cpp)
+    assert fresh_gate < invalidate < il2cpp < re_backend
+
+
+def test_stage6_outputs_are_invalidated_before_recovery_automod_and_connected_report():
+    source = _read("AutomaticEvidenceService.java")
+    helper = source.split("private void invalidateStage6Outputs()", 1)[1].split("private void runPipeline", 1)[0]
+    for name in (
+        "il2cpp-no-rva-native.json",
+        "il2cpp-no-rva-native.json.part",
+        "il2cpp-no-rva-native.methods.jsonl",
+        "il2cpp-no-rva-native.methods.jsonl.part",
+        "il2cpp-no-rva-native.failures.jsonl",
+        "il2cpp-no-rva-native.failures.jsonl.part",
+        "automod-plan.json",
+        "automod-plan.json.part",
+        "connected-report.json",
+        "connected-report.json.part",
+        "connected-report.md",
+        "connected-report.md.part",
+    ):
+        assert f'"{name}"' in helper
+
+    stage6 = source.index('stage(6,6,"no-RVA native recovery + AutoMod + connected report + cache")')
+    invalidate = source.index("invalidateStage6Outputs();", stage6)
+    recovery = source.index('getModule("modkit.mobile.il2cpp_no_rva_native_release")', invalidate)
+    automod = source.index('getModule("modkit.mobile.automod_cancellable")', recovery)
+    report = source.index('getModule("modkit.mobile.connected_report_streaming")', automod)
+    assert stage6 < invalidate < recovery < automod < report
+
+
+def test_evidence_wakelock_covers_long_release_pipeline():
+    source = _read("AutomaticEvidenceService.java")
+    acquire = source.index('newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"ModKit:auto-evidence")')
+    assert "wake.acquire(2L*60L*60L*1000L);" in source[acquire:acquire + 300]
+    assert "if(wake!=null&&wake.isHeld())wake.release();" in source
+
+
 def test_failed_epoch_invalidation_is_terminal_reconstruction_failure():
     source = _read("FullAnalysisService.java")
 
