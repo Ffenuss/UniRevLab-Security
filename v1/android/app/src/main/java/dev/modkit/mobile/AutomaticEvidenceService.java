@@ -90,15 +90,17 @@ public class AutomaticEvidenceService extends Service {
                 "analysis.resolver-index.json","analysis.autopilot-index.jsonl","analysis.gameplay-coverage.json","analysis-deep",
                 "re-analysis.json","re-analysis.ui.json","re-analysis.menu.json","rodroid"})deleteTree(app.file(name));
     }
-    private void invalidateStage6Outputs()throws IOException{
+    private void invalidatePerRunDerivedOutputs()throws IOException{
         for(String name:new String[]{
+                "simple-catalog.json","simple-catalog.json.part","simple-progress.json","simple-progress.json.part",
                 "il2cpp-no-rva-native.json","il2cpp-no-rva-native.json.part","il2cpp-no-rva-native.methods.jsonl","il2cpp-no-rva-native.methods.jsonl.part","il2cpp-no-rva-native.failures.jsonl","il2cpp-no-rva-native.failures.jsonl.part",
                 "automod-plan.json","automod-plan.json.part","connected-report.json","connected-report.json.part","connected-report.md","connected-report.md.part"})deleteTree(app.file(name));
     }
 
     private void runPipeline(JSONObject manifest)throws Exception{
         if(!app.file("game.apk").isFile()&&!app.file("installed-target.json").isFile())throw new IOException("Target отсутствует");
-        check();if(!Python.isStarted())Python.start(new AndroidPlatform(this));PyObject cache=Python.getInstance().getModule("modkit.mobile.simple_cache");
+        check();invalidatePerRunDerivedOutputs();check();
+        if(!Python.isStarted())Python.start(new AndroidPlatform(this));PyObject cache=Python.getInstance().getModule("modkit.mobile.simple_cache");
 
         stage(1,6,"target digest + APK/split cache plan");
         JSONObject plan=new JSONObject(cache.callAttr("plan_workspace",getFilesDir().getPath(),app.file("simple-cache.json").getPath(),new Progress()).toString());
@@ -107,10 +109,11 @@ public class AutomaticEvidenceService extends Service {
         boolean haveReAnalysis=app.file("re-analysis.json").isFile();
         boolean haveIl2cppAnalysis=!hasIl2cppPair||app.file("analysis.json").isFile()||app.file("analysis.methods.jsonl").isFile();
         boolean coreCacheReady=haveReAnalysis&&haveIl2cppAnalysis;
-        manifest.put("cachePlan",plan).put("cacheHit",unchanged&&coreCacheReady);
+        boolean coreCacheHit=unchanged&&coreCacheReady;
+        manifest.put("cachePlan",plan).put("cacheHit",coreCacheHit);
 
-        File reTarget=targetForReAnalysis();stage(2,6,unchanged&&coreCacheReady?"cache hit: IL2CPP/DEX/native correlation":"IL2CPP + DEX/native correlation");JSONObject engines=new JSONObject();manifest.put("engines",engines);
-        if(!unchanged||!coreCacheReady){
+        File reTarget=targetForReAnalysis();stage(2,6,coreCacheHit?"cache hit: IL2CPP/DEX/native correlation":"IL2CPP + DEX/native correlation");JSONObject engines=new JSONObject();manifest.put("engines",engines);
+        if(!coreCacheHit){
             invalidateFreshCoreOutputs();
             try{engines.put("il2cpp",runIl2cpp(reTarget));}catch(Exception e){if(app.cancelled.get())check();engines.put("il2cpp",new JSONObject().put("status","PARTIAL").put("error",String.valueOf(e.getMessage())));progress("IL2CPP частичен: "+e.getMessage()+" · продолжаю DEX/native correlation.");}
             check();try{engines.put("re",runReAnalysis(reTarget));}catch(Exception e){if(app.cancelled.get())check();engines.put("re",new JSONObject().put("status","PARTIAL").put("error",String.valueOf(e.getMessage())));progress("DEX/native correlation частична: "+e.getMessage()+" · продолжаю остальные evidence backend'ы.");}
@@ -138,7 +141,7 @@ public class AutomaticEvidenceService extends Service {
 
         check();stage(5,6,"Evidence Graph: ownership + confirmation ladder + exact locators + ranking");PyObject simple=Python.getInstance().getModule("modkit.mobile.simple_mode_cancellable");JSONObject catalog=new JSONObject(simple.callAttr("build_catalog",getFilesDir().getPath(),app.file("simple-catalog.json").getPath(),new Progress()).toString());manifest.put("catalog",new JSONObject().put("total",catalog.optInt("total")).put("important",catalog.optInt("important")).put("buildable",catalog.optInt("buildable")).put("actionable",catalog.optInt("actionable")).put("serverAudit",catalog.optInt("serverAudit")));
 
-        check();stage(6,6,"no-RVA native recovery + AutoMod + connected report + cache");invalidateStage6Outputs();
+        check();stage(6,6,"no-RVA native recovery + AutoMod + connected report + cache");
         File meta=app.file("metadata.bin"),lib=app.file("library.so"),methods=app.file("analysis.methods.jsonl");
         if(meta.isFile()&&lib.isFile()&&methods.isFile()){
             try{
@@ -197,7 +200,7 @@ public class AutomaticEvidenceService extends Service {
 
         check();app.result=readJson("analysis.summary.json");JSONObject autoPlan=readJson("automod-plan.json");JSONObject connected=readJson("connected-report.json");JSONObject nativeRecovery=readJson("il2cpp-no-rva-native.json");JSONObject recoveryCounts=nativeRecovery==null?null:nativeRecovery.optJSONObject("counts");
         String autoText=autoPlan==null?"":" · AutoMod build "+autoPlan.optInt("readyToBuildCount")+" / preflight "+autoPlan.optInt("readyForPreflightCount");String reportText=connected==null?"":" · report links "+connected.optInt("exactLinked")+" / recovered RVA "+connected.optInt("nativeRvaRecoveredFindings")+" / token-no-RVA "+connected.optInt("metadataTokenIdentityFindings")+" / conflicts "+connected.optInt("metadataTokenConflictFindings");String recoveryText=recoveryCounts==null?"":" · native recovery "+recoveryCounts.optInt("recoveredExact");
-        progress((degraded?"Готово частично":"Готово")+". Найдено "+catalog.optInt("total")+", важных "+catalog.optInt("important")+", точных locator "+catalog.optInt("actionable")+", PATCH_READY "+catalog.optInt("buildable")+", server/trust audit "+catalog.optInt("serverAudit")+autoText+recoveryText+reportText+(unchanged?" · cache hit":" · fresh target")+".");
+        progress((degraded?"Готово частично":"Готово")+". Найдено "+catalog.optInt("total")+", важных "+catalog.optInt("important")+", точных locator "+catalog.optInt("actionable")+", PATCH_READY "+catalog.optInt("buildable")+", server/trust audit "+catalog.optInt("serverAudit")+autoText+recoveryText+reportText+(coreCacheHit?" · cache hit":" · fresh core")+".");
     }
 
     private JSONObject runIl2cpp(File reTarget)throws Exception{
