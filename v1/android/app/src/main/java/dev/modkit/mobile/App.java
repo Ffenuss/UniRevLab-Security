@@ -81,15 +81,16 @@ public class App extends Application {
     private void cleanupInterruptedTargetPreparation(){
         result=null;
         String[] names={
-                "full-reconstruction.json","full-reconstruction.json.part","modkit-decompiled.zip","apktool-analysis.json","apktool-analysis.json.part","apktool-workspace",
+                "full-reconstruction.json","full-reconstruction.json.part","modkit-decompiled.zip","modkit-decompiled.zip.tmp","jadx-batch","decompiler","apktool-analysis.json","apktool-analysis.json.part","apktool-workspace",
                 "artifact-families.json","embedded-analysis.json","automatic-evidence.json","automatic-evidence.json.part","automod-plan.json","automod-plan.json.part",
                 "runtime-session.json","runtime-session.json.part","runtime-correlation.json","runtime-correlation.json.part","runtime-correlation.json.build",
                 "il2cpp-crosscheck.json","il2cpp-crosscheck.json.part","il2cpp-crosscheck.methods.jsonl","il2cpp-crosscheck.methods.jsonl.part",
                 "il2cpp-metadata-identity.json","il2cpp-metadata-identity.json.part","il2cpp-metadata-identity.methods.jsonl","il2cpp-metadata-identity.methods.jsonl.part",
                 "il2cpp-no-rva-native.json","il2cpp-no-rva-native.json.part","il2cpp-no-rva-native.methods.jsonl","il2cpp-no-rva-native.methods.jsonl.part","il2cpp-no-rva-native.failures.jsonl","il2cpp-no-rva-native.failures.jsonl.part",
                 "lua-deep.json","hermes-deep","hermes-deep.json","native-deep.json","native-deep-cache","cocos-deep.json","flutter-deep.json","deep-gameplay.json",
-                "installed-target.json","installed-target.json.part","installed-apk-set.zip","installed-apk-set.zip.tmp","installed-scan.json","installed-apks",
+                "installed-target.json","installed-target.json.part","installed-apk-set.zip","installed-apk-set.zip.tmp","installed-apk-set.digest","installed-scan.json","installed-apks","target-import.part",
                 "metadata.bin","library.so","game.apk","game-native-split.apk","game.apk.part",
+                "native-source.so","native-working.so","native-state.json","native-info.json","native-source.json","native-search.json","native-disasm.json","native-xrefs.json",
                 "analysis.json","analysis.summary.json","analysis.summary.json.part","analysis.ui.jsonl",
                 "analysis.methods.jsonl","analysis.methods.jsonl.idx","analysis.methods.jsonl.rva.idx","analysis.methods.jsonl.pages.idx","analysis.methods.meta.json",
                 "analysis.candidates.jsonl","analysis.discoveries.jsonl","analysis.fields.jsonl",
@@ -105,7 +106,7 @@ public class App extends Application {
                 "connected-report.json","connected-report.json.part","connected-report.md","connected-report.md.part","evidence-bundle.zip"
         };
         for(String name:names)deleteInterruptedTargetTree(file(name));
-        getSharedPreferences("state",0).edit().remove("selections").remove("active.project").remove("metadata.bin").remove("library.so").remove("installed.package").remove("game.apk").apply();
+        getSharedPreferences("state",0).edit().remove("selections").remove("active.project").remove("metadata.bin").remove("library.so").remove("native-source.so").remove("installed.package").remove("game.apk").apply();
     }
     private void installCrashJournal(){
         final Thread.UncaughtExceptionHandler previous=Thread.getDefaultUncaughtExceptionHandler();
