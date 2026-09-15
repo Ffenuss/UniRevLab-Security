@@ -72,11 +72,13 @@ public class AutoModActivity extends AppCompatActivity {
     }
 
     private boolean canStart(){if(app.busy.get()){toast("Сейчас выполняется другая операция");return false;}if(!app.file("game.apk").isFile()&&!app.file("installed-target.json").isFile()){toast("Target не выбран");return false;}return true;}
+    private void invalidatePreparedState(){for(String name:new String[]{"menu-spec.json","menu-preflight.json","menu-validation.json","menu-auto-confirm.json","menu-autopilot.json"})app.file(name).delete();}
 
     private void rebuildPlan(){
         if(planning){toast("AutoMod-план уже обновляется");return;}if(app.busy.get()){toast("Сейчас выполняется другая операция");return;}if(!app.file("simple-catalog.json").isFile()&&!app.file("game.apk").isFile()){toast("Сначала выполните полный анализ");return;}
+        invalidatePreparedState();
         planning=true;refresh.setEnabled(false);status.setText("AutoMod: Evidence Graph + runtime + IL2CPP structural + metadata identity + native RVA recovery…");
-        executor.execute(()->{try{if(!Python.isStarted())Python.start(new AndroidPlatform(this));PyObject result=Python.getInstance().getModule("modkit.mobile.automod").callAttr("build_workspace_plan",getFilesDir().getPath(),app.file("automod-plan.json").getPath());new JSONObject(result.toString());runOnUiThread(()->{status.setText("AutoMod-план обновлён.");render();});}catch(Exception e){runOnUiThread(()->{status.setText("AutoMod: "+e.getMessage());toast("Не удалось обновить план");});}finally{planning=false;runOnUiThread(()->refresh.setEnabled(!app.busy.get()));}});
+        executor.execute(()->{try{if(!Python.isStarted())Python.start(new AndroidPlatform(this));PyObject result=Python.getInstance().getModule("modkit.mobile.automod").callAttr("build_workspace_plan",getFilesDir().getPath(),app.file("automod-plan.json").getPath());new JSONObject(result.toString());runOnUiThread(()->{status.setText("AutoMod-план обновлён. Старый prepare/preflight инвалидирован.");render();});}catch(Exception e){runOnUiThread(()->{status.setText("AutoMod: "+e.getMessage());toast("Не удалось обновить план");});}finally{planning=false;runOnUiThread(()->refresh.setEnabled(!app.busy.get()));}});
     }
 
     private void startExactPrepare(){
