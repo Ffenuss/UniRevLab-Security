@@ -32,6 +32,15 @@ def test_manual_worker_workspaces_recover_busy_on_launch_failure():
         assert "catch(Exception e){app.busy.set(false);app.revision++" in source, name
 
 
+def test_worker_service_always_releases_global_busy_after_started_operation():
+    source = _read("WorkerService.java")
+    finally_block = source.split("} finally {", 1)[1].split("},\"modkit-work\")", 1)[0]
+    assert "if (wake != null && wake.isHeld()) wake.release();" in finally_block
+    assert 'putBoolean("running",false)' in finally_block
+    assert "app.busy.set(false); app.revision++;" in finally_block
+    assert "stopForeground(true); stopSelf();" in finally_block
+
+
 def test_created_saf_outputs_are_removed_when_worker_cannot_start():
     menu = _read("MenuBuilderActivity.java")
     patch = _read("PatchPackActivity.java")
