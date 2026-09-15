@@ -34,6 +34,17 @@ def _expected_counts(metadata_path: str | Path, cb=None) -> tuple[dict[str, int]
         meta.close()
 
 
+def _fingerprint(role: str, path: str | Path, cb=None) -> dict[str, Any]:
+    file = Path(path)
+    engine.check(cb)
+    if not file.is_file():
+        raise FileNotFoundError(str(file))
+    size = file.stat().st_size
+    sha256 = engine.digest(file, cb)
+    engine.check(cb)
+    return {"role": role, "name": file.name, "size": size, "sha256": sha256}
+
+
 def _write_audit(path: str | Path | None, audit: dict[str, Any]) -> None:
     if path is None:
         return
@@ -88,10 +99,18 @@ def prepare(metadata_path: str | Path, library_path: str | Path, catalog_path: s
             title: str = "ModKit Autopilot Menu", max_deep: int = 24,
             target_controls: int = 12, cb=None, audit_path: str | Path | None = None):
     """Run the normal autopilot with stronger, fail-closed module disambiguation."""
+    input_fingerprints = [
+        _fingerprint("metadata", metadata_path, cb),
+        _fingerprint("library", library_path, cb),
+        _fingerprint("catalog", catalog_path, cb),
+        _fingerprint("sourceApk", source_apk, cb),
+    ]
     expected, non_contiguous = _expected_counts(metadata_path, cb)
     audit: dict[str, Any] = {
         "schema": SCHEMA,
         "mode": "EXACT_METADATA_TOKEN_DOMAIN_CODEGENMODULE_ADAPTER",
+        "freshnessPolicy": "EXACT_INPUT_SHA256",
+        "inputFingerprints": input_fingerprints,
         "contiguousTokenDomains": len(expected),
         "nonContiguousTokenDomains": len(non_contiguous),
         "calls": 0,
