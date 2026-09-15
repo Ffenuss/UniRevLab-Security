@@ -71,6 +71,10 @@ final class EvidenceBundleExporter {
 
     static void ensureExportable(Context context) throws Exception { terminalPipeline(context); }
     static String exportEpoch(Context context) throws Exception { return pipelineEpoch(terminalPipeline(context)); }
+    static boolean shouldBuildConnectedReport(Context context) throws Exception {
+        String status = terminalPipeline(context).optString("status", "");
+        return "SUCCESS".equals(status) || "PARTIAL".equals(status);
+    }
 
     static JSONObject export(Context context, Uri output) throws Exception {
         JSONObject initialPipeline = terminalPipeline(context);
