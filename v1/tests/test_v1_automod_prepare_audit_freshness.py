@@ -62,3 +62,20 @@ def test_patch_lab_requires_sha_bound_audit_for_build_gate():
     assert "Exact SHA audit:" in source
     assert "не SHA-bound" in source
     assert 'build.setEnabled(idle&&prepareCount>0&&preflightReady&&exactPrepareAuditReady())' in source
+
+
+def test_automod_build_routes_through_final_sha_guard_only_for_automod_path():
+    activity = (ANDROID / "AutoModActivity.java").read_text(encoding="utf-8")
+    guard = (ANDROID / "AutoModBuildGuardService.java").read_text(encoding="utf-8")
+    manifest = Path("android/app/src/main/AndroidManifest.xml").read_text(encoding="utf-8")
+
+    assert '"menu_build_apk".equals(op)?AutoModBuildGuardService.class:WorkerService.class' in activity
+    assert '<service android:name=".AutoModBuildGuardService"' in manifest
+
+    verify = guard.index("AutoModAuditVerifier.verifyCurrent")
+    preflight = guard.index('read("menu-preflight.json")', verify)
+    worker = guard.index('new Intent(this,WorkerService.class)', preflight)
+    assert verify < preflight < worker
+    assert 'preflight.optBoolean("readyForAutoBuild")' in guard
+    assert '.putExtra("op","menu_build_apk")' in guard
+    assert '()->app.cancelled.get()' in guard
