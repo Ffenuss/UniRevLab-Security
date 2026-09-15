@@ -150,8 +150,10 @@ public class AutomaticEvidenceService extends Service {
                 manifest.put("cacheRecorded",true).put("cacheStatus",new JSONObject().put("status","SUCCESS"));
             }catch(Exception e){
                 if(app.cancelled.get())check();
+                try{Files.deleteIfExists(app.file("simple-cache.json").toPath());}
+                catch(Exception invalidationError){throw new IOException("Cache write failed and stale cache invalidation failed: "+String.valueOf(invalidationError.getMessage()),invalidationError);}
                 manifest.put("cacheRecorded",false).put("cacheStatus",new JSONObject().put("status","PARTIAL").put("error",String.valueOf(e.getMessage())));
-                progress("Cache write частичен: "+e.getMessage()+" · результаты анализа сохранены, следующий запуск перепроверит workspace.");
+                progress("Cache write частичен: "+e.getMessage()+" · stale cache инвалидирован, следующий запуск пересканирует workspace.");
             }
         }else{
             Files.deleteIfExists(app.file("simple-cache.json").toPath());manifest.put("cacheRecorded",false).put("cacheBlockedReason","core analyzer partial or incomplete").put("cacheStatus",new JSONObject().put("status","BLOCKED"));
