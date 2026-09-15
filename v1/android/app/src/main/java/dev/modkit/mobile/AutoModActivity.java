@@ -74,12 +74,17 @@ public class AutoModActivity extends AppCompatActivity {
     }
 
     private boolean canStart(){if(planning){toast("Дождитесь обновления AutoMod-плана");return false;}if(app.busy.get()){toast("Сейчас выполняется другая операция");return false;}if(!app.file("game.apk").isFile()&&!app.file("installed-target.json").isFile()){toast("Target не выбран");return false;}return true;}
-    private void invalidatePreparedState(){for(String name:new String[]{"menu-spec.json","menu-preflight.json","menu-validation.json","menu-auto-confirm.json","menu-autopilot.json","menu-native-recovery.json"})app.file(name).delete();}
+    private boolean invalidatePreparedState(){
+        for(String name:new String[]{"menu-spec.json","menu-preflight.json","menu-validation.json","menu-auto-confirm.json","menu-autopilot.json","menu-native-recovery.json","menu-native-recovery.json.tmp"}){
+            java.io.File file=app.file(name);if(file.exists()&&!file.delete())return false;
+        }
+        return true;
+    }
     private boolean exactPrepareAuditReady(){return AutoModAuditVerifier.structurallyReady(read("menu-native-recovery.json"));}
 
     private void rebuildPlan(){
         if(planning){toast("AutoMod-план уже обновляется");return;}if(app.busy.get()){toast("Сейчас выполняется другая операция");return;}if(!app.file("simple-catalog.json").isFile()&&!app.file("game.apk").isFile()){toast("Сначала выполните полный анализ");return;}
-        invalidatePreparedState();
+        if(!invalidatePreparedState()){status.setText("AutoMod: не удалось инвалидировать старый prepare/preflight · refresh заблокирован fail-closed.");toast("Не удалось очистить старый AutoMod prepare state");render();return;}
         planning=true;refresh.setEnabled(false);prepare.setEnabled(false);check.setEnabled(false);build.setEnabled(false);status.setText("AutoMod: проверяю Evidence Graph, exact SHA и native recovery…");
         executor.execute(()->{try{if(!Python.isStarted())Python.start(new AndroidPlatform(this));PyObject result=Python.getInstance().getModule("modkit.mobile.automod_cancellable").callAttr("build_workspace_plan",getFilesDir().getPath(),app.file("automod-plan.json").getPath(),new PlanningProgress());new JSONObject(result.toString());runOnUiThread(()->status.setText("План обновлён · старый prepare/preflight инвалидирован."));}catch(Exception e){runOnUiThread(()->{status.setText("AutoMod: "+e.getMessage());toast("Не удалось обновить план");});}finally{planning=false;runOnUiThread(this::render);}});
     }
