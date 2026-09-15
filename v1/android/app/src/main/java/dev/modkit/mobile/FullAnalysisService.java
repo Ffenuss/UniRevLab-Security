@@ -66,11 +66,20 @@ public class FullAnalysisService extends Service {
                 progress("Проверяю fingerprint выбранного APK/APK-set…");
                 String digest=targetDigest(inputs);
                 File manifest=app.file("full-reconstruction.json");
+                File decompiled=app.file("modkit-decompiled.zip");
                 boolean cached=false;
-                if(manifest.isFile()&&app.file("modkit-decompiled.zip").isFile()){
-                    try{JSONObject old=new JSONObject(Io.readUtf8(manifest));cached=digest.equals(old.optString("targetDigest"))&&old.optBoolean("complete");}catch(Exception ignored){}
+                if(manifest.isFile()&&decompiled.isFile()){
+                    try{
+                        JSONObject old=new JSONObject(Io.readUtf8(manifest));
+                        String expectedSha=old.optString("outputSha256","");
+                        long expectedSize=old.optLong("outputSize",-1L);
+                        boolean metadataMatches=digest.equals(old.optString("targetDigest"))&&old.optBoolean("complete")&&decompiled.getName().equals(old.optString("output"));
+                        if(metadataMatches&&expectedSize>=0L&&expectedSize==decompiled.length()&&!expectedSha.isEmpty()){
+                            cached=expectedSha.equals(fileSha256(decompiled));
+                        }
+                    }catch(java.io.InterruptedIOException cancelled){throw cancelled;}catch(Exception ignored){}
                 }
-                if(cached)stage(2,4,"JADX: cache hit · target не изменился");
+                if(cached)stage(2,4,"JADX: cache hit · target и export fingerprint совпали");
                 else{
                     stage(2,4,"JADX: все classes*.dex и resources во всех split APK");
                     JSONObject state=new JSONObject().put("schema","modkit-full-reconstruction-1.1").put("targetDigest",digest).put("complete",false).put("startedAtMs",System.currentTimeMillis());
@@ -78,8 +87,10 @@ public class FullAnalysisService extends Service {
                     try(DecompilerEngine dec=new DecompilerEngine(this)){
                         dec.open();if(app.cancelled.get())throw new java.io.InterruptedIOException("cancelled");
                         File zip=dec.exportAllZip(app.cancelled);if(app.cancelled.get())throw new java.io.InterruptedIOException("cancelled");
-                        state.put("complete",true).put("backend",DecompilerEngine.BACKEND).put("classCount",dec.classCount()).put("resourceCount",dec.resourceCount()).put("errors",dec.errorCount()).put("warnings",dec.warnCount()).put("output",zip.getName()).put("finishedAtMs",System.currentTimeMillis());
+                        long outputSize=zip.length();String outputSha=fileSha256(zip);
+                        state.put("backend",DecompilerEngine.BACKEND).put("classCount",dec.classCount()).put("resourceCount",dec.resourceCount()).put("errors",dec.errorCount()).put("warnings",dec.warnCount()).put("output",zip.getName()).put("outputSize",outputSize).put("outputSha256",outputSha);
                         JSONArray names=new JSONArray();for(File f:dec.inputFiles())names.put(f.getName());state.put("inputs",names);
+                        state.put("complete",true).put("finishedAtMs",System.currentTimeMillis());
                     }catch(Exception e){
                         state.put("complete",false).put("cancelled",app.cancelled.get()).put("error",String.valueOf(e.getMessage())).put("finishedAtMs",System.currentTimeMillis());
                         if(!app.cancelled.get())progress("JADX частичен: "+e.getMessage()+" · продолжаю остальные backend'ы.");
@@ -165,6 +176,14 @@ public class FullAnalysisService extends Service {
             try(FileInputStream in=new FileInputStream(f)){
                 int n;while((n=in.read(buf))!=-1){if(app.cancelled.get())throw new java.io.InterruptedIOException("cancelled");d.update(buf,0,n);}
             }
+        }
+        StringBuilder out=new StringBuilder();for(byte b:d.digest())out.append(String.format(Locale.ROOT,"%02x",b));return out.toString();
+    }
+
+    private String fileSha256(File file)throws Exception{
+        MessageDigest d=MessageDigest.getInstance("SHA-256");byte[] buf=new byte[1024*1024];
+        try(FileInputStream in=new FileInputStream(file)){
+            int n;while((n=in.read(buf))!=-1){if(app.cancelled.get())throw new java.io.InterruptedIOException("cancelled");d.update(buf,0,n);}
         }
         StringBuilder out=new StringBuilder();for(byte b:d.digest())out.append(String.format(Locale.ROOT,"%02x",b));return out.toString();
     }
