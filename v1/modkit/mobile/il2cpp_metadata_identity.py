@@ -120,13 +120,14 @@ def _row_id(row: dict[str, Any], index: int) -> Any:
 
 def _type_layout_candidates(version: int) -> tuple[tuple[int, int, int, str], ...]:
     # Layout tuple: (record size, methodStart offset, method_count offset, name).
-    # Header version 24 covers several Unity metadata sub-layouts, so we do not
-    # guess a decimal subversion. Instead both common layouts are scored against
-    # the actual string table, method ranges, and declaringType indices.
+    # Metadata header version 24 covers multiple Unity subversions but does not
+    # encode the decimal subtype directly. Model the three layouts described by
+    # Il2CppTypeDefinition's Version attributes and score them against the file.
     if version == 24:
         return (
-            (100, 52, 80, "LEGACY24_TYPEDEF_100"),  # <=24.1 with RGCTX fields
-            (92, 44, 72, "LEGACY24_TYPEDEF_92"),    # 24.2-24.5 compacted legacy layout
+            (100, 52, 80, "LEGACY24_0_TYPEDEF_100"),  # 24.0: customAttribute + byref + RGCTX
+            (96, 48, 76, "LEGACY24_1_TYPEDEF_96"),    # 24.1: byref + RGCTX
+            (88, 40, 68, "LEGACY24_2_5_TYPEDEF_88"),  # 24.2-24.5: byref, no RGCTX
         )
     if version >= 25:
         return ((88, 36, 64, "COMPACT_TYPEDEF_88"),)
@@ -172,7 +173,7 @@ def _choose_type_layout(blob: bytes, version: int, type_offset: int, type_size: 
 
             # The strongest discriminator is the method definition's declaringType.
             # Sample the first owned method when present; wrong 24.x offsets usually
-            # fail this immediately even if the table size is divisible by both layouts.
+            # fail this immediately even if type_size is divisible by several layouts.
             if method_len > 0 and 0 <= method_start < method_count:
                 mpos = methods_offset + method_start * method_record_size
                 if mpos + 8 <= len(blob):
