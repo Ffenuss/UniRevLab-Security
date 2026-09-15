@@ -145,9 +145,16 @@ public class AutomaticEvidenceService extends Service {
         boolean reCacheable="SUCCESS".equals(reStatus)||"CACHE_HIT".equals(reStatus);
         boolean cacheEligible=il2cppCacheable&&reCacheable;manifest.put("cacheEligible",cacheEligible);
         if(cacheEligible){
-            cache.callAttr("record_workspace",getFilesDir().getPath(),app.file("simple-cache.json").getPath(),plan.toString(),new Progress());manifest.put("cacheRecorded",true);
+            try{
+                cache.callAttr("record_workspace",getFilesDir().getPath(),app.file("simple-cache.json").getPath(),plan.toString(),new Progress());
+                manifest.put("cacheRecorded",true).put("cacheStatus",new JSONObject().put("status","SUCCESS"));
+            }catch(Exception e){
+                if(app.cancelled.get())check();
+                manifest.put("cacheRecorded",false).put("cacheStatus",new JSONObject().put("status","PARTIAL").put("error",String.valueOf(e.getMessage())));
+                progress("Cache write частичен: "+e.getMessage()+" · результаты анализа сохранены, следующий запуск перепроверит workspace.");
+            }
         }else{
-            Files.deleteIfExists(app.file("simple-cache.json").toPath());manifest.put("cacheRecorded",false).put("cacheBlockedReason","core analyzer partial or incomplete");
+            Files.deleteIfExists(app.file("simple-cache.json").toPath());manifest.put("cacheRecorded",false).put("cacheBlockedReason","core analyzer partial or incomplete").put("cacheStatus",new JSONObject().put("status","BLOCKED"));
         }
 
         JSONArray degradedReasons=new JSONArray();JSONObject reconstruction=readJson("full-reconstruction.json"),apktoolSummary=readJson("apktool-analysis.json");
@@ -155,6 +162,7 @@ public class AutomaticEvidenceService extends Service {
         if(apktoolSummary==null)degradedReasons.put("APKTOOL_SUMMARY_MISSING");else if("FAILED".equals(apktoolSummary.optString("status"))||hasError(apktoolSummary)||apktoolSummary.optInt("failed")>0)degradedReasons.put("APKTOOL_PARTIAL");
         if(embeddedSummary==null)degradedReasons.put("EMBEDDED_SUMMARY_MISSING");else if(embeddedSummary.optInt("failed")>0)degradedReasons.put("EMBEDDED_PARTIAL");
         JSONObject securityStatus=manifest.optJSONObject("security");if(securityStatus!=null&&"PARTIAL".equals(securityStatus.optString("status")))degradedReasons.put("SECURITY_PARTIAL");
+        JSONObject cacheStatus=manifest.optJSONObject("cacheStatus");if(cacheStatus!=null&&"PARTIAL".equals(cacheStatus.optString("status")))degradedReasons.put("CACHE_WRITE_PARTIAL");
         if("PARTIAL".equals(il2cppStatus))degradedReasons.put("IL2CPP_PARTIAL");if("PARTIAL".equals(reStatus))degradedReasons.put("RE_ANALYSIS_PARTIAL");
         JSONObject noRvaStatus=manifest.optJSONObject("noRvaNative"),autoStatus=manifest.optJSONObject("autoMod"),reportStatus=manifest.optJSONObject("connectedReport");
         if(noRvaStatus!=null&&"PARTIAL".equals(noRvaStatus.optString("status")))degradedReasons.put("NO_RVA_NATIVE_PARTIAL");
