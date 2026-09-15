@@ -270,7 +270,9 @@ def _identity_indexes(rows: list[dict[str, Any]]) -> tuple[dict[str, dict[str, A
             by_name.setdefault(method, []).append(row)
         if method and cls:
             by_pair.setdefault((cls, method), []).append(row)
-            by_pair.setdefault((cls.rsplit(".", 1)[-1], method), []).append(row)
+            short = cls.rsplit(".", 1)[-1]
+            if short != cls:
+                by_pair.setdefault((short, method), []).append(row)
     return by_id, by_pair, by_name
 
 
@@ -280,15 +282,17 @@ def _identity_for_card(card: dict[str, Any], indexes: tuple[dict[str, dict[str, 
     method_id = locator.get("methodId")
     if method_id not in (None, "") and str(method_id) in by_id:
         return by_id[str(method_id)]
-    method = _norm_name(locator.get("method") or locator.get("methodName") or card.get("title"))
+    method = _norm_name(locator.get("method") or locator.get("methodName"))
     cls = _norm_class(locator.get("class") or locator.get("className"))
     if method and cls:
         matches = by_pair.get((cls, method), [])
         if len(matches) == 1:
             return matches[0]
-        matches = by_pair.get((cls.rsplit(".", 1)[-1], method), [])
-        if len(matches) == 1:
-            return matches[0]
+        short = cls.rsplit(".", 1)[-1]
+        if short != cls:
+            matches = by_pair.get((short, method), [])
+            if len(matches) == 1:
+                return matches[0]
     if method and len(by_name.get(method, [])) == 1:
         return by_name[method][0]
     return None
@@ -400,7 +404,7 @@ def build_plan(catalog: dict[str, Any], runtime_correlation: dict[str, Any] | No
     candidates.sort(key=lambda row: (order.get(str(row.get("stage")), 99), -int(row.get("priority") or 0), str(row.get("title") or "").casefold()))
     counts = Counter(str(row.get("stage") or _REVIEW) for row in candidates)
     gameplay = Counter(str(row.get("gameplayDomain")) for row in candidates if row.get("gameplayDomain") and row.get("stage") not in {_AUDIT, _EXCLUDED})
-    exact = sum(1 for row in candidates if isinstance(row.get("locator"), dict) and row.get("locator"))
+    exact = sum(1 for card in cards if isinstance(card, dict) and _locator_is_exact(card))
     runtime_observed = sum(1 for row in candidates if row.get("runtimeObserved"))
     il2cpp_observed = sum(1 for row in candidates if row.get("il2cppStructuralObserved"))
     il2cpp_both = sum(1 for row in candidates if isinstance(row.get("il2cppStructural"), dict) and row["il2cppStructural"].get("status") == "STRUCTURAL_BOTH_PRESENT")
