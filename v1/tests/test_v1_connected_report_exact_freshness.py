@@ -11,7 +11,8 @@ def test_release_connected_report_uses_shared_exact_sha_secondary_gate():
     secondary = SECONDARY.read_text(encoding="utf-8")
     automod = AUTOMOD.read_text(encoding="utf-8")
 
-    assert "_secondary.ensure_workspace(workdir, cb)" in source
+    assert "root = Path(workdir)" in source
+    assert "_secondary.ensure_workspace(root, cb)" in source
     assert '"freshnessPolicy": "EXACT_INPUT_SHA256"' in secondary
     assert '"mtimeTrustedAsIdentity": False' in secondary
     assert "hashlib.sha256()" in automod
@@ -36,14 +37,6 @@ def test_exact_secondary_summaries_fail_closed_when_current_inputs_are_unavailab
 def test_v12_legacy_mtime_ensure_functions_are_replaced_and_restored_around_build():
     source = SOURCE.read_text(encoding="utf-8")
 
-    for name in (
-        "_ensure_il2cpp_crosscheck",
-        "_ensure_metadata_identity",
-        "_ensure_native_recovery",
-    ):
-        assert f"original_" in source
-        assert f"_v12.{name}" in source
-
     assert "original_crosscheck = _v12._ensure_il2cpp_crosscheck" in source
     assert "original_identity = _v12._ensure_metadata_identity" in source
     assert "original_native = _v12._ensure_native_recovery" in source
@@ -60,17 +53,25 @@ def test_v12_legacy_mtime_ensure_functions_are_replaced_and_restored_around_buil
     assert patch < build < restore
 
 
-def test_native_failure_rows_are_not_streamed_without_current_exact_native_summary():
+def test_native_failure_rows_require_current_exact_summary_and_declared_file_backing():
     source = SOURCE.read_text(encoding="utf-8")
 
-    assert 'native_current = bool(exact_native) and not bool(exact_native.get("error"))' in source
+    assert 'failures_path = root / "il2cpp-no-rva-native.failures.jsonl"' in source
+    gate = source.split("native_blockers_current = bool(", 1)[1].split("reader, retained", 1)[0]
+    assert 'not exact_native.get("error")' in gate
+    assert 'exact_native.get("freshnessPolicy") == "EXACT_INPUT_SHA256"' in gate
+    assert 'bool(exact_native.get("failuresAreFileBacked"))' in gate
+    assert 'exact_native.get("failureRowsFile") == failures_path.name' in gate
+    assert "failures_path.is_file()" in gate
+
     wrapper = source.split("def wrapped_stream_blockers", 1)[1].split("def wrapped_finding_rva", 1)[0]
-    assert "if not native_current:" in wrapper
+    assert "if not native_blockers_current or Path(path).name != failures_path.name:" in wrapper
     assert "return {}, {}" in wrapper
-    assert "return _stream_native_blockers(path, findings, gate)" in wrapper
+    assert "return _stream_native_blockers(failures_path, findings, gate)" in wrapper
 
 
-def test_report_declares_no_legacy_mtime_fallback_in_release_wrapper():
+def test_report_declares_no_legacy_mtime_fallback_and_native_blocker_freshness():
     source = SOURCE.read_text(encoding="utf-8")
     assert '"legacyMtimeFallbackUsed": False' in source
     assert '"mtimeTrustedAsIdentity": False' in source
+    assert '"nativeBlockerRowsExactCurrent": native_blockers_current' in source
