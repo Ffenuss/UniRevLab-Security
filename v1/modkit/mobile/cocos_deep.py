@@ -24,6 +24,26 @@ _SCRIPT_MARKERS = ("project.js", "settings.js", "main.js", "jsb-adapter", "/src/
 _SCRIPT_SUFFIXES = (".js", ".mjs", ".cjs", ".jsc", ".lua", ".luac", ".luae", ".json")
 
 
+class CocosScanCancelled(RuntimeError):
+    """Explicit cooperative cancellation for script/native correlation."""
+
+
+def _cancelled(cb: Any | None) -> bool:
+    if cb is None:
+        return False
+    checker = getattr(cb, "isCancelled", None)
+    if callable(checker):
+        return bool(checker())
+    if callable(cb):
+        return bool(cb())
+    return False
+
+
+def _check(cb: Any | None) -> None:
+    if _cancelled(cb):
+        raise CocosScanCancelled("Cocos correlation cancelled")
+
+
 def _id(*parts: object) -> str:
     return hashlib.sha256("!".join(str(x) for x in parts).encode("utf-8", "replace")).hexdigest()[:20]
 
@@ -36,7 +56,6 @@ def _is_script(row: dict[str, Any], have_native_cocos: bool) -> bool:
     family = str(row.get("family") or "").casefold()
     entry = "/" + str(row.get("entry") or "").casefold()
     if family == "cocos":
-        # Native engine artifacts are Cocos evidence but are not script assets.
         if entry.endswith(".so"):
             return False
         return entry.endswith(_SCRIPT_SUFFIXES) or any(marker in entry for marker in _SCRIPT_MARKERS)
@@ -72,7 +91,8 @@ def _name_match(script_name: str, native_name: str) -> tuple[str, float] | None:
     return None
 
 
-def correlate(artifact_report: dict[str, Any], native_report: dict[str, Any]) -> dict[str, Any]:
+def correlate(artifact_report: dict[str, Any], native_report: dict[str, Any], cb: Any | None = None) -> dict[str, Any]:
+    _check(cb)
     artifacts = [row for row in artifact_report.get("artifacts", []) if isinstance(row, dict)] if isinstance(artifact_report, dict) else []
     libraries = [row for row in native_report.get("libraries", []) if isinstance(row, dict)] if isinstance(native_report, dict) else []
     cocos_libs = [row for row in libraries if _is_cocos_library(row)]
@@ -82,16 +102,22 @@ def correlate(artifact_report: dict[str, Any], native_report: dict[str, Any]) ->
     bridge_rows: list[dict[str, Any]] = []
     native_functions: list[tuple[dict[str, Any], dict[str, Any]]] = []
     edge_index: dict[tuple[str, str], list[dict[str, Any]]] = {}
-    for lib in cocos_libs:
+    for lib_no, lib in enumerate(cocos_libs):
+        if (lib_no & 0x1F) == 0:
+            _check(cb)
         entry = str(lib.get("entry") or "")
-        for edge in lib.get("controlFlow", []) if isinstance(lib.get("controlFlow"), list) else []:
+        for edge_no, edge in enumerate(lib.get("controlFlow", []) if isinstance(lib.get("controlFlow"), list) else []):
+            if (edge_no & 0xFF) == 0:
+                _check(cb)
             if not isinstance(edge, dict):
                 continue
             for key in ("sourceFunction", "targetFunction"):
                 name = str(edge.get(key) or "")
                 if name:
                     edge_index.setdefault((entry, name), []).append(edge)
-        for fn in lib.get("functions", []) if isinstance(lib.get("functions"), list) else []:
+        for fn_no, fn in enumerate(lib.get("functions", []) if isinstance(lib.get("functions"), list) else []):
+            if (fn_no & 0xFF) == 0:
+                _check(cb)
             if not isinstance(fn, dict):
                 continue
             native_functions.append((lib, fn))
@@ -104,9 +130,14 @@ def correlate(artifact_report: dict[str, Any], native_report: dict[str, Any]) ->
     symbol_rows = [row for row in scripts if row.get("kind") == "SCRIPT_SYMBOL" and row.get("function")]
     correlations: list[dict[str, Any]] = []
     seen: set[tuple[str, str, int]] = set()
+    comparisons = 0
     for script in symbol_rows:
+        _check(cb)
         name = str(script.get("function") or script.get("title") or "")
         for lib, fn in native_functions:
+            comparisons += 1
+            if (comparisons & 0x3FF) == 0:
+                _check(cb)
             native_name = str(fn.get("name") or "")
             match = _name_match(name, native_name)
             if not match:
@@ -131,6 +162,7 @@ def correlate(artifact_report: dict[str, Any], native_report: dict[str, Any]) ->
         if len(correlations) >= MAX_CORRELATIONS:
             break
 
+    _check(cb)
     script_markers = sum(1 for row in scripts if any(marker in ("/"+str(row.get("entry") or "").casefold()) for marker in _SCRIPT_MARKERS))
     detected = bool(cocos_libs or script_markers)
     if cocos_libs and scripts:
@@ -152,7 +184,9 @@ def correlate(artifact_report: dict[str, Any], native_report: dict[str, Any]) ->
             "ownershipKind":"APP_OR_GAME","trustBoundary":"local","patchReady":False,"structuralOnly":True,
             "evidenceRole":"embedded-cocos-runtime",
         })
-    for bridge in bridge_rows[:300]:
+    for no, bridge in enumerate(bridge_rows[:300]):
+        if (no & 0x7F) == 0:
+            _check(cb)
         findings.append({
             "id":"cocos-bridge:"+_id(bridge.get("library"),bridge.get("function"),bridge.get("rva")),
             "kind":"COCOS_NATIVE_BRIDGE","title":str(bridge.get("function") or "Cocos bridge"),"category":"Runtime/Cocos",
@@ -161,7 +195,9 @@ def correlate(artifact_report: dict[str, Any], native_report: dict[str, Any]) ->
             "ownershipKind":"APP_OR_GAME","trustBoundary":"local","patchReady":False,"structuralOnly":True,
             "evidenceRole":"embedded-cocos-native-bridge",
         })
-    for corr in correlations:
+    for no, corr in enumerate(correlations):
+        if (no & 0x7F) == 0:
+            _check(cb)
         findings.append({
             "id":"cocos-link:"+_id(corr.get("scriptId"),corr.get("nativeLibrary"),corr.get("nativeRva")),
             "kind":"COCOS_SCRIPT_NATIVE_CORRELATION","title":f"{corr.get('scriptFunction')} ↔ {corr.get('nativeFunction')}",
@@ -170,9 +206,10 @@ def correlate(artifact_report: dict[str, Any], native_report: dict[str, Any]) ->
             "evidenceRole":"embedded-cocos-script-native-correlation",
         })
 
+    _check(cb)
     return {
         "schema":SCHEMA,"engineId":ENGINE_ID,"bundled":True,"manualImportRequired":False,"passive":True,
-        "executesTargetCode":False,"available":detected,"detected":detected,"detectionConfidence":confidence,
+        "executesTargetCode":False,"cancelAware":cb is not None,"available":detected,"detected":detected,"detectionConfidence":confidence,
         "nativeLibraryCount":len(cocos_libs),"scriptArtifactCount":len(scripts),"bridgeSymbolCount":len(bridge_rows),
         "correlationCount":len(correlations),"nativeLibraries":[str(row.get("entry") or "") for row in cocos_libs],
         "scriptEntries":sorted({str(row.get("entry") or "") for row in scripts if row.get("entry")})[:1000],
@@ -182,15 +219,18 @@ def correlate(artifact_report: dict[str, Any], native_report: dict[str, Any]) ->
 
 
 def scan_workspace(workdir: str | Path, artifact_report: dict[str, Any] | None = None,
-                   native_report: dict[str, Any] | None = None, output_path: str | Path | None = None) -> dict[str, Any]:
+                   native_report: dict[str, Any] | None = None, output_path: str | Path | None = None,
+                   cb: Any | None = None) -> dict[str, Any]:
     root = Path(workdir)
+    _check(cb)
     if artifact_report is None:
         path = root / "artifact-families.json"
         artifact_report = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
     if native_report is None:
         path = root / "native-deep.json"
         native_report = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
-    out = correlate(artifact_report, native_report)
+    out = correlate(artifact_report, native_report, cb)
+    _check(cb)
     if output_path:
         Path(output_path).write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
     return out
