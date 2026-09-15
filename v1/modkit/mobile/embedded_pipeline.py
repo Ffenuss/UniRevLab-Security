@@ -151,7 +151,7 @@ def run_workspace(
     native_report: dict[str, Any] = {}
     _check(cb, "Embedded 4/7 · native ELF/ARM64…")
     try:
-        native_report = native_deep.scan_workspace(root, root / "native-deep.json")
+        native_report = native_deep.scan_workspace(root, root / "native-deep.json", cb)
         runs.append({
             "engineId": native_deep.ENGINE_ID,
             "status": "SUCCESS",
@@ -162,6 +162,8 @@ def run_workspace(
         _merge_findings(static_report, native_report, summary_key="deepNative",
                         default_engine=native_deep.ENGINE_ID, default_kind="NATIVE_EVIDENCE",
                         default_category="Native/ARM64")
+    except native_deep.NativeScanCancelled as exc:
+        raise Cancelled(str(exc)) from exc
     except Cancelled:
         raise
     except Exception as exc:
