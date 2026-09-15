@@ -73,15 +73,15 @@ public class AutoModActivity extends AppCompatActivity {
         render();if(!app.file("automod-plan.json").isFile()&&app.file("simple-catalog.json").isFile())rebuildPlan();handler.post(poll);
     }
 
-    private boolean canStart(){if(app.busy.get()){toast("Сейчас выполняется другая операция");return false;}if(!app.file("game.apk").isFile()&&!app.file("installed-target.json").isFile()){toast("Target не выбран");return false;}return true;}
+    private boolean canStart(){if(planning){toast("Дождитесь обновления AutoMod-плана");return false;}if(app.busy.get()){toast("Сейчас выполняется другая операция");return false;}if(!app.file("game.apk").isFile()&&!app.file("installed-target.json").isFile()){toast("Target не выбран");return false;}return true;}
     private void invalidatePreparedState(){for(String name:new String[]{"menu-spec.json","menu-preflight.json","menu-validation.json","menu-auto-confirm.json","menu-autopilot.json","menu-native-recovery.json"})app.file(name).delete();}
     private boolean exactPrepareAuditReady(){JSONObject audit=read("menu-native-recovery.json");return audit!=null&&audit.optBoolean("completed")&&audit.optBoolean("normalBindingRequired")&&audit.optBoolean("preflightRequired")&&!audit.optBoolean("promotesBuildability")&&!audit.optBoolean("addressRecoveryPromotesBuildability");}
 
     private void rebuildPlan(){
         if(planning){toast("AutoMod-план уже обновляется");return;}if(app.busy.get()){toast("Сейчас выполняется другая операция");return;}if(!app.file("simple-catalog.json").isFile()&&!app.file("game.apk").isFile()){toast("Сначала выполните полный анализ");return;}
         invalidatePreparedState();
-        planning=true;refresh.setEnabled(false);status.setText("AutoMod: проверяю Evidence Graph, exact SHA и native recovery…");
-        executor.execute(()->{try{if(!Python.isStarted())Python.start(new AndroidPlatform(this));PyObject result=Python.getInstance().getModule("modkit.mobile.automod_cancellable").callAttr("build_workspace_plan",getFilesDir().getPath(),app.file("automod-plan.json").getPath(),new PlanningProgress());new JSONObject(result.toString());runOnUiThread(()->{status.setText("План обновлён · старый prepare/preflight инвалидирован.");render();});}catch(Exception e){runOnUiThread(()->{status.setText("AutoMod: "+e.getMessage());toast("Не удалось обновить план");});}finally{planning=false;runOnUiThread(()->refresh.setEnabled(!app.busy.get()));}});
+        planning=true;refresh.setEnabled(false);prepare.setEnabled(false);check.setEnabled(false);build.setEnabled(false);status.setText("AutoMod: проверяю Evidence Graph, exact SHA и native recovery…");
+        executor.execute(()->{try{if(!Python.isStarted())Python.start(new AndroidPlatform(this));PyObject result=Python.getInstance().getModule("modkit.mobile.automod_cancellable").callAttr("build_workspace_plan",getFilesDir().getPath(),app.file("automod-plan.json").getPath(),new PlanningProgress());new JSONObject(result.toString());runOnUiThread(()->status.setText("План обновлён · старый prepare/preflight инвалидирован."));}catch(Exception e){runOnUiThread(()->{status.setText("AutoMod: "+e.getMessage());toast("Не удалось обновить план");});}finally{planning=false;runOnUiThread(this::render);}});
     }
 
     private void startExactPrepare(){
@@ -98,6 +98,7 @@ public class AutoModActivity extends AppCompatActivity {
     }
 
     private void chooseBuildDestination(){
+        if(!canStart())return;
         JSONObject plan=read("automod-plan.json");if(plan==null){toast("Сначала обновите AutoMod-план");return;}int ready=plan.optInt("readyToBuildCount")+plan.optInt("readyForPreflightCount");if(ready<=0){toast("Нет локальных кандидатов, допущенных до prepare/preflight");return;}
         if(!exactPrepareAuditReady()){toast("Exact prepare audit отсутствует или не завершён. Сборка fail-closed заблокирована.");return;}
         JSONObject pf=read("menu-preflight.json");if(pf==null||!pf.optBoolean("readyForAutoBuild")){toast("Сначала выполните успешный exact prepare/preflight. Сборка fail-closed заблокирована.");return;}
@@ -123,7 +124,7 @@ public class AutoModActivity extends AppCompatActivity {
     }
 
     private void setButtons(JSONObject plan,JSONObject pf){boolean idle=!app.busy.get()&&!planning;int prepareCount=plan==null?0:plan.optInt("readyToBuildCount")+plan.optInt("readyForPreflightCount");refresh.setEnabled(idle);prepare.setEnabled(idle&&prepareCount>0);check.setEnabled(idle&&app.file("menu-spec.json").isFile());boolean preflightReady=pf!=null&&pf.optBoolean("readyForAutoBuild");build.setEnabled(idle&&prepareCount>0&&preflightReady&&exactPrepareAuditReady());}
-    private final Runnable poll=new Runnable(){public void run(){if(revision!=app.revision){revision=app.revision;render();}status.setText(app.status==null?"":app.status);handler.postDelayed(this,600);}};
+    private final Runnable poll=new Runnable(){public void run(){if(revision!=app.revision){revision=app.revision;render();if(!planning)status.setText(app.status==null?"":app.status);}else if(app.busy.get()&&!planning)status.setText(app.status==null?"":app.status);handler.postDelayed(this,600);}};
     @Override protected void onResume(){super.onResume();render();}
     @Override protected void onDestroy(){handler.removeCallbacks(poll);executor.shutdownNow();super.onDestroy();}
 }
