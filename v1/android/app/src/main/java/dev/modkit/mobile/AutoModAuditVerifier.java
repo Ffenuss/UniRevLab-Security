@@ -29,6 +29,13 @@ final class AutoModAuditVerifier {
         if(!audit.optBoolean("completed")) return false;
         if(!audit.optBoolean("normalBindingRequired")||!audit.optBoolean("preflightRequired")) return false;
         if(audit.optBoolean("promotesBuildability")||audit.optBoolean("addressRecoveryPromotesBuildability")) return false;
+        if(!audit.optBoolean("phase7PlanRequired")) return false;
+        JSONObject phase7=audit.optJSONObject("phase7Gate");
+        if(phase7==null||!phase7.optBoolean("validated")) return false;
+        if(!"modkit-automod-phase7-prepare-gate-1.0".equals(phase7.optString("schema"))) return false;
+        if(phase7.optInt("rejectedControlCount",-1)!=0) return false;
+        if(phase7.optInt("executableControlCount",0)<=0||phase7.optInt("allowedRvaCount",0)<=0) return false;
+        if(phase7.optBoolean("runtimeEvidencePromotesBuildability")||phase7.optBoolean("reviewEvidencePromotesBuildability")) return false;
         if(!"EXACT_INPUT_SHA256".equals(audit.optString("freshnessPolicy"))) return false;
         JSONArray rows=audit.optJSONArray("inputFingerprints");
         JSONArray outputs=audit.optJSONArray("outputFingerprints");
@@ -42,7 +49,7 @@ final class AutoModAuditVerifier {
 
     static JSONObject verifyCurrent(App app,File sourceApk,CancelGate gate)throws Exception {
         JSONObject audit=read(app);
-        if(!structurallyReady(audit))throw new IOException("Exact recovery audit не содержит обязательную SHA-256 freshness proof");
+        if(!structurallyReady(audit))throw new IOException("Exact recovery audit не содержит обязательную Phase 7 + SHA-256 freshness proof");
         JSONArray rows=audit.getJSONArray("inputFingerprints");
         JSONArray outputs=audit.getJSONArray("outputFingerprints");
         verify(rows,"metadata",app.file("metadata.bin"),gate);
@@ -50,6 +57,9 @@ final class AutoModAuditVerifier {
         verify(rows,"catalog",app.file("analysis.methods.jsonl"),gate);
         verify(rows,"sourceApk",sourceApk,gate);
         verify(outputs,"menuSpec",app.file("menu-spec.json"),gate);
+        JSONObject phase7=audit.getJSONObject("phase7Gate");
+        if(!phase7.optBoolean("validated")||phase7.optInt("rejectedControlCount",-1)!=0)
+            throw new IOException("AutoMod Phase 7 gate stale или содержит rejected executable control");
         return audit;
     }
 
