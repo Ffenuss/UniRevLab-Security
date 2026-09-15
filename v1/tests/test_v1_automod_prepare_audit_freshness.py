@@ -94,4 +94,4 @@ def test_blocked_prebuild_guard_removes_created_saf_destination():
     assert "DocumentsContract.deleteDocument(getContentResolver(),destination)" in guard
     handoff = guard.index("handedOff=true;")
     cleanup = guard.index("DocumentsContract.deleteDocument")
-    assert cleanup < handoff
+    assert handoff < cleanup
