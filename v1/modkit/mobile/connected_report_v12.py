@@ -14,6 +14,8 @@ from typing import Any
 from modkit.mobile.connected_report import build_connected_report as _build_base
 
 SCHEMA = "modkit-connected-report-1.2"
+_IL2CPP_CROSSCHECK_SCHEMA = "modkit-il2cpp-crosscheck-1.0"
+_METADATA_IDENTITY_SCHEMA = "modkit-il2cpp-metadata-identity-1.1"
 
 
 def _json(path: Path) -> dict[str, Any]:
@@ -162,7 +164,8 @@ def _ensure_il2cpp_crosscheck(root: Path) -> dict[str, Any]:
 
     if inputs_available:
         outputs = [summary_path] if existing.get("error") else [summary_path, rows_path]
-        if existing and _fresh(outputs, inputs):
+        current_schema = existing.get("schema") == _IL2CPP_CROSSCHECK_SCHEMA
+        if existing and (current_schema or existing.get("error")) and _fresh(outputs, inputs):
             result = dict(existing)
             result["freshnessVerified"] = True
             result["sourceInputsAvailable"] = True
@@ -211,7 +214,8 @@ def _ensure_metadata_identity(root: Path) -> dict[str, Any]:
 
     if inputs_available:
         outputs = [summary_path] if existing.get("error") else [summary_path, rows_path]
-        if existing and _fresh(outputs, inputs):
+        current_schema = existing.get("schema") == _METADATA_IDENTITY_SCHEMA
+        if existing and (current_schema or existing.get("error")) and _fresh(outputs, inputs):
             result = dict(existing)
             result["freshnessVerified"] = True
             result["sourceInputsAvailable"] = True
