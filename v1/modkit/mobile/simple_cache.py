@@ -149,25 +149,27 @@ def plan_workspace(workdir: str | Path, manifest_path: str | Path | None = None)
 
     digest = _target_digest(rows) if rows else ""
     previous_digest = str(previous.get("targetDigest", "")) if isinstance(previous, dict) else ""
-    unchanged = bool(rows and previous_digest and digest == previous_digest)
+    target_unchanged = bool(rows and previous_digest and digest == previous_digest)
 
     analysis_names = list(_ANALYSIS_CORE)
     if (root / "metadata.bin").is_file() and (root / "library.so").is_file():
         analysis_names.extend(_IL2CPP_CORE)
     analysis_ok, analysis_changed, analysis_rows = _verify_outputs(root, previous, tuple(analysis_names))
     security_ok, security_changed, security_rows = _verify_outputs(root, previous, _SECURITY_CORE)
+    unchanged = bool(target_unchanged and analysis_ok and security_ok)
 
     return json.dumps({
         "schema": SCHEMA,
         "targetDigest": digest,
         "previousTargetDigest": previous_digest,
+        "targetUnchanged": target_unchanged,
         "unchanged": unchanged,
         "targets": rows,
         "targetCount": len(rows),
         "changedFiles": changed,
         "reusedHashCount": reused_hashes,
-        "analysisOutputsUnchanged": bool(unchanged and analysis_ok),
-        "securityOutputsUnchanged": bool(unchanged and security_ok),
+        "analysisOutputsUnchanged": bool(target_unchanged and analysis_ok),
+        "securityOutputsUnchanged": bool(target_unchanged and security_ok),
         "changedAnalysisOutputs": analysis_changed,
         "changedSecurityOutputs": security_changed,
         "analysisOutputs": analysis_rows,
