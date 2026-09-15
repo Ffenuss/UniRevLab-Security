@@ -86,13 +86,17 @@ def run_workspace(
 
     _check(cb, "Embedded 1/7 · artifact families…")
     try:
-        static_report = artifact_families.scan_workspace(root)
+        static_report = artifact_families.scan_workspace(root, None, cb)
         runs.append({
             "engineId": "artifact-family-suite",
             "status": "SUCCESS",
             "artifactCount": int(static_report.get("artifactCount") or 0),
             "symbolCount": int(static_report.get("symbolCount") or 0),
         })
+    except artifact_families.ArtifactScanCancelled as exc:
+        raise Cancelled(str(exc)) from exc
+    except Cancelled:
+        raise
     except Exception as exc:
         static_report = {
             "schema": artifact_families.SCHEMA,
