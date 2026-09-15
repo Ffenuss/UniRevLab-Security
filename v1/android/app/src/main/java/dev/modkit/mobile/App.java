@@ -3,6 +3,7 @@ package dev.modkit.mobile;
 import android.app.Application;
 import org.json.JSONObject;
 import java.io.File;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -41,11 +42,26 @@ public class App extends Application {
         if(m.find())try{stageProgress=Integer.parseInt(m.group(1));}catch(Exception ignored){}
         revision++;
     }
+    private void markInterruptedPipeline(){
+        File part=file("automatic-evidence.json.part");
+        if(part.exists())part.delete();
+        File manifest=file("automatic-evidence.json");
+        if(!manifest.isFile())return;
+        try{
+            JSONObject value;
+            try{value=new JSONObject(new String(Files.readAllBytes(manifest.toPath()),StandardCharsets.UTF_8));}
+            catch(Exception malformed){value=new JSONObject().put("schema","modkit-automatic-evidence-1.1").put("status","RUNNING");}
+            if(!"RUNNING".equals(value.optString("status")))return;
+            value.put("status","FAILED").put("phase","FINISHED").put("complete",false).put("cancelled",false).put("interruptedBySystem",true).put("error","SYSTEM_INTERRUPTED").put("finishedAtMs",System.currentTimeMillis());
+            Files.write(manifest.toPath(),value.toString(2).getBytes(StandardCharsets.UTF_8));
+        }catch(Exception ignored){}
+    }
     @Override public void onCreate() {
         super.onCreate();
         if (getSharedPreferences("state",0).getBoolean("running",false)) {
             status = "Предыдущая операция прервана системой. Можно запустить её заново.";
             stage = "STOPPED";
+            markInterruptedPipeline();
             getSharedPreferences("state",0).edit().putBoolean("running",false).apply();
         }
         new Thread(() -> {
@@ -53,7 +69,7 @@ public class App extends Application {
                 if (busy.get()) return;
                 try {
                     File f = file("analysis.summary.json");
-                    if (f.exists()) result = new JSONObject(new String(Files.readAllBytes(f.toPath()), java.nio.charset.StandardCharsets.UTF_8));
+                    if (f.exists()) result = new JSONObject(new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8));
                 } catch (Exception ignored) { }
                 revision++;
             }
