@@ -57,7 +57,7 @@ public class AutoModActivity extends AppCompatActivity {
         super.onCreate(state);app=(App)getApplication();
         ScrollView scroll=new ScrollView(this);root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(dp(16),dp(18),dp(16),dp(30));root.setBackgroundColor(bg());scroll.addView(root);setContentView(scroll);
         TextView title=text("AutoMod / Patch Lab",29);title.setTypeface(null,Typeface.BOLD);root.addView(title);
-        TextView note=text("Evidence Graph сам раскладывает находки по готовности. Runtime load-base/RVA, IL2CPP metadata+ELF cross-check и no-RVA metadata identity усиливают доказательства, но не делают finding buildable. Подтверждённый Class::Method без RVA остаётся REVIEW и не получает выдуманный адрес. В сборку проходят только локальные app-owned controls с validated executable binding и успешным preflight.",13);note.setTextColor(muted());root.addView(note);
+        TextView note=text("Evidence Graph сам раскладывает находки по готовности. Runtime load-base/RVA, IL2CPP metadata+ELF cross-check и metadata identity — corroboration и сами по себе не делают finding buildable. Class::Method или token без RVA остаются REVIEW. Только строгий CodeGenModule recovery может восстановить реальный executable RVA; такой locator допускается лишь к binding/preflight и всё равно не становится buildable автоматически.",13);note.setTextColor(muted());root.addView(note);
         summary=text("",14);root.addView(summary);preflight=text("",13);preflight.setTextColor(muted());root.addView(preflight);status=text("",13);root.addView(status);
         refresh=button("Обновить AutoMod-план",v->rebuildPlan());
         prepare=button("Подготовить подтверждённые controls",v->startWork("menu_smart_prepare",null));
@@ -77,7 +77,7 @@ public class AutoModActivity extends AppCompatActivity {
         if(planning){toast("AutoMod-план уже обновляется");return;}
         if(app.busy.get()){toast("Сейчас выполняется другая операция");return;}
         if(!app.file("simple-catalog.json").isFile()&&!app.file("game.apk").isFile()){toast("Сначала выполните полный анализ");return;}
-        planning=true;refresh.setEnabled(false);status.setText("AutoMod: Evidence Graph + runtime + IL2CPP structural + metadata identity…");
+        planning=true;refresh.setEnabled(false);status.setText("AutoMod: Evidence Graph + runtime + IL2CPP structural + metadata identity + native RVA recovery…");
         executor.execute(()->{
             try{
                 if(!Python.isStarted())Python.start(new AndroidPlatform(this));
@@ -112,22 +112,14 @@ public class AutoModActivity extends AppCompatActivity {
         startActivityForResult(intent,BUILD_DOCUMENT);
     }
 
-    private boolean hasApkSet(){
-        JSONObject target=read("installed-target.json");
-        JSONArray splits=target==null?null:target.optJSONArray("splits");
-        return splits!=null&&splits.length()>1;
-    }
-
-    @Override protected void onActivityResult(int request,int result,Intent data){
-        super.onActivityResult(request,result,data);
-        if(request==BUILD_DOCUMENT&&result==RESULT_OK&&data!=null&&data.getData()!=null)startWork("menu_smart_build_apk",data.getData());
-    }
-
+    private boolean hasApkSet(){JSONObject target=read("installed-target.json");JSONArray splits=target==null?null:target.optJSONArray("splits");return splits!=null&&splits.length()>1;}
+    @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(request==BUILD_DOCUMENT&&result==RESULT_OK&&data!=null&&data.getData()!=null)startWork("menu_smart_build_apk",data.getData());}
     private String count(JSONObject plan,String key){return String.valueOf(plan==null?0:plan.optInt(key));}
+
     private void render(){
         JSONObject plan=read("automod-plan.json");JSONObject pf=read("menu-preflight.json");
         if(plan==null){summary.setText("План ещё не построен. Выполните полный анализ и нажмите «Обновить AutoMod-план».");candidates.removeAllViews();setButtons(null,pf);return;}
-        summary.setText("Готово к build: "+count(plan,"readyToBuildCount")+" · preflight: "+count(plan,"readyForPreflightCount")+" · runtime/binding: "+count(plan,"runtimeNeededCount")+" · review: "+count(plan,"reviewCount")+" · audit-only: "+count(plan,"auditOnlyCount")+" · исключено: "+count(plan,"excludedCount")+"\nExact locators: "+count(plan,"exactLocatorCount")+" · runtime VA observed: "+count(plan,"runtimeObservedCount")+" · IL2CPP structural: "+count(plan,"il2cppStructuralObservedCount")+" (both "+count(plan,"il2cppStructuralBothCount")+") · metadata identity/no-RVA: "+count(plan,"metadataIdentityObservedCount")+" (qualified "+count(plan,"metadataQualifiedNoRvaCount")+") · всего: "+count(plan,"candidateCount"));
+        summary.setText("Готово к build: "+count(plan,"readyToBuildCount")+" · preflight: "+count(plan,"readyForPreflightCount")+" · runtime/binding: "+count(plan,"runtimeNeededCount")+" · review: "+count(plan,"reviewCount")+" · audit-only: "+count(plan,"auditOnlyCount")+" · исключено: "+count(plan,"excludedCount")+"\nExact locators: "+count(plan,"exactLocatorCount")+" · recovered native RVA: "+count(plan,"nativeRecoveredLocatorCount")+" · runtime VA observed: "+count(plan,"runtimeObservedCount")+" · IL2CPP structural: "+count(plan,"il2cppStructuralObservedCount")+" (both "+count(plan,"il2cppStructuralBothCount")+") · metadata identity/no-RVA: "+count(plan,"metadataIdentityObservedCount")+" (qualified "+count(plan,"metadataQualifiedNoRvaCount")+", token "+count(plan,"metadataTokenNoRvaCount")+") · всего: "+count(plan,"candidateCount"));
         if(pf==null)preflight.setText("Preflight ещё не выполнен. Сборка заблокирована.");
         else preflight.setText("Preflight: "+(pf.optBoolean("readyForAutoBuild")?"READY":"BLOCK")+" · controls "+pf.optInt("controlCount",pf.optInt("controls"))+" · blockers "+pf.optInt("blockerCount",pf.optInt("blockers")));
         candidates.removeAllViews();JSONArray rows=plan.optJSONArray("candidates");int shown=0;if(rows!=null)for(int i=0;i<rows.length()&&shown<24;i++){JSONObject row=rows.optJSONObject(i);if(row==null)continue;String stage=row.optString("stage","REVIEW");if("EXCLUDED".equals(stage)&&shown>=18)continue;candidateCard(row);shown++;}
@@ -139,21 +131,16 @@ public class AutoModActivity extends AppCompatActivity {
         LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(dp(12),dp(9),dp(12),dp(10));card.addView(box);
         TextView h=text(row.optString("title","evidence"),16);h.setTypeface(null,Typeface.BOLD);box.addView(h);
         String domain=row.optString("gameplayDomain","");String locator="";JSONObject loc=row.optJSONObject("locator");if(loc!=null){Object rva=loc.opt("rva");if(rva!=null&&rva!=JSONObject.NULL&&!"0".equals(String.valueOf(rva))&&!"0x0".equalsIgnoreCase(String.valueOf(rva)))locator=" · RVA "+String.valueOf(rva);else if(loc.has("entry"))locator=" · "+loc.optString("entry");}
+        JSONObject recovered=row.optJSONObject("nativeRvaRecovery");String recoveredText="";if(recovered!=null&&row.optBoolean("nativeRvaRecovered")){recoveredText=" · recovered RVA "+recovered.optString("rvaHex",String.valueOf(recovered.opt("rva")))+" · exact CodeGenModule";}
         JSONObject runtime=row.optJSONObject("runtimeObservation");String runtimeText="";if(runtime!=null&&runtime.optBoolean("mapped")){runtimeText=" · runtime VA "+runtime.optString("runtimeVaHex","?")+" @ "+runtime.optString("moduleBasename",runtime.optString("modulePath","module"));}
         JSONObject il2cpp=row.optJSONObject("il2cppStructural");String il2cppText="";if(il2cpp!=null){il2cppText=" · IL2CPP "+il2cpp.optString("status","cross-check");}
-        JSONObject identity=row.optJSONObject("metadataIdentity");String identityText="";if(identity!=null){identityText=" · metadata "+(identity.optBoolean("metadataQualifiedMethodPresent")?"Class::Method":"method-name")+" / RVA unresolved";}
-        TextView meta=text(row.optString("stage")+" · "+row.optString("verificationStage","FOUND_STATIC")+(domain.isEmpty()?"":" · "+domain)+locator+runtimeText+il2cppText+identityText,12);meta.setTextColor(muted());box.addView(meta);
+        JSONObject identity=row.optJSONObject("metadataIdentity");String identityText="";if(identity!=null){String kind=identity.optBoolean("metadataTokenConfirmed")?"token":(identity.optBoolean("metadataQualifiedMethodPresent")?"Class::Method":"method-name");identityText=" · metadata "+kind+(recovered==null?" / RVA unresolved":"");}
+        TextView meta=text(row.optString("stage")+" · "+row.optString("verificationStage","FOUND_STATIC")+(domain.isEmpty()?"":" · "+domain)+locator+recoveredText+runtimeText+il2cppText+identityText,12);meta.setTextColor(muted());box.addView(meta);
         box.addView(text(row.optString("reason",""),13));
         LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.setMargins(0,dp(5),0,dp(5));candidates.addView(card,lp);
     }
 
-    private void setButtons(JSONObject plan,JSONObject pf){
-        boolean idle=!app.busy.get()&&!planning;int prepareCount=plan==null?0:plan.optInt("readyToBuildCount")+plan.optInt("readyForPreflightCount");
-        refresh.setEnabled(idle);prepare.setEnabled(idle&&prepareCount>0);check.setEnabled(idle&&app.file("menu-spec.json").isFile());
-        boolean preflightReady=pf!=null&&pf.optBoolean("readyForAutoBuild");
-        build.setEnabled(idle&&prepareCount>0&&preflightReady);
-    }
-
+    private void setButtons(JSONObject plan,JSONObject pf){boolean idle=!app.busy.get()&&!planning;int prepareCount=plan==null?0:plan.optInt("readyToBuildCount")+plan.optInt("readyForPreflightCount");refresh.setEnabled(idle);prepare.setEnabled(idle&&prepareCount>0);check.setEnabled(idle&&app.file("menu-spec.json").isFile());boolean preflightReady=pf!=null&&pf.optBoolean("readyForAutoBuild");build.setEnabled(idle&&prepareCount>0&&preflightReady);}
     private final Runnable poll=new Runnable(){public void run(){if(revision!=app.revision){revision=app.revision;render();}status.setText(app.status==null?"":app.status);handler.postDelayed(this,600);}};
     @Override protected void onResume(){super.onResume();render();}
     @Override protected void onDestroy(){handler.removeCallbacks(poll);executor.shutdownNow();super.onDestroy();}
