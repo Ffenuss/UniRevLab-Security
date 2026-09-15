@@ -130,17 +130,21 @@ public class FullAnalysisService extends Service {
                 invalidatePreparedAutoModState();
                 invalidatePerRunEvidenceState();
                 runStateInvalidated=true;
-                List<File> inputs=DecompilerEngine.resolveTargetInputs(app);
+                TargetResolver.Target target=TargetResolver.resolve(app);
+                JSONObject targetVerification=TargetResolver.requireVerified(target,app.cancelled);
+                List<File> inputs=target.apkFiles();
                 if(inputs.isEmpty())throw new java.io.FileNotFoundException("Сначала выберите APK или установленный пакет.");
+                String digest=targetVerification.getString("currentTargetDigest");
+                AnalysisJournal.append(this,"TARGET_VERIFIED","Full Analysis canonical target verified",new JSONObject().put("targetId",target.targetId).put("targetDigest",digest).put("memberCount",inputs.size()));
                 if(!Python.isStarted())Python.start(new AndroidPlatform(this));
 
                 stage(1,4,"Inventory: APK/split, DEX, native, Unity/IL2CPP и runtime-маркеры");
                 String scanJson=runInventory(inputs);
                 normalizeInstalledTarget(scanJson);
+                if(app.file("installed-target.json").isFile())TargetResolver.requireVerified(TargetResolver.resolve(app),app.cancelled);
                 if(app.cancelled.get()){chain=false;progress("Полный анализ отменён пользователем.");return;}
 
                 progress("Проверяю fingerprint выбранного APK/APK-set…");
-                String digest=targetDigest(inputs);
                 File manifest=app.file("full-reconstruction.json");
                 File decompiled=app.file("modkit-decompiled.zip");
                 boolean cached=false;
@@ -159,7 +163,7 @@ public class FullAnalysisService extends Service {
                 if(cached)stage(2,4,"JADX bounded: cache hit · target и export fingerprint совпали");
                 else{
                     stage(2,4,"JADX bounded: APK/split обрабатываются последовательно с освобождением heap");
-                    JSONObject state=new JSONObject().put("schema","modkit-full-reconstruction-1.1").put("targetDigest",digest).put("backend",BoundedJadxExporter.BACKEND).put("complete",false).put("startedAtMs",System.currentTimeMillis()).put("memoryStart",AnalysisJournal.memory());
+                    JSONObject state=new JSONObject().put("schema","modkit-full-reconstruction-1.1").put("targetId",target.targetId).put("targetDigest",digest).put("targetMembers",inputs.size()).put("backend",BoundedJadxExporter.BACKEND).put("complete",false).put("startedAtMs",System.currentTimeMillis()).put("memoryStart",AnalysisJournal.memory());
                     writeAtomicJson("full-reconstruction.json",state);
                     try{
                         BoundedJadxExporter.Result dec=BoundedJadxExporter.export(this,inputs,app.cancelled,this::progress);
@@ -264,18 +268,6 @@ public class FullAnalysisService extends Service {
         PyObject result=Python.getInstance().getModule("modkit.mobile.package_target").callAttr("build_target_manifest",scanJson,packageName,label,versionName,versionCode,expected,"[]");
         JSONObject normalized=new JSONObject(result.toString());
         writeAtomicJson("installed-target.json",normalized);
-    }
-
-    private String targetDigest(List<File> files)throws Exception{
-        MessageDigest d=MessageDigest.getInstance("SHA-256");byte[] buf=new byte[1024*1024];
-        for(File f:files){
-            if(app.cancelled.get())throw new java.io.InterruptedIOException("cancelled");
-            d.update(f.getCanonicalPath().getBytes(StandardCharsets.UTF_8));d.update(Long.toString(f.length()).getBytes(StandardCharsets.UTF_8));
-            try(FileInputStream in=new FileInputStream(f)){
-                int n;while((n=in.read(buf))!=-1){if(app.cancelled.get())throw new java.io.InterruptedIOException("cancelled");d.update(buf,0,n);}
-            }
-        }
-        StringBuilder out=new StringBuilder();for(byte b:d.digest())out.append(String.format(Locale.ROOT,"%02x",b));return out.toString();
     }
 
     private String fileSha256(File file)throws Exception{
