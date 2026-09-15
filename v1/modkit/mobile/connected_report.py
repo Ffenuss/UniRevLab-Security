@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "modkit-connected-report-1.0"
+SCHEMA = "modkit-connected-report-1.1"
 
 
 def _json(path: Path) -> dict[str, Any]:
@@ -104,12 +104,124 @@ def _link_methods(locator: dict[str, Any], by_id: dict[int, dict[str, Any]], by_
     return "UNRESOLVED", []
 
 
+def _file_meta(root: Path, name: str, purpose: str, use: str) -> dict[str, Any]:
+    path = root / name
+    return {
+        "file": name,
+        "available": path.exists(),
+        "bytes": path.stat().st_size if path.is_file() else None,
+        "purpose": purpose,
+        "whenToUse": use,
+    }
+
+
+def _engine_row(engine_id: str, report_file: str, report: dict[str, Any], **details: Any) -> dict[str, Any]:
+    available = bool(report.get("available", report.get("detected", report.get("analyzedLibraryCount", 0))))
+    if report and not any(key in report for key in ("available", "detected", "analyzedLibraryCount")):
+        available = True
+    row: dict[str, Any] = {
+        "engineId": engine_id,
+        "report": report_file,
+        "available": available,
+        "findingCount": int(report.get("findingCount") or 0),
+        "manualImportRequired": bool(report.get("manualImportRequired", False)),
+        "runtimeTruth": report.get("runtimeTruth") or "not-observed-by-static-analysis",
+    }
+    for key, value in details.items():
+        if value not in (None, ""):
+            row[key] = value
+    return row
+
+
+def _engine_coverage(root: Path, embedded: dict[str, Any], artifact_families: dict[str, Any]) -> list[dict[str, Any]]:
+    lua = _json(root / "lua-deep.json")
+    hermes = _json(root / "hermes-deep.json")
+    native = _json(root / "native-deep.json")
+    cocos = _json(root / "cocos-deep.json")
+    flutter = _json(root / "flutter-deep.json")
+    run_status = {
+        str(row.get("engineId")): row.get("status")
+        for row in embedded.get("runs", []) if isinstance(row, dict) and row.get("engineId")
+    }
+    rows = [
+        _engine_row(
+            "lua.bytecode-embedded", "lua-deep.json", lua,
+            status=run_status.get("lua.bytecode-embedded"),
+            chunkCount=int(lua.get("chunkCount") or 0),
+            decodedChunks=sum(1 for row in lua.get("chunks", []) if isinstance(row, dict) and row.get("status") == "BYTECODE_DISASSEMBLED"),
+            opaqueChunks=sum(1 for row in lua.get("chunks", []) if isinstance(row, dict) and row.get("recoveryLevel") == "OPAQUE"),
+        ),
+        _engine_row(
+            "hermes.deep-embedded", "hermes-deep.json", hermes,
+            status=run_status.get("hermes.deep-embedded"),
+            bundleCount=int(hermes.get("bundleCount") or 0),
+        ),
+        _engine_row(
+            "native.deep-embedded", "native-deep.json", native,
+            status=run_status.get("native.deep-embedded"),
+            libraryCount=int(native.get("analyzedLibraryCount") or 0),
+            directCallCount=sum(int(row.get("directCallCount") or 0) for row in native.get("libraries", []) if isinstance(row, dict)),
+            tailCallCount=sum(int(row.get("tailCallCount") or 0) for row in native.get("libraries", []) if isinstance(row, dict)),
+            indirectSlotCount=sum(int(row.get("indirectSlotCount") or 0) for row in native.get("libraries", []) if isinstance(row, dict)),
+        ),
+        _engine_row(
+            "cocos.deep-embedded", "cocos-deep.json", cocos,
+            status=run_status.get("cocos.deep-embedded"),
+            detectionConfidence=cocos.get("detectionConfidence"),
+            nativeLibraryCount=int(cocos.get("nativeLibraryCount") or 0),
+            scriptArtifactCount=int(cocos.get("scriptArtifactCount") or 0),
+            bridgeSymbolCount=int(cocos.get("bridgeSymbolCount") or 0),
+            correlationCount=int(cocos.get("correlationCount") or 0),
+        ),
+        _engine_row(
+            "flutter.aot-embedded", "flutter-deep.json", flutter,
+            status=run_status.get("flutter.aot-embedded"),
+            artifactCount=int(flutter.get("artifactCount") or 0),
+        ),
+    ]
+    # Keep the merged artifact-level summaries visible without duplicating the potentially huge reports.
+    for row in rows:
+        summary_key = {
+            "lua.bytecode-embedded": "deepLua",
+            "hermes.deep-embedded": "deepHermes",
+            "native.deep-embedded": "deepNative",
+            "cocos.deep-embedded": "deepCocos",
+            "flutter.aot-embedded": "deepFlutter",
+        }.get(str(row.get("engineId")))
+        summary = artifact_families.get(summary_key) if summary_key else None
+        if isinstance(summary, dict):
+            row["mergedFindingCount"] = int(summary.get("mergedFindingCount") or 0)
+    return rows
+
+
+def _artifact_guide(root: Path) -> list[dict[str, Any]]:
+    specs = [
+        ("simple-catalog.json", "Приоритетная сводка findings", "Начинайте отсюда: важные, actionable и buildable находки."),
+        ("connected-report.json", "Связанный человеко-читаемый индекс", "Используйте для связи finding → method/class/RVA и общей сводки."),
+        ("analysis.methods.jsonl", "Полный каталог методов", "Ищите method id, class/method и RVA; файл большой и построчный."),
+        ("analysis.fields.jsonl", "Каталог полей", "Ищите поля/offset evidence и владельца типа."),
+        ("analysis.evidence-graph.jsonl", "Evidence Graph", "Используйте для связей между DEX/native/IL2CPP/security/semantic evidence."),
+        ("analysis.gameplay-coverage.json", "Игровая семантика", "HP/damage/currency/speed/level и другие gameplay-домены."),
+        ("lua-deep.json", "Lua bytecode structural report", "Прототипы, constants, instructions, debug metadata; opaque xLua/SLua отмечены явно."),
+        ("hermes-deep.json", "Hermes HBC deep report", "Функции/инструкции/строки для поддерживаемых HBC версий."),
+        ("native-deep.json", "ARM64/ELF deep report", "Символы, exact direct/tail edges, thunks, indirect slot evidence и string xrefs."),
+        ("cocos-deep.json", "Cocos script↔native correlation", "JS/Lua symbol ↔ native bridge/symbol RVA; static correlation, не runtime proof."),
+        ("flutter-deep.json", "Flutter/Dart AOT report", "Snapshot/package/route evidence и корреляция с libapp/native AOT."),
+        ("security-surfaces.json", "Security surface report", "TLS/network/auth/crypto/storage/WebView и trust-boundary findings."),
+        ("apktool-analysis.json", "Apktool decode summary", "Manifest/resources/smali decode status и workspace coverage."),
+        ("full-reconstruction.json", "JADX reconstruction manifest", "Проверяйте полноту Java/Smali/resources reconstruction и cache state."),
+        ("modkit-decompiled.zip", "Полный JADX export", "Открывайте исходноподобное Java-представление, Smali и resources."),
+    ]
+    return [_file_meta(root, *spec) for spec in specs]
+
+
 def build_connected_report(workdir: str | Path, output_json: str | Path | None = None, output_md: str | Path | None = None) -> dict[str, Any]:
     root = Path(workdir)
     catalog = _json(root / "simple-catalog.json")
     analysis = _json(root / "analysis.summary.json")
     security = _json(root / "security-surfaces.json")
     embedded = _json(root / "embedded-analysis.json")
+    artifact_families = _json(root / "artifact-families.json")
     apktool = _json(root / "apktool-analysis.json")
     by_id, by_rva, by_name = _method_index(root / "analysis.methods.jsonl")
     rows: list[dict[str, Any]] = []
@@ -137,6 +249,9 @@ def build_connected_report(workdir: str | Path, output_json: str | Path | None =
             "linkedMethods": methods,
             "description": card.get("description"),
         })
+    coverage = _engine_coverage(root, embedded, artifact_families)
+    available_engines = sum(1 for row in coverage if row.get("available"))
+    evidence_guide = _artifact_guide(root)
     out = {
         "schema": SCHEMA,
         "findingCount": len(rows),
@@ -150,21 +265,64 @@ def build_connected_report(workdir: str | Path, output_json: str | Path | None =
             "buildable": catalog.get("buildable", 0),
             "actionable": catalog.get("actionable", 0),
             "serverAudit": catalog.get("serverAudit", 0),
+            "deepEnginesAvailable": available_engines,
+            "deepEngineCount": len(coverage),
         },
         "embedded": {
             "apktool": {"status": apktool.get("status"), "decoded": apktool.get("decoded"), "failed": apktool.get("failed")},
-            "families": embedded.get("familyCounts") or embedded.get("families"),
+            "pipelineSchema": embedded.get("schema"),
+            "runs": embedded.get("runs") if isinstance(embedded.get("runs"), list) else [],
+            "familyCounts": artifact_families.get("familyCounts"),
+            "recoveryCounts": artifact_families.get("recoveryCounts"),
             "manualImportRequired": False,
         },
+        "engineCoverage": coverage,
+        "artifactGuide": evidence_guide,
         "securitySummary": security.get("summary") or security.get("counts"),
         "findings": rows,
+        "evidenceSemantics": {
+            "EXACT_METHOD_ID": "Finding references an exact method id from the method catalogue.",
+            "EXACT_RVA": "Finding RVA equals a catalogue method RVA; this is static address evidence, not runtime execution proof.",
+            "EXACT_NAME": "Finding method name exactly matches catalogue rows; overloaded/duplicate names may yield multiple rows.",
+            "UNRESOLVED": "No exact method id/RVA/name correlation was proven.",
+            "runtimeTruth": "Static reports never claim that a code path executed on-device unless a separate runtime session observed it.",
+        },
     }
     if output_json:
         Path(output_json).write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
     if output_md:
-        md = ["# ModKit connected report", "", f"Findings: {len(rows)}", f"Exact method/locator links: {exact}", f"Unresolved links: {len(rows)-exact}", ""]
+        md = [
+            "# ModKit connected report",
+            "",
+            f"Findings: {len(rows)}",
+            f"Exact method/locator links: {exact}",
+            f"Unresolved links: {len(rows)-exact}",
+            f"Deep engines available: {available_engines}/{len(coverage)}",
+            "",
+            "## Deep engine coverage",
+            "",
+        ]
+        for engine in coverage:
+            state = "available" if engine.get("available") else "not detected / unavailable"
+            extras = []
+            for key in ("findingCount", "chunkCount", "decodedChunks", "opaqueChunks", "libraryCount", "directCallCount", "tailCallCount", "indirectSlotCount", "correlationCount", "bridgeSymbolCount", "bundleCount", "artifactCount"):
+                if key in engine:
+                    extras.append(f"{key}={engine.get(key)}")
+            md.append(f"- **{engine.get('engineId')}** — {state} · report `{engine.get('report')}`" + (" · " + ", ".join(extras) if extras else ""))
+        md += ["", "## Где что смотреть", ""]
+        for item in evidence_guide:
+            if not item.get("available"):
+                continue
+            md.append(f"- **`{item.get('file')}`** — {item.get('purpose')}. {item.get('whenToUse')}")
+        md += [
+            "",
+            "## Findings",
+            "",
+            "> Static exact RVA/method links are evidence of address/identity correlation, not proof that the path executed at runtime.",
+            "",
+        ]
         for row in rows:
-            md.append(f"## {row.get('title') or 'Finding'}")
+            md.append(f"### {row.get('title') or 'Finding'}")
             md.append(f"- Status: {row.get('status')}")
             md.append(f"- Verification: {row.get('verificationStage')}")
             md.append(f"- Link: {row.get('methodLinkStatus')}")
