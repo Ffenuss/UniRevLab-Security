@@ -12,8 +12,7 @@ def test_rerun_invalidates_old_final_manifest_before_reconstruction():
     source = _read("FullAnalysisService.java")
 
     assert 'pipelineState("RUNNING","RECONSTRUCTION",false,false,null);' in source
-    assert 'File temp=app.file("automatic-evidence.json.part")' in source
-    assert 'Files.move(temp.toPath(),dest.toPath(),StandardCopyOption.REPLACE_EXISTING)' in source
+    assert 'writeAtomicJson("automatic-evidence.json",state)' in source
 
 
 def test_full_rerun_invalidates_prepared_automod_epoch_before_target_work():
@@ -81,13 +80,17 @@ def test_evidence_service_persists_live_phase_before_heavy_pipeline():
     assert '.put("phase","FINISHED")' in source
 
 
-def test_process_death_only_converts_running_manifest_to_system_interrupted():
+def test_process_death_only_converts_running_manifest_to_system_interrupted_atomically():
     source = _read("App.java")
 
+    assert 'File part=file("automatic-evidence.json.part")' in source
     assert 'if(!"RUNNING".equals(value.optString("status")))return;' in source
     assert '.put("status","FAILED").put("phase","FINISHED")' in source
     assert '.put("interruptedBySystem",true)' in source
     assert '.put("error","SYSTEM_INTERRUPTED")' in source
+    assert 'Files.write(part.toPath(),value.toString(2).getBytes(StandardCharsets.UTF_8))' in source
+    assert 'Files.move(part.toPath(),manifest.toPath(),StandardCopyOption.REPLACE_EXISTING)' in source
+    assert 'Files.deleteIfExists(part.toPath())' in source
     assert 'markInterruptedPipeline();' in source
 
 
