@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
-from modkit.mobile.connected_report_v12 import build_connected_report
+from modkit.mobile.connected_report_v12 import build_connected_report, _fresh
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -113,6 +114,7 @@ def test_connected_report_v12_attaches_runtime_and_il2cpp_without_promoting_buil
     assert report["corroboration"]["runtime"]["promotesBuildability"] is False
     assert report["corroboration"]["il2cppStructural"]["confirmsMethodToRvaAssociation"] is False
     assert report["corroboration"]["il2cppStructural"]["promotesBuildability"] is False
+    assert report["corroboration"]["il2cppStructural"]["freshnessVerified"] is False
 
     guide = {row["file"]: row for row in report["artifactGuide"]}
     assert guide["runtime-correlation.json"]["available"] is True
@@ -185,6 +187,7 @@ def test_connected_report_attaches_exact_no_rva_metadata_identity_without_addres
     report = build_connected_report(tmp_path, tmp_path / "connected-report.json", out_md)
     finding = report["findings"][0]
     assert finding["buildable"] is False
+    assert finding["actionable"] is False
     assert finding["metadataIdentityConfirmed"] is True
     assert finding["metadataIdentity"]["status"] == "METADATA_QUALIFIED_METHOD_CONFIRMED_NO_RVA"
     assert finding["metadataIdentity"]["addressConfirmed"] is False
@@ -194,9 +197,136 @@ def test_connected_report_attaches_exact_no_rva_metadata_identity_without_addres
     assert finding["metadataIdentity"]["promotesBuildability"] is False
     assert report["metadataIdentityConfirmedFindings"] == 1
     assert report["metadataQualifiedIdentityFindings"] == 1
+    assert report["metadataTokenIdentityFindings"] == 0
     assert report["corroboration"]["il2cppMetadataIdentity"]["addressResolver"] is False
     assert report["corroboration"]["il2cppMetadataIdentity"]["promotesBuildability"] is False
+    assert report["corroboration"]["il2cppMetadataIdentity"]["freshnessVerified"] is False
     assert "No-RVA metadata identity confirmed: 1" in out_md.read_text(encoding="utf-8")
+
+
+def test_connected_report_attaches_unique_token_identity_without_rva_or_promotion(tmp_path: Path):
+    (tmp_path / "analysis.methods.jsonl").write_text(
+        json.dumps({"id": 77, "class": "Game.Player", "name": "SetHealth", "token": "0x0600002a", "rva": None}) + "\n",
+        encoding="utf-8",
+    )
+    _write_json(tmp_path / "simple-catalog.json", {"cards": [{
+        "id": "token-health",
+        "title": "SetHealth",
+        "buildable": False,
+        "actionable": False,
+        "locator": {"methodId": 77, "class": "Game.Player", "method": "SetHealth", "rva": None},
+    }]})
+    _write_json(tmp_path / "il2cpp-metadata-identity.json", {
+        "schema": "modkit-il2cpp-metadata-identity-1.1",
+        "engine": "il2cpp.metadata-identity-embedded",
+        "uniqueMethodTokenCount": 4,
+        "counts": {"tokenMethodConfirmedNoRva": 1, "tokenConflictNoRva": 0},
+        "addressResolver": False,
+        "promotesBuildability": False,
+    })
+    (tmp_path / "il2cpp-metadata-identity.methods.jsonl").write_text(json.dumps({
+        "id": 77,
+        "class": "Game.Player",
+        "methodName": "SetHealth",
+        "status": "METADATA_TOKEN_METHOD_CONFIRMED_NO_RVA",
+        "metadataMethodNamePresent": True,
+        "metadataQualifiedMethodPresent": True,
+        "metadataToken": "0x0600002a",
+        "metadataTokenConfirmed": True,
+        "metadataTokenConflict": False,
+        "metadataResolvedClass": "Game.Player",
+        "metadataResolvedMethodName": "SetHealth",
+        "addressConfirmed": False,
+        "rva": None,
+        "actionable": False,
+        "buildable": False,
+        "promotesBuildability": False,
+    }) + "\n", encoding="utf-8")
+
+    report = build_connected_report(tmp_path)
+    finding = report["findings"][0]
+    assert finding["metadataIdentityConfirmed"] is True
+    assert finding["metadataIdentity"]["metadataToken"] == "0x0600002a"
+    assert finding["metadataIdentity"]["metadataTokenConfirmed"] is True
+    assert finding["metadataIdentity"]["rva"] is None
+    assert finding["actionable"] is False
+    assert finding["buildable"] is False
+    assert report["metadataIdentityConfirmedFindings"] == 1
+    assert report["metadataTokenIdentityFindings"] == 1
+    assert report["metadataTokenConflictFindings"] == 0
+    assert report["corroboration"]["il2cppMetadataIdentity"]["uniqueMethodTokenCount"] == 4
+
+
+def test_connected_report_token_conflict_is_visible_but_never_confirmation(tmp_path: Path):
+    (tmp_path / "analysis.methods.jsonl").write_text(
+        json.dumps({"id": 88, "class": "Game.Player", "name": "SetHealth", "token": "0x0600002b", "rva": None}) + "\n",
+        encoding="utf-8",
+    )
+    _write_json(tmp_path / "simple-catalog.json", {"cards": [{
+        "id": "conflict-health",
+        "title": "SetHealth",
+        "buildable": False,
+        "actionable": False,
+        "locator": {"methodId": 88, "class": "Game.Player", "method": "SetHealth", "rva": None},
+    }]})
+    _write_json(tmp_path / "il2cpp-metadata-identity.json", {
+        "schema": "modkit-il2cpp-metadata-identity-1.1",
+        "engine": "il2cpp.metadata-identity-embedded",
+        "counts": {"tokenMethodConfirmedNoRva": 0, "tokenConflictNoRva": 1},
+        "addressResolver": False,
+        "promotesBuildability": False,
+    })
+    (tmp_path / "il2cpp-metadata-identity.methods.jsonl").write_text(json.dumps({
+        "id": 88,
+        "class": "Game.Player",
+        "methodName": "SetHealth",
+        "status": "METADATA_TOKEN_CONFLICT_NO_RVA",
+        "metadataToken": "0x0600002b",
+        "metadataTokenConfirmed": False,
+        "metadataTokenConflict": True,
+        "metadataResolvedClass": "Game.Enemy",
+        "metadataResolvedMethodName": "SetHealth",
+        "addressConfirmed": False,
+        "rva": None,
+        "actionable": False,
+        "buildable": False,
+        "promotesBuildability": False,
+    }) + "\n", encoding="utf-8")
+
+    report = build_connected_report(tmp_path)
+    finding = report["findings"][0]
+    assert finding["metadataIdentityConfirmed"] is False
+    assert finding.get("metadataIdentity") is None
+    assert finding["metadataIdentityConflict"]["status"] == "METADATA_TOKEN_CONFLICT_NO_RVA"
+    assert finding["metadataIdentityConflict"]["metadataTokenConflict"] is True
+    assert finding["metadataIdentityConflict"]["actionable"] is False
+    assert finding["metadataIdentityConflict"]["buildable"] is False
+    assert finding["actionable"] is False
+    assert finding["buildable"] is False
+    assert report["metadataIdentityConfirmedFindings"] == 0
+    assert report["metadataTokenIdentityFindings"] == 0
+    assert report["metadataTokenConflictFindings"] == 1
+    assert report["metadataTokenConflictRows"] == 1
+
+
+def test_connected_report_freshness_guard_invalidates_outputs_after_method_catalog_changes(tmp_path: Path):
+    metadata = tmp_path / "metadata.bin"
+    methods = tmp_path / "analysis.methods.jsonl"
+    summary = tmp_path / "il2cpp-metadata-identity.json"
+    rows = tmp_path / "il2cpp-metadata-identity.methods.jsonl"
+    metadata.write_bytes(b"metadata")
+    methods.write_text("old\n", encoding="utf-8")
+    summary.write_text("{}", encoding="utf-8")
+    rows.write_text("{}\n", encoding="utf-8")
+    newest_output = max(summary.stat().st_mtime_ns, rows.stat().st_mtime_ns)
+    old_input = min(metadata.stat().st_mtime_ns, methods.stat().st_mtime_ns)
+    if old_input > newest_output:
+        os.utime(metadata, ns=(newest_output - 1_000_000, newest_output - 1_000_000))
+        os.utime(methods, ns=(newest_output - 1_000_000, newest_output - 1_000_000))
+    assert _fresh([summary, rows], [metadata, methods]) is True
+    future = max(summary.stat().st_mtime_ns, rows.stat().st_mtime_ns) + 10_000_000
+    os.utime(methods, ns=(future, future))
+    assert _fresh([summary, rows], [metadata, methods]) is False
 
 
 def test_android_report_center_uses_enriched_connected_report_and_evidence_bundle():
@@ -206,5 +336,8 @@ def test_android_report_center_uses_enriched_connected_report_and_evidence_bundl
     assert "connected-report 1.2" in activity
     assert "runtimeObservedFindings" in activity
     assert "il2cppStructuralFindings" in activity
+    assert "metadataTokenIdentityFindings" in activity
+    assert "metadataTokenConflictFindings" in activity
+    assert "token conflicts" in activity
     assert "EvidenceBundleExporter.export" in activity
     assert '".jsonl"' in exporter
