@@ -43,20 +43,29 @@ public class App extends Application {
         if(m.find())try{stageProgress=Integer.parseInt(m.group(1));}catch(Exception ignored){}
         revision++;
     }
-    private void markInterruptedPipeline(){
-        File part=file("automatic-evidence.json.part");
-        if(part.exists())part.delete();
-        File manifest=file("automatic-evidence.json");
-        if(!manifest.isFile())return;
+    private boolean markInterruptedPipeline(){
+        File part=file("automatic-evidence.json.part"),manifest=file("automatic-evidence.json");
+        boolean interruptedPublication=part.isFile();
+        if(!interruptedPublication&&!manifest.isFile())return false;
+        JSONObject value=null;
         try{
-            JSONObject value;
-            try{value=new JSONObject(new String(Files.readAllBytes(manifest.toPath()),StandardCharsets.UTF_8));}
-            catch(Exception malformed){value=new JSONObject().put("schema","modkit-automatic-evidence-1.1").put("status","RUNNING");}
-            if(!"RUNNING".equals(value.optString("status")))return;
+            if(interruptedPublication){
+                try{value=new JSONObject(new String(Files.readAllBytes(part.toPath()),StandardCharsets.UTF_8));}catch(Exception ignored){}
+            }
+            if(value==null&&manifest.isFile()){
+                try{value=new JSONObject(new String(Files.readAllBytes(manifest.toPath()),StandardCharsets.UTF_8));}
+                catch(Exception malformed){value=new JSONObject().put("schema","modkit-automatic-evidence-1.1").put("status","RUNNING");}
+            }
+            if(value==null)value=new JSONObject().put("schema","modkit-automatic-evidence-1.1").put("status","RUNNING");
+            if(!interruptedPublication&&!"RUNNING".equals(value.optString("status")))return false;
             value.put("status","FAILED").put("phase","FINISHED").put("complete",false).put("cancelled",false).put("interruptedBySystem",true).put("error","SYSTEM_INTERRUPTED").put("finishedAtMs",System.currentTimeMillis());
-            try{Files.write(part.toPath(),value.toString(2).getBytes(StandardCharsets.UTF_8));Files.move(part.toPath(),manifest.toPath(),StandardCopyOption.REPLACE_EXISTING);}
-            catch(Exception writeError){Files.deleteIfExists(part.toPath());throw writeError;}
-        }catch(Exception ignored){}
+            Files.deleteIfExists(part.toPath());
+            try{Files.write(part.toPath(),value.toString(2).getBytes(StandardCharsets.UTF_8));Files.move(part.toPath(),manifest.toPath(),StandardCopyOption.REPLACE_EXISTING);return true;}
+            catch(Exception writeError){Files.deleteIfExists(part.toPath());Files.deleteIfExists(manifest.toPath());return true;}
+        }catch(Exception recoveryError){
+            try{Files.deleteIfExists(part.toPath());Files.deleteIfExists(manifest.toPath());}catch(Exception ignored){}
+            return true;
+        }
     }
     private void deleteInterruptedTargetTree(File value){
         if(value==null||!value.exists())return;
@@ -99,16 +108,19 @@ public class App extends Application {
         super.onCreate();
         boolean wasRunning=getSharedPreferences("state",0).getBoolean("running",false);
         boolean targetPreparing=getSharedPreferences("state",0).getBoolean("target.preparing",false);
+        boolean pipelineInterrupted=false;
         if(targetPreparing){
             cleanupInterruptedTargetPreparation();
             status="Подготовка target была прервана системой. Частичный APK/APK-set очищен; выберите target заново.";
             stage="STOPPED";
-        }else if(wasRunning){
-            status = "Предыдущая операция прервана системой. Можно запустить её заново.";
-            stage = "STOPPED";
+        }else{
+            pipelineInterrupted=markInterruptedPipeline();
+            if(wasRunning||pipelineInterrupted){
+                status="Предыдущая операция прервана системой. Можно запустить её заново.";
+                stage="STOPPED";
+            }
         }
-        if(wasRunning){markInterruptedPipeline();}
-        if(wasRunning||targetPreparing){getSharedPreferences("state",0).edit().putBoolean("running",false).putBoolean("target.preparing",false).apply();}
+        if(wasRunning||targetPreparing||pipelineInterrupted){getSharedPreferences("state",0).edit().putBoolean("running",false).putBoolean("target.preparing",false).apply();}
         new Thread(() -> {
             synchronized (this) {
                 if (busy.get()) return;
