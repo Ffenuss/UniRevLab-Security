@@ -25,6 +25,7 @@ def test_new_target_clears_file_backed_indexes_cache_and_exact_recovery_state():
         "il2cpp-metadata-identity.json",
         "il2cpp-no-rva-native.json",
         "il2cpp-no-rva-native.methods.jsonl",
+        "il2cpp-no-rva-native.failures.jsonl",
         "automod-plan.json",
         "menu-spec.json",
         "menu-preflight.json",
@@ -37,6 +38,13 @@ def test_new_target_clears_file_backed_indexes_cache_and_exact_recovery_state():
     assert "app.result=null" in source
     assert '.remove("active.project")' in source
     assert '.remove("selections")' in source
+
+
+def test_target_reset_fails_closed_if_old_artifact_cannot_be_deleted():
+    source = (ROOT / "android/app/src/main/java/dev/modkit/mobile/TargetPreparationService.java").read_text(encoding="utf-8")
+    assert "private void clearTargetDependentOutputs()throws IOException" in source
+    assert "private static void deleteTree(File file)throws IOException" in source
+    assert 'if(!file.delete()&&file.exists())throw new IOException("Не удалось очистить старый target artifact: "+file.getName())' in source
 
 
 def test_target_selection_service_remains_preparation_only():
