@@ -45,7 +45,7 @@ def _metadata_v24(path: Path, *, typedef_size: int, method_record_size: int,
     struct.pack_into("<Ii", blob, 160, type_offset, type_size)
     blob[string_offset:string_offset + len(strings)] = strings
 
-    # v24 method layouts still begin with nameIndex + declaringType.
+    # Every supported v24.x method layout begins with nameIndex + declaringType.
     struct.pack_into("<Ii", blob, methods_offset, 12, 0)
     struct.pack_into("<Ii", blob, methods_offset + method_record_size, 22, 0)
 
@@ -67,8 +67,8 @@ def test_metadata_identity_parses_declaring_type_and_method_pairs(tmp_path):
     assert ("Player", "Other") in parsed["qualifiedMethods"]
 
 
-def test_metadata_identity_recognizes_v24_legacy_100_layout(tmp_path):
-    metadata = tmp_path / "metadata-v24-100.bin"
+def test_metadata_identity_recognizes_v24_0_typedef_100_methoddef_56(tmp_path):
+    metadata = tmp_path / "metadata-v24-0.bin"
     _metadata_v24(
         metadata,
         typedef_size=100,
@@ -79,25 +79,43 @@ def test_metadata_identity_recognizes_v24_legacy_100_layout(tmp_path):
     parsed = parse_metadata_identities(metadata)
     assert parsed["metadata"]["version"] == 24
     assert parsed["metadata"]["methodRecordSize"] == 56
-    assert parsed["typeLayout"] == "LEGACY24_TYPEDEF_100"
+    assert parsed["typeLayout"] == "LEGACY24_0_TYPEDEF_100"
     assert parsed["typeLayoutScore"] >= 1.2
     assert ("Game.Player", "SetHealth") in parsed["qualifiedMethods"]
     assert ("Player", "Other") in parsed["qualifiedMethods"]
 
 
-def test_metadata_identity_recognizes_v24_legacy_92_layout(tmp_path):
-    metadata = tmp_path / "metadata-v24-92.bin"
+def test_metadata_identity_recognizes_v24_1_typedef_96_methoddef_52(tmp_path):
+    metadata = tmp_path / "metadata-v24-1.bin"
     _metadata_v24(
         metadata,
-        typedef_size=92,
+        typedef_size=96,
         method_record_size=52,
-        method_start_offset=44,
-        method_count_offset=72,
+        method_start_offset=48,
+        method_count_offset=76,
     )
     parsed = parse_metadata_identities(metadata)
     assert parsed["metadata"]["version"] == 24
     assert parsed["metadata"]["methodRecordSize"] == 52
-    assert parsed["typeLayout"] == "LEGACY24_TYPEDEF_92"
+    assert parsed["typeLayout"] == "LEGACY24_1_TYPEDEF_96"
+    assert parsed["typeLayoutScore"] >= 1.2
+    assert ("Game.Player", "SetHealth") in parsed["qualifiedMethods"]
+    assert ("Player", "Other") in parsed["qualifiedMethods"]
+
+
+def test_metadata_identity_recognizes_v24_2_to_24_5_typedef_88_methoddef_32(tmp_path):
+    metadata = tmp_path / "metadata-v24-2-5.bin"
+    _metadata_v24(
+        metadata,
+        typedef_size=88,
+        method_record_size=32,
+        method_start_offset=40,
+        method_count_offset=68,
+    )
+    parsed = parse_metadata_identities(metadata)
+    assert parsed["metadata"]["version"] == 24
+    assert parsed["metadata"]["methodRecordSize"] == 32
+    assert parsed["typeLayout"] == "LEGACY24_2_5_TYPEDEF_88"
     assert parsed["typeLayoutScore"] >= 1.2
     assert ("Game.Player", "SetHealth") in parsed["qualifiedMethods"]
     assert ("Player", "Other") in parsed["qualifiedMethods"]
