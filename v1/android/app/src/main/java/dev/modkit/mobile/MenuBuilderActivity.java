@@ -32,16 +32,17 @@ public class MenuBuilderActivity extends Activity {
         ScrollView scroll=new ScrollView(this);root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(dp(18),dp(20),dp(18),dp(24));root.setBackgroundColor(getColor(R.color.mk_background));scroll.addView(root);setContentView(scroll);
         TextView title=text("Menu / Runtime",28);title.setTypeface(null,Typeface.BOLD);root.addView(title);
         boolean il2cpp=hasIl2cppPath();
-        root.addView(text(il2cpp?"ModKit показывает обычный путь: подготовить → проверить → собрать. Неподтверждённые bindings остаются REVIEW и не выполняются.":"Обычное Android-приложение: DEX/debug/premium/network находки показываются как evidence. IL2CPP-only инструменты скрыты; строка без owning method/patch contract не становится переключателем.",14));
+        root.addView(text(il2cpp?"IL2CPP controls здесь можно просматривать и редактировать, но prepare/preflight/подписанная сборка идут только через AutoMod Phase 7. Runtime/review evidence не может обойти Evidence Graph quality gate.":"Обычное Android-приложение: DEX/debug/premium/network находки показываются как evidence. IL2CPP-only инструменты скрыты; строка без owning method/patch contract не становится переключателем.",14));
 
         LinearLayout basic=group("Основные действия");
-        button(il2cpp?"Авто: подготовить подтверждённое меню":"Обновить review-кандидаты из RE",basic,v->{
+        button(il2cpp?"Открыть AutoMod Phase 7":"Обновить review-кандидаты из RE",basic,v->{
+            if(il2cpp){startActivity(new Intent(this,AutoModActivity.class));return;}
             if(!app.file("re-analysis.json").isFile()&&!app.file("analysis.json").isFile()){toast("Сначала выполните RE-анализ");return;}
             startWork(new Intent().putExtra("op","menu_smart_prepare"));
         });
         if(il2cpp){
-            button("Проверить готовность Menu → Payload",basic,v->{if(!app.file("game.apk").isFile()){toast("Сначала выберите APK");return;}startWork(new Intent().putExtra("op","menu_preflight"));});
-            button("Собрать подписанный APK / APK-set",basic,v->{if(!app.file("game.apk").isFile()){toast("Сначала выберите APK");return;}File builtIn=new File(getApplicationInfo().nativeLibraryDir,"libmk.so");if(!app.file("menu-runtime.so").isFile()&&!builtIn.isFile()){toast("Runtime не найден в этой сборке ModKit");return;}pickBuildOutput("modkit-auto-menu-test",309);});
+            button("Проверить готовность через AutoMod",basic,v->startActivity(new Intent(this,AutoModActivity.class)));
+            button("Собрать подписанный APK / APK-set через AutoMod",basic,v->startActivity(new Intent(this,AutoModActivity.class)));
         }
 
         Button advancedToggle=button("Расширенные инструменты ▸",v->{});
@@ -59,12 +60,13 @@ public class MenuBuilderActivity extends Activity {
         button("Экспортировать проект Menu Builder (ZIP)",advanced,v->{if(!app.file("menu-spec.json").isFile()){toast("Сначала создайте меню");return;}startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/zip").addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE,"modkit-menu-project.zip"),301);});
 
         status=text("",14);root.addView(status);summary=text("",13);root.addView(summary);list=new LinearLayout(this);list.setOrientation(LinearLayout.VERTICAL);root.addView(list);
-        if(!app.file("menu-spec.json").isFile()&&app.file("re-analysis.json").isFile())startWork(new Intent().putExtra("op","menu_smart_prepare"));
+        if(!il2cpp&&!app.file("menu-spec.json").isFile()&&app.file("re-analysis.json").isFile())startWork(new Intent().putExtra("op","menu_smart_prepare"));
     }
     private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
     private boolean createdOutputOp(String op){return "menu_export".equals(op)||"menu_payload_export".equals(op)||"menu_build_apk".equals(op)||"menu_auto_build_apk".equals(op)||"menu_auto_build_apk_deep".equals(op)||"menu_autopilot_build_apk".equals(op)||"menu_probe_build_apk".equals(op)||"menu_smart_build_apk".equals(op);}
+    private boolean signedBuildOp(String op){return "menu_build_apk".equals(op)||"menu_auto_build_apk".equals(op)||"menu_auto_build_apk_deep".equals(op)||"menu_autopilot_build_apk".equals(op)||"menu_probe_build_apk".equals(op)||"menu_smart_build_apk".equals(op);}
     private void deleteCreatedDocument(Intent i){String op=i.getStringExtra("op"),uriText=i.getStringExtra("uri");if(!createdOutputOp(op)||uriText==null||uriText.isEmpty())return;try{android.provider.DocumentsContract.deleteDocument(getContentResolver(),Uri.parse(uriText));}catch(Exception ignored){}}
-    private boolean startWork(Intent i){if(app.busy.get()){deleteCreatedDocument(i);toast("Сейчас выполняется другая операция");return false;}app.cancelled.set(false);app.busy.set(true);app.progress("Подготовка…");i.setClass(this,WorkerService.class);try{startForegroundService(i);return true;}catch(Exception e){app.busy.set(false);app.revision++;deleteCreatedDocument(i);app.progress("Menu Builder: не удалось запустить операцию: "+e.getMessage());toast("Не удалось запустить Menu Builder-операцию");return false;}}
+    private boolean startWork(Intent i){String op=i.getStringExtra("op");if(signedBuildOp(op)){deleteCreatedDocument(i);toast("Подписанная сборка выполняется только через AutoMod Phase 7");startActivity(new Intent(this,AutoModActivity.class));return false;}if(app.busy.get()){deleteCreatedDocument(i);toast("Сейчас выполняется другая операция");return false;}app.cancelled.set(false);app.busy.set(true);app.progress("Подготовка…");i.setClass(this,WorkerService.class);try{startForegroundService(i);return true;}catch(Exception e){app.busy.set(false);app.revision++;deleteCreatedDocument(i);app.progress("Menu Builder: не удалось запустить операцию: "+e.getMessage());toast("Не удалось запустить Menu Builder-операцию");return false;}}
     private JSONObject read(){try{return new JSONObject(Io.readUtf8(app.file("menu-spec.json")));}catch(Exception e){return null;}}
     private void write(JSONObject o){try{Io.writeUtf8(app.file("menu-spec.json"),o.toString(2));app.revision++;}catch(Exception e){toast(e.getMessage());}}
     private void validateVisualBinding(String visual,String call) throws Exception {
