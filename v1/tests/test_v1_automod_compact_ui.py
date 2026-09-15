@@ -46,15 +46,23 @@ def test_patch_lab_build_remains_fail_closed():
     assert 'pf.optBoolean("readyForAutoBuild")' in source
     verifier = Path("android/app/src/main/java/dev/modkit/mobile/AutoModAuditVerifier.java").read_text(encoding="utf-8")
     assert 'audit.optBoolean("promotesBuildability")||audit.optBoolean("addressRecoveryPromotesBuildability")' in verifier
+    assert 'audit.optBoolean("phase7PlanRequired")' in verifier
+    assert 'audit.optJSONObject("phase7Gate")' in verifier
     assert '"EXACT_INPUT_SHA256".equals(audit.optString("freshnessPolicy"))' in verifier
     assert 'build.setEnabled(idle&&prepareCount>0&&preflightReady&&exactPrepareAuditReady())' in source
 
 
-def test_candidate_cards_are_compact_but_full_details_remain_accessible():
+def test_candidate_cards_are_split_into_phase7_lanes_but_full_details_remain_accessible():
     source = _source()
 
-    assert 'shown<16' in source
-    assert "нажмите для деталей" in source
+    assert "controlsList" in source
+    assert "runtimeList" in source
+    assert "reviewList" in source
+    assert 'if(controls<12)' in source
+    assert 'if(runtime<10)' in source
+    assert 'if(review<12)' in source
+    assert 'row.optBoolean("executableControl")' in source
+    assert 'row.optBoolean("runtimeProbe")' in source
     assert "new AlertDialog.Builder(this)" in source
     assert ".setMessage(row.toString())" in source
     assert 'row.optString("reason","")' in source
