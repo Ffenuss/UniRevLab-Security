@@ -18,7 +18,28 @@ SCHEMA = "modkit-flutter-deep-1.0"
 ENGINE_ID = "flutter.aot-embedded"
 MAX_ENTRY_BYTES = 96 * 1024 * 1024
 MAX_FINDINGS = 1200
+READ_CHUNK_BYTES = 1024 * 1024
 PRINTABLE = re.compile(rb"[\x20-\x7e]{5,}")
+
+
+class FlutterScanCancelled(RuntimeError):
+    """Explicit cooperative cancellation; partial output is never published."""
+
+
+def _cancelled(cb: Any | None) -> bool:
+    if cb is None:
+        return False
+    checker = getattr(cb, "isCancelled", None)
+    if callable(checker):
+        return bool(checker())
+    if callable(cb):
+        return bool(cb())
+    return False
+
+
+def _check(cb: Any | None) -> None:
+    if _cancelled(cb):
+        raise FlutterScanCancelled("Flutter deep scan cancelled")
 
 
 def _workspace_apks(root: Path) -> list[Path]:
@@ -58,10 +79,13 @@ def _interesting(text: str) -> bool:
     return bool(re.match(r"^/[a-zA-Z0-9_./{}:-]{2,120}$", text))
 
 
-def _scan_strings(data: bytes, limit: int = 300) -> list[str]:
+def _scan_strings(data: bytes, limit: int = 300, cb: Any | None = None) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
-    for match in PRINTABLE.finditer(data):
+    _check(cb)
+    for no, match in enumerate(PRINTABLE.finditer(data)):
+        if (no & 0xFF) == 0:
+            _check(cb)
         text = match.group().decode("utf-8", "replace").strip()
         if not text or text in seen or not _interesting(text):
             continue
@@ -86,8 +110,22 @@ def _load_native(native_report: str | Path | dict[str, Any] | None) -> dict[str,
     return {}
 
 
+def _read_entry(zf: zipfile.ZipFile, info: zipfile.ZipInfo, cb: Any | None = None) -> bytes:
+    chunks: list[bytes] = []
+    with zf.open(info, "r") as source:
+        while True:
+            _check(cb)
+            chunk = source.read(READ_CHUNK_BYTES)
+            if not chunk:
+                break
+            chunks.append(chunk)
+    _check(cb)
+    return b"".join(chunks)
+
+
 def scan_apk_paths(paths: Iterable[str | Path], native_report: str | Path | dict[str, Any] | None = None,
-                   output_path: str | Path | None = None) -> dict[str, Any]:
+                   output_path: str | Path | None = None, cb: Any | None = None) -> dict[str, Any]:
+    _check(cb)
     native = _load_native(native_report)
     findings: list[dict[str, Any]] = []
     artifacts: list[dict[str, Any]] = []
@@ -96,7 +134,9 @@ def scan_apk_paths(paths: Iterable[str | Path], native_report: str | Path | dict
     flutter_detected = False
 
     # Reuse exact app-owned function/call/xref work from the embedded native backend.
-    for library in native.get("libraries", []) if isinstance(native, dict) else []:
+    for library_no, library in enumerate(native.get("libraries", []) if isinstance(native, dict) else []):
+        if (library_no & 0x3F) == 0:
+            _check(cb)
         if not isinstance(library, dict) or not str(library.get("entry") or "").casefold().endswith("libapp.so"):
             continue
         flutter_detected = True
@@ -110,7 +150,9 @@ def scan_apk_paths(paths: Iterable[str | Path], native_report: str | Path | dict
             "addressXrefCount": library.get("addressXrefCount", 0),
             "recoveryLevel": "NATIVE_AOT",
         })
-        for row in library.get("findings", []) or []:
+        for row_no, row in enumerate(library.get("findings", []) or []):
+            if (row_no & 0x7F) == 0:
+                _check(cb)
             if not isinstance(row, dict):
                 continue
             copied = dict(row)
@@ -124,6 +166,7 @@ def scan_apk_paths(paths: Iterable[str | Path], native_report: str | Path | dict
                 break
 
     for raw in paths:
+        _check(cb)
         apk = Path(raw)
         if not apk.is_file():
             continue
@@ -131,6 +174,7 @@ def scan_apk_paths(paths: Iterable[str | Path], native_report: str | Path | dict
         try:
             with zipfile.ZipFile(apk) as zf:
                 for info in zf.infolist():
+                    _check(cb)
                     if len(findings) >= MAX_FINDINGS:
                         break
                     low = info.filename.casefold()
@@ -157,10 +201,14 @@ def scan_apk_paths(paths: Iterable[str | Path], native_report: str | Path | dict
                     if info.file_size <= 0 or info.file_size > MAX_ENTRY_BYTES or low.endswith(("libapp.so", "libflutter.so")):
                         continue
                     try:
-                        data = zf.read(info)
+                        data = _read_entry(zf, info, cb)
+                    except FlutterScanCancelled:
+                        raise
                     except Exception:
+                        if _cancelled(cb):
+                            raise FlutterScanCancelled("Flutter deep scan cancelled")
                         continue
-                    for text in _scan_strings(data):
+                    for text in _scan_strings(data, cb=cb):
                         fid = hashlib.sha256(f"{apk.name}!{info.filename}!{text}".encode("utf-8", "replace")).hexdigest()[:20]
                         findings.append({
                             "id": "flutter-meta:" + fid,
@@ -181,9 +229,14 @@ def scan_apk_paths(paths: Iterable[str | Path], native_report: str | Path | dict
                         })
                         if len(findings) >= MAX_FINDINGS:
                             break
+        except FlutterScanCancelled:
+            raise
         except Exception as exc:
+            if _cancelled(cb):
+                raise FlutterScanCancelled("Flutter deep scan cancelled") from exc
             errors.append({"apk": apk.name, "error": str(exc)})
 
+    _check(cb)
     out = {
         "schema": SCHEMA,
         "engineId": ENGINE_ID,
@@ -191,6 +244,7 @@ def scan_apk_paths(paths: Iterable[str | Path], native_report: str | Path | dict
         "manualImportRequired": False,
         "passive": True,
         "executesTargetCode": False,
+        "cancelAware": cb is not None,
         "originalDartSourceClaimed": False,
         "apkCount": apk_count,
         "detected": flutter_detected,
@@ -200,12 +254,13 @@ def scan_apk_paths(paths: Iterable[str | Path], native_report: str | Path | dict
         "findings": findings,
         "errors": errors[:100],
     }
+    _check(cb)
     if output_path:
         Path(output_path).write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
     return out
 
 
 def scan_workspace(workdir: str | Path, native_report: str | Path | dict[str, Any] | None = None,
-                   output_path: str | Path | None = None) -> dict[str, Any]:
+                   output_path: str | Path | None = None, cb: Any | None = None) -> dict[str, Any]:
     root = Path(workdir)
-    return scan_apk_paths(_workspace_apks(root), native_report, output_path)
+    return scan_apk_paths(_workspace_apks(root), native_report, output_path, cb)
