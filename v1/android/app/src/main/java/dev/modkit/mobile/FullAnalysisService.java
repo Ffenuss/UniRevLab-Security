@@ -32,11 +32,16 @@ public class FullAnalysisService extends Service {
     @Override public IBinder onBind(Intent intent){return null;}
     private Notification note(String text){Intent stop=new Intent(this,FullAnalysisService.class).setAction("cancel");PendingIntent cancel=PendingIntent.getService(this,92,stop,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);PendingIntent open=PendingIntent.getActivity(this,91,new Intent(this,AutoAnalysisActivity.class),PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);return new Notification.Builder(this,"full-analysis").setSmallIcon(R.drawable.ic_modkit).setContentTitle("ModKit · полный анализ").setContentText(text).setContentIntent(open).setOngoing(true).addAction(0,"Отмена",cancel).build();}
     private void progress(String text){app.progress(text);((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).notify(91,note(text));}
+    private void writeAtomicJson(String name,JSONObject value)throws Exception{
+        File temp=app.file(name+".part"),dest=app.file(name);Files.deleteIfExists(temp.toPath());
+        try{Files.write(temp.toPath(),value.toString(2).getBytes(StandardCharsets.UTF_8));Files.move(temp.toPath(),dest.toPath(),StandardCopyOption.REPLACE_EXISTING);}
+        catch(Exception e){Files.deleteIfExists(temp.toPath());throw e;}
+    }
     private void stage(int index,int total,String name){
         long elapsed=Math.max(0L,System.currentTimeMillis()-startedAt);
         try{
             JSONObject row=new JSONObject().put("schema","modkit-simple-progress-1.1").put("phase","RECONSTRUCTION").put("stage",index).put("totalStages",total).put("name",name).put("remainingStages",Math.max(0,total-index)).put("elapsedMs",elapsed);
-            Files.write(app.file("simple-progress.json").toPath(),row.toString(2).getBytes(StandardCharsets.UTF_8));
+            writeAtomicJson("simple-progress.json",row);
         }catch(Exception ignored){}
         progress("Реконструкция ["+index+"/"+total+"]: "+name);
     }
@@ -44,9 +49,7 @@ public class FullAnalysisService extends Service {
         try{
             JSONObject state=new JSONObject().put("schema","modkit-automatic-evidence-1.1").put("status",status).put("phase",phase).put("complete",complete).put("cancelled",cancelled).put("startedAtMs",startedAt).put("updatedAtMs",System.currentTimeMillis());
             if(error!=null&&!error.isEmpty())state.put("error",error);
-            File temp=app.file("automatic-evidence.json.part"),dest=app.file("automatic-evidence.json");
-            Files.write(temp.toPath(),state.toString(2).getBytes(StandardCharsets.UTF_8));
-            Files.move(temp.toPath(),dest.toPath(),StandardCopyOption.REPLACE_EXISTING);
+            writeAtomicJson("automatic-evidence.json",state);
         }catch(Exception ignored){}
     }
     private void invalidatePreparedAutoModState()throws Exception{
@@ -192,7 +195,7 @@ public class FullAnalysisService extends Service {
         int expected=previous.optInt("expectedApkCount",previous.optJSONArray("splits")!=null?previous.optJSONArray("splits").length():0);
         PyObject result=Python.getInstance().getModule("modkit.mobile.package_target").callAttr("build_target_manifest",scanJson,packageName,label,versionName,versionCode,expected,"[]");
         JSONObject normalized=new JSONObject(result.toString());
-        Files.write(targetFile.toPath(),normalized.toString(2).getBytes(StandardCharsets.UTF_8));
+        writeAtomicJson("installed-target.json",normalized);
     }
 
     private String targetDigest(List<File> files)throws Exception{
