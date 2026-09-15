@@ -20,7 +20,9 @@ def _metadata_with_type(path: Path):
     blob[string_offset:string_offset + len(strings)] = strings
 
     struct.pack_into("<Ii", blob, methods_offset, 12, 0)
+    struct.pack_into("<I", blob, methods_offset + 20, 0x06000001)
     struct.pack_into("<Ii", blob, methods_offset + 32, 22, 0)
+    struct.pack_into("<I", blob, methods_offset + 32 + 20, 0x06000002)
 
     struct.pack_into("<II", blob, type_offset, 0, 7)
     struct.pack_into("<i", blob, type_offset + 36, 0)
@@ -43,8 +45,11 @@ def _metadata_v24(path: Path, *, typedef_size: int, method_record_size: int,
     struct.pack_into("<Ii", blob, 160, type_offset, type_size)
     blob[string_offset:string_offset + len(strings)] = strings
 
+    token_offset = {56: 44, 52: 40, 32: 20}[method_record_size]
     struct.pack_into("<Ii", blob, methods_offset, 12, 0)
+    struct.pack_into("<I", blob, methods_offset + token_offset, 0x06000001)
     struct.pack_into("<Ii", blob, methods_offset + method_record_size, 22, 0)
+    struct.pack_into("<I", blob, methods_offset + method_record_size + token_offset, 0x06000002)
 
     struct.pack_into("<II", blob, type_offset, 0, 7)
     struct.pack_into("<i", blob, type_offset + method_start_offset, 0)
@@ -52,7 +57,7 @@ def _metadata_v24(path: Path, *, typedef_size: int, method_record_size: int,
     path.write_bytes(blob)
 
 
-def test_metadata_identity_parses_declaring_type_and_method_pairs(tmp_path):
+def test_metadata_identity_parses_declaring_type_method_pairs_and_tokens(tmp_path):
     metadata = tmp_path / "metadata.bin"
     _metadata_with_type(metadata)
     parsed = parse_metadata_identities(metadata)
@@ -62,75 +67,55 @@ def test_metadata_identity_parses_declaring_type_and_method_pairs(tmp_path):
     assert parsed["typeDefinitionCount"] == 1
     assert ("Game.Player", "SetHealth") in parsed["qualifiedMethods"]
     assert ("Player", "Other") in parsed["qualifiedMethods"]
+    assert parsed["methodTokens"][0x06000001]["methodName"] == "SetHealth"
+    assert parsed["methodTokens"][0x06000001]["class"] == "Game.Player"
+    assert parsed["methodTokens"][0x06000002]["methodName"] == "Other"
 
 
 def test_metadata_identity_recognizes_v24_0_typedef_104_methoddef_56(tmp_path):
     metadata = tmp_path / "metadata-v24-0.bin"
-    _metadata_v24(
-        metadata,
-        typedef_size=104,
-        method_record_size=56,
-        method_start_offset=52,
-        method_count_offset=80,
-    )
+    _metadata_v24(metadata, typedef_size=104, method_record_size=56, method_start_offset=52, method_count_offset=80)
     parsed = parse_metadata_identities(metadata)
     assert parsed["metadata"]["version"] == 24
     assert parsed["metadata"]["methodRecordSize"] == 56
     assert parsed["typeLayout"] == "LEGACY24_0_TYPEDEF_104"
     assert parsed["typeLayoutScore"] >= 1.2
     assert ("Game.Player", "SetHealth") in parsed["qualifiedMethods"]
-    assert ("Player", "Other") in parsed["qualifiedMethods"]
+    assert parsed["methodTokens"][0x06000001]["class"] == "Game.Player"
 
 
 def test_metadata_identity_recognizes_v24_1_typedef_100_methoddef_52(tmp_path):
     metadata = tmp_path / "metadata-v24-1.bin"
-    _metadata_v24(
-        metadata,
-        typedef_size=100,
-        method_record_size=52,
-        method_start_offset=48,
-        method_count_offset=76,
-    )
+    _metadata_v24(metadata, typedef_size=100, method_record_size=52, method_start_offset=48, method_count_offset=76)
     parsed = parse_metadata_identities(metadata)
     assert parsed["metadata"]["version"] == 24
     assert parsed["metadata"]["methodRecordSize"] == 52
     assert parsed["typeLayout"] == "LEGACY24_1_TYPEDEF_100"
     assert parsed["typeLayoutScore"] >= 1.2
     assert ("Game.Player", "SetHealth") in parsed["qualifiedMethods"]
-    assert ("Player", "Other") in parsed["qualifiedMethods"]
+    assert parsed["methodTokens"][0x06000002]["methodName"] == "Other"
 
 
 def test_metadata_identity_recognizes_v24_2_to_24_5_typedef_92_methoddef_32(tmp_path):
     metadata = tmp_path / "metadata-v24-2-5.bin"
-    _metadata_v24(
-        metadata,
-        typedef_size=92,
-        method_record_size=32,
-        method_start_offset=40,
-        method_count_offset=68,
-    )
+    _metadata_v24(metadata, typedef_size=92, method_record_size=32, method_start_offset=40, method_count_offset=68)
     parsed = parse_metadata_identities(metadata)
     assert parsed["metadata"]["version"] == 24
     assert parsed["metadata"]["methodRecordSize"] == 32
     assert parsed["typeLayout"] == "LEGACY24_2_5_TYPEDEF_92"
     assert parsed["typeLayoutScore"] >= 1.2
     assert ("Game.Player", "SetHealth") in parsed["qualifiedMethods"]
-    assert ("Player", "Other") in parsed["qualifiedMethods"]
+    assert parsed["methodTokens"][0x06000001]["tokenHex"] == "0x06000001"
 
 
 def test_v24_layout_must_pair_with_inferred_method_record_size(tmp_path):
     metadata = tmp_path / "mismatched-v24.bin"
-    _metadata_v24(
-        metadata,
-        typedef_size=104,
-        method_record_size=32,
-        method_start_offset=52,
-        method_count_offset=80,
-    )
+    _metadata_v24(metadata, typedef_size=104, method_record_size=32, method_start_offset=52, method_count_offset=80)
     parsed = parse_metadata_identities(metadata)
     assert parsed["metadata"]["methodRecordSize"] == 32
     assert parsed["typeLayout"] == "TYPE_LAYOUT_UNRESOLVED"
     assert parsed["qualifiedMethods"] == set()
+    assert parsed["methodTokens"][0x06000001]["class"] is None
 
 
 def test_no_rva_rows_gain_identity_evidence_but_never_address_or_buildability(tmp_path):
@@ -154,6 +139,7 @@ def test_no_rva_rows_gain_identity_evidence_but_never_address_or_buildability(tm
     assert result["counts"]["qualifiedMethodConfirmedNoRva"] == 1
     assert result["counts"]["methodNamePresentNoRva"] == 1
     assert result["counts"]["unresolvedNoRva"] == 1
+    assert result["uniqueMethodTokenCount"] == 2
     assert result["addressResolver"] is False
     assert result["actionable"] is False
     assert result["promotesBuildability"] is False
@@ -169,3 +155,52 @@ def test_no_rva_rows_gain_identity_evidence_but_never_address_or_buildability(tm
     assert by_id[2]["status"] == "METADATA_METHOD_NAME_PRESENT_NO_RVA"
     assert by_id[3]["status"] == "UNRESOLVED_NO_RVA"
     assert 4 not in by_id
+
+
+def test_method_token_can_restore_identity_without_rva_class_or_name(tmp_path):
+    metadata = tmp_path / "metadata.bin"
+    methods = tmp_path / "analysis.methods.jsonl"
+    output = tmp_path / "identity.json"
+    rows = tmp_path / "identity.methods.jsonl"
+    _metadata_with_type(metadata)
+    methods.write_text(json.dumps({"id": 9, "token": "0x06000001", "rva": None}) + "\n", encoding="utf-8")
+
+    result = build_identity_evidence(metadata, methods, output, rows)
+    evidence = json.loads(rows.read_text(encoding="utf-8").strip())
+    assert result["schema"] == "modkit-il2cpp-metadata-identity-1.1"
+    assert result["counts"]["tokenMethodConfirmedNoRva"] == 1
+    assert evidence["status"] == "METADATA_TOKEN_METHOD_CONFIRMED_NO_RVA"
+    assert evidence["metadataTokenConfirmed"] is True
+    assert evidence["metadataTokenConflict"] is False
+    assert evidence["metadataToken"] == "0x06000001"
+    assert evidence["class"] == "Game.Player"
+    assert evidence["methodName"] == "SetHealth"
+    assert evidence["metadataQualifiedMethodPresent"] is True
+    assert evidence["addressConfirmed"] is False
+    assert evidence["rva"] is None
+    assert evidence["actionable"] is False
+    assert evidence["buildable"] is False
+
+
+def test_method_token_conflict_is_fail_closed(tmp_path):
+    metadata = tmp_path / "metadata.bin"
+    methods = tmp_path / "analysis.methods.jsonl"
+    output = tmp_path / "identity.json"
+    rows = tmp_path / "identity.methods.jsonl"
+    _metadata_with_type(metadata)
+    methods.write_text(
+        json.dumps({"id": 10, "token": "0x06000001", "class": "Game.Player", "method": "Other", "rva": 0}) + "\n",
+        encoding="utf-8",
+    )
+
+    result = build_identity_evidence(metadata, methods, output, rows)
+    evidence = json.loads(rows.read_text(encoding="utf-8").strip())
+    assert result["counts"]["tokenConflictNoRva"] == 1
+    assert result["counts"]["tokenMethodConfirmedNoRva"] == 0
+    assert evidence["status"] == "METADATA_TOKEN_CONFLICT_NO_RVA"
+    assert evidence["metadataTokenConfirmed"] is False
+    assert evidence["metadataTokenConflict"] is True
+    assert evidence["metadataQualifiedMethodPresent"] is False
+    assert evidence["addressConfirmed"] is False
+    assert evidence["actionable"] is False
+    assert evidence["buildable"] is False
