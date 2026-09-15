@@ -24,6 +24,7 @@ import java.io.InputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
@@ -38,12 +39,18 @@ public class TargetPreparationService extends Service {
     private void progress(String text){app.progress(text);((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).notify(NOTE_ID,note(text));}
     @Override public int onStartCommand(Intent intent,int flags,int startId){startForeground(NOTE_ID,note("Подготовка target…"));getSharedPreferences("state",0).edit().putBoolean("running",true).apply();new Thread(()->{try{String kind=intent==null?"":intent.getStringExtra("kind");if("installed".equals(kind))prepareInstalled(intent.getStringExtra("package"),intent.getStringExtra("label"));else if("apk".equals(kind))prepareApk(intent.getStringExtra("uri"),intent.getStringExtra("display"));else throw new IllegalArgumentException("Неизвестный тип target");}catch(Exception e){try{cleanupFailedPreparation();}catch(Exception cleanup){progress("Target не подготовлен: "+e.getMessage()+" · cleanup: "+cleanup.getMessage());return;}progress(app.cancelled.get()?"Подготовка target отменена. Старый/частичный target очищен.":"Target не подготовлен: "+e.getMessage()+" · частичный target очищен.");}finally{getSharedPreferences("state",0).edit().putBoolean("running",false).apply();app.busy.set(false);app.revision++;stopForeground(true);stopSelf();}},"modkit-target-preparation").start();return START_NOT_STICKY;}
 
+    private void writeAtomicJson(String name,JSONObject value)throws Exception{
+        File temp=app.file(name+".part"),dest=app.file(name);Files.deleteIfExists(temp.toPath());
+        try{Files.write(temp.toPath(),value.toString(2).getBytes(StandardCharsets.UTF_8));Files.move(temp.toPath(),dest.toPath(),StandardCopyOption.REPLACE_EXISTING);}
+        catch(Exception e){Files.deleteIfExists(temp.toPath());throw e;}
+    }
+
     private void prepareInstalled(String packageName,String label)throws Exception{
         if(packageName==null||packageName.isEmpty())throw new IllegalArgumentException("package не указан");
         clearTargetDependentOutputs();
         progress("Копирую APK-set установленного приложения…");PackageManager pm=getPackageManager();ApplicationInfo ai=pm.getApplicationInfo(packageName,0);PackageInfo pi=pm.getPackageInfo(packageName,0);List<File> sources=new ArrayList<>();sources.add(new File(ai.sourceDir));if(ai.splitSourceDirs!=null)for(String path:ai.splitSourceDirs)if(path!=null&&!path.isEmpty())sources.add(new File(path));for(File source:sources)if(!source.isFile())throw new java.io.FileNotFoundException(source.getAbsolutePath());
         File dir=app.file("installed-apks");deleteTree(dir);if(!dir.mkdirs()&&!dir.isDirectory())throw new java.io.IOException("Не удалось создать installed-apks");JSONArray splits=new JSONArray();for(int i=0;i<sources.size();i++){checkCancelled();File source=sources.get(i);String sourceName=source.getName();String name=i==0?"base.apk":String.format(Locale.ROOT,"split-%03d-%s",i,safeName(sourceName));File dest=new File(dir,name);copy(source,dest);splits.put(new JSONObject().put("index",i).put("name",name).put("path",dest.getCanonicalPath()).put("size",dest.length()).put("sha256",sha256(dest)));progress("Копирую APK-set: "+(i+1)+"/"+sources.size());}
-        copy(new File(dir,"base.apk"),app.file("game.apk"));checkCancelled();JSONObject target=new JSONObject().put("schema","modkit-target-selection-1.0").put("preparedOnly",true).put("analysisPerformed",false).put("packageName",packageName).put("label",label==null?String.valueOf(pm.getApplicationLabel(ai)):label).put("versionName",pi.versionName).put("versionCode",versionCode(pi)).put("expectedApkCount",sources.size()).put("splits",splits);Files.write(app.file("installed-target.json").toPath(),target.toString(2).getBytes(StandardCharsets.UTF_8));SharedPreferences.Editor prefs=getSharedPreferences("state",0).edit();prefs.putString("installed.package",packageName).putString("game.apk","base.apk").apply();progress("Target готов: "+packageName+" · APK-set "+sources.size()+" · анализ ещё не запускался.");
+        copy(new File(dir,"base.apk"),app.file("game.apk"));checkCancelled();JSONObject target=new JSONObject().put("schema","modkit-target-selection-1.0").put("preparedOnly",true).put("analysisPerformed",false).put("packageName",packageName).put("label",label==null?String.valueOf(pm.getApplicationLabel(ai)):label).put("versionName",pi.versionName).put("versionCode",versionCode(pi)).put("expectedApkCount",sources.size()).put("splits",splits);writeAtomicJson("installed-target.json",target);SharedPreferences.Editor prefs=getSharedPreferences("state",0).edit();prefs.putString("installed.package",packageName).putString("game.apk","base.apk").apply();progress("Target готов: "+packageName+" · APK-set "+sources.size()+" · анализ ещё не запускался.");
     }
     @SuppressWarnings("deprecation") private static long versionCode(PackageInfo info){return Build.VERSION.SDK_INT>=Build.VERSION_CODES.P?info.getLongVersionCode():(long)info.versionCode;}
     private void prepareApk(String uriText,String display)throws Exception{if(uriText==null||uriText.isEmpty())throw new IllegalArgumentException("APK URI не указан");clearTargetDependentOutputs();progress("Копирую выбранный APK…");Uri uri=Uri.parse(uriText);File installed=app.file("installed-apks");deleteTree(installed);File temp=app.file("game.apk.part");try(InputStream in=getContentResolver().openInputStream(uri);FileOutputStream out=new FileOutputStream(temp)){if(in==null)throw new java.io.FileNotFoundException("Не удалось открыть APK");byte[] buf=new byte[1024*1024];int n;while((n=in.read(buf))!=-1){checkCancelled();out.write(buf,0,n);}}if(temp.length()==0)throw new java.io.IOException("Выбран пустой APK");File dest=app.file("game.apk");if(dest.exists()&&!dest.delete())throw new java.io.IOException("Не удалось заменить game.apk");if(!temp.renameTo(dest)){copy(temp,dest);if(!temp.delete()&&temp.exists())throw new IOException("Не удалось удалить временный APK");}checkCancelled();getSharedPreferences("state",0).edit().remove("installed.package").putString("game.apk",display==null?"target.apk":display).apply();progress("Target готов: "+(display==null?"APK":display)+" · SHA-256 "+sha256(dest).substring(0,16)+"… · анализ ещё не запускался.");}
@@ -58,7 +65,7 @@ public class TargetPreparationService extends Service {
             "il2cpp-metadata-identity.json","il2cpp-metadata-identity.json.part","il2cpp-metadata-identity.methods.jsonl","il2cpp-metadata-identity.methods.jsonl.part",
             "il2cpp-no-rva-native.json","il2cpp-no-rva-native.json.part","il2cpp-no-rva-native.methods.jsonl","il2cpp-no-rva-native.failures.jsonl",
             "lua-deep.json","hermes-deep","hermes-deep.json","native-deep.json","native-deep-cache","cocos-deep.json","flutter-deep.json","deep-gameplay.json",
-            "installed-target.json","installed-apk-set.zip","installed-apk-set.zip.tmp","installed-scan.json","installed-apks",
+            "installed-target.json","installed-target.json.part","installed-apk-set.zip","installed-apk-set.zip.tmp","installed-scan.json","installed-apks",
             "metadata.bin","library.so","game.apk","game-native-split.apk","game.apk.part",
             "analysis.json","analysis.summary.json","analysis.ui.jsonl",
             "analysis.methods.jsonl","analysis.methods.jsonl.idx","analysis.methods.jsonl.rva.idx","analysis.methods.jsonl.pages.idx","analysis.methods.meta.json",
@@ -76,7 +83,7 @@ public class TargetPreparationService extends Service {
         getSharedPreferences("state",0).edit().remove("selections").remove("active.project").remove("metadata.bin").remove("library.so").remove("installed.package").remove("game.apk").apply();
     }
     private void cleanupFailedPreparation()throws IOException{
-        for(String name:new String[]{"installed-target.json","installed-apk-set.zip","installed-apk-set.zip.tmp","installed-apks","game.apk","game.apk.part","game-native-split.apk"})deleteTree(app.file(name));
+        for(String name:new String[]{"installed-target.json","installed-target.json.part","installed-apk-set.zip","installed-apk-set.zip.tmp","installed-apks","game.apk","game.apk.part","game-native-split.apk"})deleteTree(app.file(name));
         getSharedPreferences("state",0).edit().remove("installed.package").remove("game.apk").apply();
     }
     private void checkCancelled()throws java.io.InterruptedIOException{if(app.cancelled.get())throw new java.io.InterruptedIOException("cancelled");}
