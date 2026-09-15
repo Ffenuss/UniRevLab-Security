@@ -42,6 +42,9 @@ public class App extends Application {
         Matcher m=PERCENT.matcher(visible);
         if(m.find())try{stageProgress=Integer.parseInt(m.group(1));}catch(Exception ignored){}
         revision++;
+        JSONObject detail=new JSONObject();
+        try{detail.put("stage",stage).put("stageProgress",stageProgress).put("busy",busy.get()).put("cancelled",cancelled.get());}catch(Exception ignored){}
+        AnalysisJournal.append(this,"PROGRESS",visible,detail);
     }
     private boolean markInterruptedPipeline(){
         File part=file("automatic-evidence.json.part"),manifest=file("automatic-evidence.json");
@@ -104,8 +107,18 @@ public class App extends Application {
         for(String name:names)deleteInterruptedTargetTree(file(name));
         getSharedPreferences("state",0).edit().remove("selections").remove("active.project").remove("metadata.bin").remove("library.so").remove("installed.package").remove("game.apk").apply();
     }
+    private void installCrashJournal(){
+        final Thread.UncaughtExceptionHandler previous=Thread.getDefaultUncaughtExceptionHandler();
+        Thread.setDefaultUncaughtExceptionHandler((thread,error)->{
+            try{AnalysisJournal.exception(this,"UNCAUGHT_EXCEPTION",error);}catch(Throwable ignored){}
+            if(previous!=null)previous.uncaughtException(thread,error);
+            else{android.os.Process.killProcess(android.os.Process.myPid());System.exit(10);}
+        });
+    }
     @Override public void onCreate() {
         super.onCreate();
+        AnalysisJournal.startSession(this);
+        installCrashJournal();
         boolean wasRunning=getSharedPreferences("state",0).getBoolean("running",false);
         boolean targetPreparing=getSharedPreferences("state",0).getBoolean("target.preparing",false);
         boolean pipelineInterrupted=false;
@@ -113,11 +126,13 @@ public class App extends Application {
             cleanupInterruptedTargetPreparation();
             status="Подготовка target была прервана системой. Частичный APK/APK-set очищен; выберите target заново.";
             stage="STOPPED";
+            AnalysisJournal.append(this,"RECOVERY","Interrupted target preparation cleaned");
         }else{
             pipelineInterrupted=markInterruptedPipeline();
             if(wasRunning||pipelineInterrupted){
                 status="Предыдущая операция прервана системой. Можно запустить её заново.";
                 stage="STOPPED";
+                AnalysisJournal.append(this,"RECOVERY","Previous operation recovered as SYSTEM_INTERRUPTED");
             }
         }
         boolean interruptedState=wasRunning||targetPreparing||pipelineInterrupted;
