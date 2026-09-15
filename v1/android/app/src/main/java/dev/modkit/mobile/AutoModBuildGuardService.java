@@ -11,7 +11,6 @@ import android.os.IBinder;
 import android.os.PowerManager;
 import android.provider.DocumentsContract;
 
-import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.File;
@@ -40,7 +39,7 @@ public class AutoModBuildGuardService extends Service {
 
     @Override public int onStartCommand(Intent intent,int flags,int startId){
         if(intent!=null&&"cancel".equals(intent.getAction())){app.cancelled.set(true);progress("AutoMod build: отмена запрошена…");return START_NOT_STICKY;}
-        startForeground(NOTE_ID,note("Проверяю exact SHA перед сборкой…"));
+        startForeground(NOTE_ID,note("Проверяю canonical target и exact SHA перед сборкой…"));
         wake=((PowerManager)getSystemService(POWER_SERVICE)).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"ModKit:automod-build-guard");wake.acquire(20L*60L*1000L);
         getSharedPreferences("state",0).edit().putBoolean("running",true).apply();
         new Thread(()->{
@@ -51,8 +50,8 @@ public class AutoModBuildGuardService extends Service {
                 if(uriText==null||uriText.isEmpty())throw new IOException("Не выбран файл назначения AutoMod APK");
                 destination=Uri.parse(uriText);
                 check();
-                File source=targetPatchApk();
-                progress("AutoMod build: повторно сверяю SHA-256 metadata/lib/catalog/owning APK…");
+                TargetResolver.Target target=TargetResolver.resolve(app);JSONObject targetVerification=TargetResolver.requireVerified(target,app.cancelled);File source=target.patchOwnerApk();
+                progress("AutoMod build: target SHA verified · повторно сверяю metadata/lib/catalog/owning APK…");
                 AutoModAuditVerifier.verifyCurrent(app,source,()->app.cancelled.get());
                 check();
                 JSONObject preflight=read("menu-preflight.json");
@@ -60,8 +59,10 @@ public class AutoModBuildGuardService extends Service {
                 Intent worker=new Intent(this,WorkerService.class).putExtra("op","menu_build_apk").putExtra("uri",destination.toString());
                 startForegroundService(worker);
                 handedOff=true;
-                progress("AutoMod build: exact SHA актуальны · передаю в штатную preflight/signing сборку…");
+                AnalysisJournal.append(this,"AUTOMOD_BUILD_HANDOFF","AutoMod build target verified",new JSONObject().put("targetDigest",targetVerification.optString("currentTargetDigest")).put("sourceApk",source.getAbsolutePath()));
+                progress("AutoMod build: canonical target + exact SHA актуальны · передаю в штатную preflight/signing сборку…");
             }catch(Exception e){
+                AnalysisJournal.exception(this,"AUTOMOD_BUILD_BLOCKED",e);
                 if(destination!=null&&!handedOff)try{DocumentsContract.deleteDocument(getContentResolver(),destination);}catch(Exception ignored){}
                 progress(app.cancelled.get()?"AutoMod build отменён.":"AutoMod build заблокирован: "+String.valueOf(e.getMessage()));
             }finally{
@@ -74,18 +75,5 @@ public class AutoModBuildGuardService extends Service {
     }
 
     private JSONObject read(String name){try{File f=app.file(name);return f.isFile()?new JSONObject(Io.readUtf8(f)):null;}catch(Exception ignored){return null;}}
-
-    private File targetPatchApk()throws Exception{
-        File manifest=app.file("installed-target.json");
-        if(manifest.isFile()){
-            JSONObject target=new JSONObject(Io.readUtf8(manifest));JSONObject owner=target.optJSONObject("patchOwner");
-            if(owner!=null){File file=new File(owner.optString("path",""));if(file.isFile())return file;}
-            JSONArray splits=target.optJSONArray("splits");
-            if(splits!=null){for(int i=0;i<splits.length();i++){JSONObject row=splits.optJSONObject(i);if(row==null)continue;String name=row.optString("name","");if("base.apk".equals(name)||name.endsWith("-base.apk")){File file=new File(row.optString("path",""));if(file.isFile())return file;}}}
-        }
-        File fallback=app.file("game.apk");if(fallback.isFile())return fallback;
-        throw new IOException("Owning APK target отсутствует");
-    }
-
     private void check()throws IOException{if(app.cancelled.get())throw new java.io.InterruptedIOException("AutoMod build cancelled");}
 }
