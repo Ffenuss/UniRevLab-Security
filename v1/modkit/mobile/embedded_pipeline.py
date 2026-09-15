@@ -9,9 +9,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from modkit.mobile import artifact_families, flutter_deep, hermes_deep, lua_deep, native_deep
+from modkit.mobile import artifact_families, cocos_deep, flutter_deep, hermes_deep, lua_deep, native_deep
 
-SCHEMA = "modkit-embedded-analysis-1.2"
+SCHEMA = "modkit-embedded-analysis-1.3"
 
 
 def _artifacts(report: dict[str, Any]) -> list[dict[str, Any]]:
@@ -140,6 +140,22 @@ def run_workspace(
         runs.append({"engineId": native_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
 
     try:
+        cocos_report = cocos_deep.scan_workspace(root, static_report, native_report, root / "cocos-deep.json")
+        runs.append({
+            "engineId": cocos_deep.ENGINE_ID,
+            "status": "SUCCESS" if cocos_report.get("available") else "UNAVAILABLE",
+            "scriptArtifactCount": int(cocos_report.get("scriptArtifactCount") or 0),
+            "nativeLibraryCount": int(cocos_report.get("nativeLibraryCount") or 0),
+            "correlationCount": int(cocos_report.get("correlationCount") or 0),
+            "findingCount": int(cocos_report.get("findingCount") or 0),
+        })
+        _merge_findings(static_report, cocos_report, summary_key="deepCocos",
+                        default_engine=cocos_deep.ENGINE_ID, default_kind="COCOS_EVIDENCE",
+                        default_category="Runtime/Cocos")
+    except Exception as exc:
+        runs.append({"engineId": cocos_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
+
+    try:
         flutter_report = flutter_deep.scan_workspace(root, native_report, root / "flutter-deep.json")
         runs.append({
             "engineId": flutter_deep.ENGINE_ID,
@@ -167,6 +183,7 @@ def run_workspace(
         "artifactReport": artifact_path.name,
         "luaReport": "lua-deep.json",
         "nativeReport": "native-deep.json",
+        "cocosReport": "cocos-deep.json",
         "flutterReport": "flutter-deep.json",
         "successful": sum(1 for run in runs if run.get("status") == "SUCCESS"),
         "unavailable": sum(1 for run in runs if run.get("status") == "UNAVAILABLE"),
