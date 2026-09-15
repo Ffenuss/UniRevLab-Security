@@ -2,8 +2,8 @@
 
 No sockets are opened and no authentication is attempted. The report records API/server
 endpoints and locations of crypto/key-handling configuration. It does not extract or use
-credential values. The automatic workspace pass also exposes the artifact-family report
-so Lua/JS/Hermes/Flutter/Cocos/native evidence is part of the unified automatic analysis.
+credential values. Repeated occurrences are aggregated by normalized surface identity so
+one CDN/API/config marker does not become hundreds of independent findings.
 """
 from __future__ import annotations
 
@@ -15,10 +15,12 @@ from typing import Any, Iterable
 import zipfile
 
 from . import artifact_families
+from .evidence_quality import normalize_endpoint
 
-SCHEMA = "modkit-security-surfaces-1.3"
+SCHEMA = "modkit-security-surfaces-1.4"
 MAX_ENTRY_BYTES = 64 * 1024 * 1024
 MAX_FINDINGS = 6000
+MAX_LOCATIONS_PER_FINDING = 16
 READ_CHUNK_BYTES = 1024 * 1024
 PRINTABLE = re.compile(rb"[\x20-\x7e]{5,}")
 URL_RE = re.compile(r"\b(?:https?|wss?)://[^\s\"'<>\\]{4,512}", re.I)
@@ -29,6 +31,7 @@ CRYPTO_MARKERS = ("aes/gcm", "aes/cbc", "chacha20", "blowfish", "xtea", "pbkdf2"
 KEY_MARKERS = ("encryption_key", "aes_key", "crypto_key", "keystore", "keyalias", "secretkeyspec", "keygenerator", "api_key", "apikey", "client_id", "client_secret")
 NETWORK_MARKERS = ("retrofit", "okhttp", "websocket", "io.grpc", "grpc", "graphql", "certificatepinner", "trustmanager")
 CONNECTION_CONFIG_MARKERS = ("baseurl", "base_url", "api_host", "apihost", "server_url", "serverurl", "server_host", "gateway_url", "socket_url", "websocket_url")
+_ENDPOINT_KINDS = {"API_ENDPOINT", "WEBSOCKET_ENDPOINT", "HOST_PORT", "API_PATH"}
 
 
 class ScanCancelled(RuntimeError):
@@ -57,9 +60,9 @@ def _sha(text: str) -> str:
 
 def _row(kind: str, title: str, apk: str, entry: str, offset: int, value: str | None = None,
          severity: str = "INFO", description: str = "", group: str = "network") -> dict[str, Any]:
-    stable = _sha(apk + "!" + entry + "!" + str(offset) + "!" + str(value or title))[:20]
+    # ID is finalized after normalization/aggregation. Keeping it location-independent
+    # prevents one literal repeated in many DEX/splits from looking like many issues.
     row: dict[str, Any] = {
-        "id": "sec:" + kind.lower() + ":" + stable,
         "kind": kind,
         "title": title,
         "category": "Security/Connection",
@@ -77,6 +80,51 @@ def _row(kind: str, title: str, apk: str, entry: str, offset: int, value: str | 
     if value is not None:
         row["value"] = value[:1024]
     return row
+
+
+def _normalized_value(row: dict[str, Any]) -> str:
+    kind = str(row.get("kind") or "").upper()
+    value = str(row.get("value") or "").strip()
+    if value:
+        if kind in _ENDPOINT_KINDS:
+            return normalize_endpoint(value)
+        return re.sub(r"\s+", " ", value).strip().casefold()
+    # Marker-only evidence is intentionally global: its location list keeps provenance.
+    return re.sub(r"\s+", " ", str(row.get("title") or kind)).strip().casefold()
+
+
+def _finding_key(row: dict[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(row.get("group") or "network").casefold(),
+        str(row.get("kind") or "UNKNOWN").upper(),
+        _normalized_value(row),
+    )
+
+
+def _location(row: dict[str, Any]) -> dict[str, Any]:
+    return {"apk": row.get("apk"), "entry": row.get("entry"), "offset": int(row.get("offset") or 0)}
+
+
+def _merge_finding(existing: dict[str, Any] | None, row: dict[str, Any]) -> dict[str, Any]:
+    normalized = _normalized_value(row)
+    if existing is None:
+        out = dict(row)
+        identity = "|".join((str(row.get("group") or "network").casefold(), str(row.get("kind") or "UNKNOWN").upper(), normalized))
+        out["id"] = "sec:" + str(row.get("kind") or "unknown").lower() + ":" + _sha(identity)[:20]
+        out["normalizedValue"] = normalized
+        out["occurrenceCount"] = 1
+        out["locations"] = [_location(row)]
+        out["deduplicated"] = False
+        return out
+    out = existing
+    out["occurrenceCount"] = int(out.get("occurrenceCount", 1) or 1) + 1
+    out["deduplicated"] = True
+    loc = _location(row)
+    locations = out.get("locations") if isinstance(out.get("locations"), list) else []
+    if loc not in locations and len(locations) < MAX_LOCATIONS_PER_FINDING:
+        locations.append(loc)
+    out["locations"] = locations
+    return out
 
 
 def find_network_and_crypto_markers(text: str, apk: str = "", entry: str = "", base_offset: int = 0) -> list[dict[str, Any]]:
@@ -140,7 +188,7 @@ def _read_entry(z: zipfile.ZipFile, info: zipfile.ZipInfo, cb: Any | None = None
     return b"".join(chunks)
 
 
-def _scan_entry(apk: Path, z: zipfile.ZipFile, info: zipfile.ZipInfo, remaining: int,
+def _scan_entry(apk: Path, z: zipfile.ZipFile, info: zipfile.ZipInfo,
                 cb: Any | None = None) -> list[dict[str, Any]]:
     _check(cb)
     if info.is_dir() or info.file_size <= 0 or info.file_size > MAX_ENTRY_BYTES:
@@ -158,28 +206,34 @@ def _scan_entry(apk: Path, z: zipfile.ZipFile, info: zipfile.ZipInfo, remaining:
     rows: list[dict[str, Any]] = []
     for offset, text in _strings(data, cb):
         rows.extend(find_network_and_crypto_markers(text, apk.name, info.filename, offset))
-        if len(rows) >= remaining:
+        # Bound one pathological entry even when most hits later deduplicate globally.
+        if len(rows) >= MAX_FINDINGS:
             break
     _check(cb)
-    return rows[:remaining]
+    return rows[:MAX_FINDINGS]
 
 
 def _group(findings: list[dict[str, Any]], name: str) -> dict[str, Any]:
     rows = [r for r in findings if r.get("group") == name]
     unique_values: dict[tuple[str, str], dict[str, Any]] = {}
     markers: set[str] = set()
+    occurrence_count = 0
     for row in rows:
+        occurrence_count += int(row.get("occurrenceCount", 1) or 1)
         value = str(row.get("value") or "")
+        normalized = str(row.get("normalizedValue") or "")
         if value:
-            key = (str(row.get("kind") or ""), value)
-            item = unique_values.setdefault(key, {"kind": key[0], "value": value, "locations": []})
-            loc = {"apk": row.get("apk"), "entry": row.get("entry"), "offset": row.get("offset")}
-            if loc not in item["locations"] and len(item["locations"]) < 8:
-                item["locations"].append(loc)
+            key = (str(row.get("kind") or ""), normalized or value.casefold())
+            item = unique_values.setdefault(key, {"kind": key[0], "value": value, "normalizedValue": normalized, "occurrenceCount": 0, "locations": []})
+            item["occurrenceCount"] += int(row.get("occurrenceCount", 1) or 1)
+            for loc in row.get("locations", []) if isinstance(row.get("locations"), list) else []:
+                if loc not in item["locations"] and len(item["locations"]) < MAX_LOCATIONS_PER_FINDING:
+                    item["locations"].append(loc)
         else:
             markers.add(str(row.get("title") or row.get("kind") or ""))
     return {
         "count": len(rows),
+        "occurrenceCount": occurrence_count,
         "uniqueValueCount": len(unique_values),
         "values": list(unique_values.values())[:200],
         "markers": sorted(x for x in markers if x)[:200],
@@ -188,9 +242,10 @@ def _group(findings: list[dict[str, Any]], name: str) -> dict[str, Any]:
 
 def scan_apk_paths(paths: Iterable[str | Path], output_path: str | Path | None = None,
                    cb: Any | None = None) -> dict[str, Any]:
-    findings: list[dict[str, Any]] = []
-    seen: set[tuple[str, str, str, int]] = set()
+    findings_by_key: dict[tuple[str, str, str], dict[str, Any]] = {}
+    raw_occurrences = 0
     skipped = 0
+    truncated = False
     for raw in paths:
         _check(cb)
         apk = Path(raw)
@@ -200,23 +255,30 @@ def scan_apk_paths(paths: Iterable[str | Path], output_path: str | Path | None =
             with zipfile.ZipFile(apk) as z:
                 for info in z.infolist():
                     _check(cb)
-                    if len(findings) >= MAX_FINDINGS:
-                        break
                     if info.file_size > MAX_ENTRY_BYTES:
                         skipped += 1
                         continue
-                    for row in _scan_entry(apk, z, info, MAX_FINDINGS - len(findings), cb):
-                        key = (row["kind"], row["apk"], row["entry"], row["offset"])
-                        if key not in seen:
-                            seen.add(key); findings.append(row)
+                    for row in _scan_entry(apk, z, info, cb):
+                        raw_occurrences += 1
+                        key = _finding_key(row)
+                        existing = findings_by_key.get(key)
+                        if existing is None and len(findings_by_key) >= MAX_FINDINGS:
+                            truncated = True
+                            continue
+                        findings_by_key[key] = _merge_finding(existing, row)
         except ScanCancelled:
             raise
         except Exception:
             continue
     _check(cb)
+    findings = list(findings_by_key.values())
+    findings.sort(key=lambda row: (str(row.get("group") or ""), str(row.get("kind") or ""), str(row.get("normalizedValue") or "")))
     counts: dict[str, int] = {}
+    occurrence_counts: dict[str, int] = {}
     for row in findings:
-        counts[row["kind"]] = counts.get(row["kind"], 0) + 1
+        kind = str(row.get("kind") or "UNKNOWN")
+        counts[kind] = counts.get(kind, 0) + 1
+        occurrence_counts[kind] = occurrence_counts.get(kind, 0) + int(row.get("occurrenceCount", 1) or 1)
     groups = {name: _group(findings, name) for name in ("endpoints", "network", "crypto")}
     out = {
         "schema": SCHEMA,
@@ -227,15 +289,33 @@ def scan_apk_paths(paths: Iterable[str | Path], output_path: str | Path | None =
         "keyValueExtraction": False,
         "findings": findings,
         "counts": counts,
+        "occurrenceCounts": occurrence_counts,
         "groups": groups,
         "total": len(findings),
+        "rawOccurrenceCount": raw_occurrences,
+        "deduplicatedOccurrences": max(0, raw_occurrences - len(findings)),
         "uniqueEndpoints": groups["endpoints"]["uniqueValueCount"],
         "skippedOversizeEntries": skipped,
-        "truncated": len(findings) >= MAX_FINDINGS,
+        "truncated": truncated,
+        "dedupPolicy": {
+            "normalizedIdentity": True,
+            "queryValuesExcludedFromEndpointIdentity": True,
+            "maxLocationsPerFinding": MAX_LOCATIONS_PER_FINDING,
+            "preservesOccurrenceCount": True,
+        },
     }
     _check(cb)
     if output_path:
-        Path(output_path).write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+        destination = Path(output_path)
+        temporary = destination.with_name(destination.name + ".part")
+        temporary.unlink(missing_ok=True)
+        try:
+            temporary.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+            _check(cb)
+            temporary.replace(destination)
+        except Exception:
+            temporary.unlink(missing_ok=True)
+            raise
     return out
 
 
@@ -264,13 +344,7 @@ def _workspace_apks(root: Path) -> list[Path]:
 
 
 def _artifact_report(root: Path, apk_paths: list[Path]) -> tuple[dict[str, Any], bool]:
-    """Reuse the current full-analysis enriched report instead of downgrading it.
-
-    TargetPreparationService deletes this file whenever the target changes, so an
-    embedded-enriched report in the current workspace belongs to the current target.
-    If no enriched report exists, standalone security scans still create the static
-    artifact inventory as before.
-    """
+    """Reuse the current full-analysis enriched report instead of downgrading it."""
     path = root / "artifact-families.json"
     if path.is_file():
         try:
@@ -305,5 +379,14 @@ def scan_workspace(workdir: str | Path, output_path: str | Path | None = None,
     }
     _check(cb)
     if output_path:
-        Path(output_path).write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+        destination = Path(output_path)
+        temporary = destination.with_name(destination.name + ".part")
+        temporary.unlink(missing_ok=True)
+        try:
+            temporary.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+            _check(cb)
+            temporary.replace(destination)
+        except Exception:
+            temporary.unlink(missing_ok=True)
+            raise
     return out
