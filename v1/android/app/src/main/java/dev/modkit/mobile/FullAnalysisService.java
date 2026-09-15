@@ -49,6 +49,12 @@ public class FullAnalysisService extends Service {
             Files.move(temp.toPath(),dest.toPath(),StandardCopyOption.REPLACE_EXISTING);
         }catch(Exception ignored){}
     }
+    private void invalidatePreparedAutoModState()throws Exception{
+        for(String name:new String[]{"automod-plan.json","automod-plan.json.part","menu-spec.json","menu-preflight.json","menu-validation.json","menu-auto-confirm.json","menu-autopilot.json","menu-native-recovery.json"}){
+            if(app.cancelled.get())throw new java.io.InterruptedIOException("cancelled");
+            Files.deleteIfExists(app.file(name).toPath());
+        }
+    }
 
     /** Chaquopy callback shared with inventory and embedded backends. */
     public final class Progress {
@@ -62,10 +68,12 @@ public class FullAnalysisService extends Service {
         getSharedPreferences("state",0).edit().putBoolean("running",true).apply();
         new Thread(()->{
             boolean chain=true;
+            boolean preparedStateInvalidated=false;
             String handoffFailure=null;
             startedAt=System.currentTimeMillis();
             pipelineState("RUNNING","RECONSTRUCTION",false,false,null);
             try{
+                invalidatePreparedAutoModState();preparedStateInvalidated=true;
                 List<File> inputs=DecompilerEngine.resolveTargetInputs(app);
                 if(inputs.isEmpty())throw new java.io.FileNotFoundException("Сначала выберите APK или установленный пакет.");
                 if(!Python.isStarted())Python.start(new AndroidPlatform(this));
@@ -136,6 +144,7 @@ public class FullAnalysisService extends Service {
                 }
                 if(app.cancelled.get()){chain=false;progress("Полный анализ отменён пользователем.");}
             }catch(Exception e){
+                if(!preparedStateInvalidated){chain=false;handoffFailure="AUTOMOD_PREPARED_STATE_INVALIDATION_FAILED: "+String.valueOf(e.getMessage());}
                 progress(app.cancelled.get()?"Полный анализ отменён.":"Полный анализ: "+e.getMessage()+" · продолжаю доступными анализаторами.");
                 if(app.cancelled.get())chain=false;
             }finally{
@@ -152,7 +161,7 @@ public class FullAnalysisService extends Service {
                 }
                 if(!handedOff){
                     if(app.cancelled.get())pipelineState("CANCELLED","RECONSTRUCTION",false,true,"USER_CANCELLED");
-                    else pipelineState("FAILED","HANDOFF",false,false,handoffFailure==null?"EVIDENCE_HANDOFF_NOT_STARTED":handoffFailure);
+                    else pipelineState("FAILED",preparedStateInvalidated?"HANDOFF":"RECONSTRUCTION",false,false,handoffFailure==null?"EVIDENCE_HANDOFF_NOT_STARTED":handoffFailure);
                     getSharedPreferences("state",0).edit().putBoolean("running",false).apply();
                     app.busy.set(false);app.revision++;
                 }
