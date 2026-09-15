@@ -8,29 +8,44 @@ def _read(name: str) -> str:
     return (ANDROID / name).read_text(encoding="utf-8")
 
 
-def test_rerun_publishes_running_manifest_before_reconstruction():
+def test_rerun_publishes_running_manifest_before_worker_and_reconstruction():
     source = _read("FullAnalysisService.java")
 
     helper = source.split("private void writePipelineState", 1)[1].split("private boolean bestEffortPipelineState", 1)[0]
     assert '.put("status",status).put("phase",phase)' in helper
     assert 'writeAtomicJson("automatic-evidence.json",state)' in helper
-    start = source.index('writePipelineState("RUNNING","RECONSTRUCTION",false,false,null);pipelineStarted=true;')
-    prepared = source.index("invalidatePreparedAutoModState();", start)
-    assert start < prepared
+
+    started = source.index("startedAt=System.currentTimeMillis();")
+    publish = source.index('writePipelineState("RUNNING","RECONSTRUCTION",false,false,null);', started)
+    worker = source.index("new Thread(()->", publish)
+    prepared = source.index("invalidatePreparedAutoModState();", worker)
+    resolve = source.index("DecompilerEngine.resolveTargetInputs(app)", prepared)
+    inventory = source.index('stage(1,4,"Inventory:', resolve)
+    assert started < publish < worker < prepared < resolve < inventory
 
 
-def test_running_manifest_write_failure_blocks_all_reconstruction_backends():
+def test_running_manifest_write_failure_blocks_worker_and_all_reconstruction_backends():
     source = _read("FullAnalysisService.java")
 
-    assert "boolean pipelineStarted=false;" in source
-    assert 'writePipelineState("RUNNING","RECONSTRUCTION",false,false,null);pipelineStarted=true;' in source
-    assert 'if(!pipelineStarted)reconstructionFailure="PIPELINE_MANIFEST_WRITE_FAILED:' in source
-    cleanup = 'Files.deleteIfExists(app.file("automatic-evidence.json").toPath());Files.deleteIfExists(app.file("automatic-evidence.json.part").toPath())'
-    assert cleanup in source
-    start = source.index('writePipelineState("RUNNING","RECONSTRUCTION",false,false,null);pipelineStarted=true;')
-    resolve = source.index("DecompilerEngine.resolveTargetInputs(app)", start)
+    publish = source.index('writePipelineState("RUNNING","RECONSTRUCTION",false,false,null);')
+    failure_start = source.index("}catch(Exception startError){", publish)
+    worker = source.index("new Thread(()->", failure_start)
+    failure = source[failure_start:worker]
+
+    assert 'Files.deleteIfExists(app.file("automatic-evidence.json.part").toPath())' in failure
+    assert 'Files.deleteIfExists(app.file("automatic-evidence.json").toPath())' in failure
+    assert 'putBoolean("running",false)' in failure
+    assert "не удалось опубликовать RUNNING manifest" in failure
+    assert "wake.release()" in failure
+    assert "app.busy.set(false)" in failure
+    assert "stopForeground(true)" in failure
+    assert "stopSelf()" in failure
+    assert "return START_NOT_STICKY" in failure
+
+    resolve = source.index("DecompilerEngine.resolveTargetInputs(app)", worker)
     inventory = source.index('stage(1,4,"Inventory:', resolve)
-    assert start < resolve < inventory
+    assert publish < failure_start < worker < resolve < inventory
+    assert "boolean pipelineStarted=true;" in source[worker:resolve]
 
 
 def test_full_rerun_invalidates_prepared_automod_and_per_run_evidence_before_target_work():
