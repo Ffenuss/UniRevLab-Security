@@ -16,11 +16,42 @@ def test_rerun_invalidates_old_final_manifest_before_reconstruction():
     assert 'Files.move(temp.toPath(),dest.toPath(),StandardCopyOption.REPLACE_EXISTING)' in source
 
 
+def test_full_rerun_invalidates_prepared_automod_epoch_before_target_work():
+    source = _read("FullAnalysisService.java")
+
+    required = (
+        "automod-plan.json",
+        "automod-plan.json.part",
+        "menu-spec.json",
+        "menu-preflight.json",
+        "menu-validation.json",
+        "menu-auto-confirm.json",
+        "menu-autopilot.json",
+        "menu-native-recovery.json",
+    )
+    helper = source.split("private void invalidatePreparedAutoModState()", 1)[1].split("/** Chaquopy", 1)[0]
+    for name in required:
+        assert f'"{name}"' in helper
+
+    invalidate = source.index("invalidatePreparedAutoModState();preparedStateInvalidated=true;")
+    resolve = source.index("DecompilerEngine.resolveTargetInputs(app)")
+    inventory = source.index('stage(1,4,"Inventory:')
+    assert invalidate < resolve < inventory
+
+
+def test_failed_epoch_invalidation_blocks_evidence_handoff():
+    source = _read("FullAnalysisService.java")
+
+    assert "boolean preparedStateInvalidated=false;" in source
+    assert 'if(!preparedStateInvalidated){chain=false;handoffFailure="AUTOMOD_PREPARED_STATE_INVALIDATION_FAILED:' in source
+    assert 'preparedStateInvalidated?"HANDOFF":"RECONSTRUCTION"' in source
+
+
 def test_pre_evidence_cancel_and_handoff_failure_are_terminal_states():
     source = _read("FullAnalysisService.java")
 
     assert 'pipelineState("CANCELLED","RECONSTRUCTION",false,true,"USER_CANCELLED")' in source
-    assert 'pipelineState("FAILED","HANDOFF",false,false' in source
+    assert 'pipelineState("FAILED",preparedStateInvalidated?"HANDOFF":"RECONSTRUCTION",false,false' in source
     assert 'EVIDENCE_HANDOFF_NOT_STARTED' in source
 
 
