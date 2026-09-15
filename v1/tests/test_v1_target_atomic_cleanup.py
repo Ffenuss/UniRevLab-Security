@@ -10,6 +10,7 @@ def test_target_reset_clears_atomic_output_orphans_and_progress():
     required = (
         '"full-reconstruction.json.part"',
         '"apktool-analysis.json.part"',
+        '"analysis.summary.json.part"',
         '"automod-plan.json.part"',
         '"connected-report.json.part"',
         '"connected-report.md.part"',
@@ -20,6 +21,7 @@ def test_target_reset_clears_atomic_output_orphans_and_progress():
         '"il2cpp-no-rva-native.json.part"',
         '"installed-apk-set.zip.tmp"',
         '"installed-target.json.part"',
+        '"menu-native-recovery.json.tmp"',
         '"simple-progress.json"',
         '"simple-progress.json.part"',
         '"automatic-evidence.json"',
@@ -59,10 +61,12 @@ def test_full_reconstruction_status_target_and_backend_manifests_use_atomic_json
     assert 'writeAtomicJson("apktool-analysis.json",error)' in source
 
 
-def test_evidence_service_json_promotion_uses_sibling_part_file():
+def test_evidence_service_json_promotion_uses_sibling_part_file_and_summary_route():
     source = (ANDROID / "AutomaticEvidenceService.java").read_text(encoding="utf-8")
 
     assert 'part=app.file(name+".part")' in source
     assert 'Files.deleteIfExists(part.toPath())' in source
     assert 'Files.write(part.toPath()' in source
     assert 'Files.move(part.toPath(),destination.toPath(),StandardCopyOption.REPLACE_EXISTING)' in source
+    assert 'writeJson("analysis.summary.json",analysis)' in source
+    assert 'Files.write(app.file("analysis.summary.json").toPath()' not in source
