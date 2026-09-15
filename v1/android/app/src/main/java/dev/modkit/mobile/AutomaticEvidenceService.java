@@ -107,7 +107,7 @@ public class AutomaticEvidenceService extends Service {
         boolean unchanged=plan.optBoolean("unchanged",false);
         boolean hasIl2cppPair=app.file("metadata.bin").isFile()&&app.file("library.so").isFile();
         boolean haveReAnalysis=app.file("re-analysis.json").isFile();
-        boolean haveIl2cppAnalysis=!hasIl2cppPair||app.file("analysis.json").isFile()||app.file("analysis.methods.jsonl").isFile();
+        boolean haveIl2cppAnalysis=!hasIl2cppPair||(app.file("analysis.json").isFile()&&app.file("analysis.summary.json").isFile()&&app.file("analysis.methods.jsonl").isFile()&&app.file("analysis.gameplay-coverage.json").isFile());
         boolean coreCacheReady=haveReAnalysis&&haveIl2cppAnalysis;
         boolean coreCacheHit=unchanged&&coreCacheReady;
         manifest.put("cachePlan",plan).put("cacheHit",coreCacheHit);
