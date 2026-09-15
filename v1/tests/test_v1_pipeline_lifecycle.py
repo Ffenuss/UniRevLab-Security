@@ -61,7 +61,7 @@ def test_embedded_outputs_are_invalidated_before_same_target_rerun_backend_execu
 
 def test_fresh_evidence_core_outputs_are_invalidated_before_il2cpp_and_re_backends():
     source = _read("AutomaticEvidenceService.java")
-    helper = source.split("private void invalidateFreshCoreOutputs()", 1)[1].split("private void invalidateStage6Outputs()", 1)[0]
+    helper = source.split("private void invalidateFreshCoreOutputs()", 1)[1].split("private void invalidatePerRunDerivedOutputs()", 1)[0]
     for name in (
         "analysis.json",
         "analysis.summary.json",
@@ -77,17 +77,21 @@ def test_fresh_evidence_core_outputs_are_invalidated_before_il2cpp_and_re_backen
     ):
         assert f'"{name}"' in helper
 
-    fresh_gate = source.index("if(!unchanged||!coreCacheReady){")
+    fresh_gate = source.index("if(!coreCacheHit){")
     invalidate = source.index("invalidateFreshCoreOutputs();", fresh_gate)
     il2cpp = source.index("runIl2cpp(reTarget)", invalidate)
     re_backend = source.index("runReAnalysis(reTarget)", il2cpp)
     assert fresh_gate < invalidate < il2cpp < re_backend
 
 
-def test_stage6_outputs_are_invalidated_before_recovery_automod_and_connected_report():
+def test_per_run_derived_outputs_are_invalidated_before_evidence_backends_can_fail():
     source = _read("AutomaticEvidenceService.java")
-    helper = source.split("private void invalidateStage6Outputs()", 1)[1].split("private void runPipeline", 1)[0]
+    helper = source.split("private void invalidatePerRunDerivedOutputs()", 1)[1].split("private void runPipeline", 1)[0]
     for name in (
+        "simple-catalog.json",
+        "simple-catalog.json.part",
+        "simple-progress.json",
+        "simple-progress.json.part",
         "il2cpp-no-rva-native.json",
         "il2cpp-no-rva-native.json.part",
         "il2cpp-no-rva-native.methods.jsonl",
@@ -103,12 +107,13 @@ def test_stage6_outputs_are_invalidated_before_recovery_automod_and_connected_re
     ):
         assert f'"{name}"' in helper
 
+    run = source.index("private void runPipeline(JSONObject manifest)")
+    invalidate = source.index("invalidatePerRunDerivedOutputs();", run)
+    python = source.index("Python.start(new AndroidPlatform(this))", invalidate)
+    stage1 = source.index('stage(1,6,"target digest + APK/split cache plan")', python)
+    assert run < invalidate < python < stage1
     stage6 = source.index('stage(6,6,"no-RVA native recovery + AutoMod + connected report + cache")')
-    invalidate = source.index("invalidateStage6Outputs();", stage6)
-    recovery = source.index('getModule("modkit.mobile.il2cpp_no_rva_native_release")', invalidate)
-    automod = source.index('getModule("modkit.mobile.automod_cancellable")', recovery)
-    report = source.index('getModule("modkit.mobile.connected_report_streaming")', automod)
-    assert stage6 < invalidate < recovery < automod < report
+    assert "invalidatePerRunDerivedOutputs();" not in source[stage6:]
 
 
 def test_evidence_wakelock_covers_long_release_pipeline():
@@ -124,13 +129,14 @@ def test_core_cache_hit_requires_re_analysis_and_il2cpp_artifacts_when_pair_exis
     assert 'boolean haveReAnalysis=app.file("re-analysis.json").isFile();' in source
     assert 'boolean haveIl2cppAnalysis=!hasIl2cppPair||app.file("analysis.json").isFile()||app.file("analysis.methods.jsonl").isFile();' in source
     assert 'boolean coreCacheReady=haveReAnalysis&&haveIl2cppAnalysis;' in source
-    assert '.put("cacheHit",unchanged&&coreCacheReady)' in source
-    assert 'if(!unchanged||!coreCacheReady)' in source
+    assert 'boolean coreCacheHit=unchanged&&coreCacheReady;' in source
+    assert '.put("cacheHit",coreCacheHit)' in source
+    assert 'if(!coreCacheHit)' in source
+    assert '(coreCacheHit?" · cache hit":" · fresh core")' in source
 
 
 def test_non_il2cpp_cache_hit_remains_not_applicable_not_fake_il2cpp_cache_hit():
     source = _read("AutomaticEvidenceService.java")
-    cache_branch = source.split("}else{", source.count("}else{") - 1)[-1] if False else source
     assert 'engines.put("il2cpp",hasIl2cppPair?new JSONObject().put("status","CACHE_HIT"):new JSONObject().put("status","NOT_APPLICABLE").put("reason","complete IL2CPP pair not found"));' in source
     assert 'engines.put("re",new JSONObject().put("status","CACHE_HIT"));' in source
 
