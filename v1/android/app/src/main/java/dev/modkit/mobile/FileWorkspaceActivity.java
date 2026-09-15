@@ -58,8 +58,19 @@ public class FileWorkspaceActivity extends Activity {
     }
 
     private void updateButtons(){boolean opened=original.length>0;save.setEnabled(opened);export.setEnabled(opened);boolean apk=opened&&sourceApk!=null&&targetEntry!=null;patch.setEnabled(apk&&!app.busy.get());build.setEnabled(apk&&app.file("workspace-patch.zip").isFile()&&!app.busy.get());specialized.setVisibility(opened&&format!=null&&specialRouteSupported(format.kind)?View.VISIBLE:View.GONE);if(opened&&format!=null)specialized.setText("Открыть: "+format.route);}
-    private boolean specialRouteSupported(FileFormatDetector.Kind kind){return kind==FileFormatDetector.Kind.DEX||kind==FileFormatDetector.Kind.ELF||kind==FileFormatDetector.Kind.IL2CPP_METADATA||kind==FileFormatDetector.Kind.UNITY_BUNDLE||kind==FileFormatDetector.Kind.UNITY_ASSET;}
-    private void openSpecialized(){if(format==null)return;switch(format.kind){case DEX:startActivity(new Intent(this,DecompilerActivity.class));break;case ELF:startActivity(new Intent(this,NativeWorkspaceActivity.class));break;case IL2CPP_METADATA:case UNITY_BUNDLE:case UNITY_ASSET:startActivity(new Intent(this,ReWorkspaceActivity.class));break;default:toast("Для этого формата отдельный viewer ещё не требуется");}}
+    private boolean specialRouteSupported(FileFormatDetector.Kind kind){switch(kind){case DEX:case ELF:case IL2CPP_METADATA:case UNITY_BUNDLE:case UNITY_ASSET:case SQLITE:case PNG:case JPEG:case WEBP:case APK_ZIP:case ZIP:case AXML:case ARSC:return true;default:return false;}}
+    private void openSpecialized(){
+        if(format==null)return;
+        try{
+            switch(format.kind){
+                case DEX:startActivity(new Intent(this,DecompilerActivity.class));break;
+                case ELF:startActivity(new Intent(this,NativeWorkspaceActivity.class));break;
+                case IL2CPP_METADATA:case UNITY_BUNDLE:case UNITY_ASSET:startActivity(new Intent(this,ReWorkspaceActivity.class));break;
+                case SQLITE:case PNG:case JPEG:case WEBP:case APK_ZIP:case ZIP:case AXML:case ARSC:persistPreview(editedBytes());startActivity(new Intent(this,StructuredFilePreviewActivity.class));break;
+                default:toast("Для этого формата отдельный viewer ещё не требуется");
+            }
+        }catch(Exception e){AnalysisJournal.exception(this,"FILE_PREVIEW_FAILED",e);toast("Не удалось открыть preview: "+e.getMessage());}
+    }
 
     private String display(Uri uri){String d=uri.getLastPathSegment();try(Cursor c=getContentResolver().query(uri,new String[]{OpenableColumns.DISPLAY_NAME},null,null,null)){if(c!=null&&c.moveToFirst())d=c.getString(0);}catch(Exception ignored){}return d==null?"file":d;}
     private void setOpened(byte[] data,String name,File apk,String entry,String openedStatus){displayName=name;sourceApk=apk;targetEntry=entry;original=data;format=FileFormatDetector.detect(entry==null?name:entry,data);hexMode=format.defaultHex;render();status.setText(openedStatus+"\nФормат: "+format.label+" · маршрут: "+format.route);AnalysisJournal.append(this,"FILE_OPEN","Workspace file opened",new JSONObjectSafe().put("name",name).put("format",format.kind.name()).put("bytes",data.length).json());}
@@ -82,6 +93,11 @@ public class FileWorkspaceActivity extends Activity {
     private void saveWorking(){try{byte[] b=editedBytes();Files.write(app.file("workspace-edit.bin").toPath(),b);original=b;format=FileFormatDetector.detect(targetEntry==null?displayName:targetEntry,b);meta.setText(displayName+" · "+b.length+" bytes · рабочая копия сохранена\n"+BinaryFormatInspector.inspect(format,b,displayName));status.setText("Рабочая копия сохранена. Исходный APK не изменён.");updateButtons();}catch(Exception e){toast("Ошибка: "+e.getMessage());}}
     private void exportEdited(){if(original.length==0)return;startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/octet-stream").addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE,targetEntry==null?displayName:new File(targetEntry).getName()),EXPORT_FILE);}
     private void writeEdited(Uri uri){try(OutputStream out=getContentResolver().openOutputStream(uri,"w")){if(out==null)throw new IOException("openOutputStream returned null");out.write(editedBytes());out.flush();status.setText("Изменённый файл экспортирован.");}catch(Exception e){deleteCreatedDocument(uri);toast(e.getMessage());}}
+
+    private void persistPreview(byte[] bytes)throws Exception{
+        File destination=app.file("workspace-preview.bin"),tmp=app.file("workspace-preview.bin.part");Files.deleteIfExists(tmp.toPath());try{Files.write(tmp.toPath(),bytes);Files.move(tmp.toPath(),destination.toPath(),StandardCopyOption.REPLACE_EXISTING);}catch(Exception e){Files.deleteIfExists(tmp.toPath());throw e;}
+        JSONObject preview=new JSONObject().put("schema","modkit-workspace-preview-1.0").put("name",targetEntry==null?displayName:targetEntry).put("displayName",displayName).put("bytes",bytes.length).put("sha256",sha256(bytes)).put("format",format==null?"":format.kind.name()).put("createdAtMs",System.currentTimeMillis());if(sourceApk!=null)preview.put("sourceApk",sourceApk.getCanonicalPath());if(targetEntry!=null)preview.put("targetEntry",targetEntry);writeAtomicJson(app.file("workspace-preview.json"),preview);
+    }
 
     private TargetResolver.Member sourceMember(TargetResolver.Target target)throws Exception{if(sourceApk==null)throw new IOException("Source APK отсутствует");String source=sourceApk.getCanonicalPath();for(TargetResolver.Member member:target.members)if(member.file.getCanonicalPath().equals(source))return member;throw new IOException("Открытый APK больше не принадлежит текущему canonical target");}
     private void preparePatch(){try{
