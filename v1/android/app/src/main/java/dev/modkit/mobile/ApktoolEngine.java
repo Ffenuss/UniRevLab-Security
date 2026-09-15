@@ -59,9 +59,9 @@ public final class ApktoolEngine {
                 File marker = new File(out, CACHE_MARKER);
                 row.put("sha256", sha).put("workspace", "apktool-workspace/" + id);
 
-                if (isCacheHit(marker, out, sha, cancelled)) {
-                    JSONObject fp = workspaceFingerprint(out, cancelled);
-                    row.put("status", "CACHE_HIT").put("fileCount", fp.optInt("fileCount"));
+                JSONObject cachedFingerprint = verifiedCacheFingerprint(marker, out, sha, cancelled);
+                if (cachedFingerprint != null) {
+                    row.put("status", "CACHE_HIT").put("fileCount", cachedFingerprint.optInt("fileCount"));
                     cached++;
                     rows.put(row);
                     continue;
@@ -135,25 +135,26 @@ public final class ApktoolEngine {
                 .put("inputs", rows);
     }
 
-    private static boolean isCacheHit(File marker, File workspace, String sha, AtomicBoolean cancelled) throws Exception {
-        if (!marker.isFile() || !workspace.isDirectory()) return false;
+    private static JSONObject verifiedCacheFingerprint(File marker, File workspace, String sha, AtomicBoolean cancelled) throws Exception {
+        if (!marker.isFile() || !workspace.isDirectory()) return null;
         try {
             JSONObject old = new JSONObject(Io.readUtf8(marker));
             if (!old.optBoolean("complete") || !sha.equals(old.optString("sha256"))
                     || !ENGINE_ID.equals(old.optString("engineId"))
-                    || !APKTOOL_VERSION.equals(old.optString("apktoolVersion"))) return false;
+                    || !APKTOOL_VERSION.equals(old.optString("apktoolVersion"))) return null;
             String expectedSha = old.optString("workspaceSha256", "");
             int expectedCount = old.optInt("workspaceFileCount", -1);
             long expectedBytes = old.optLong("workspaceBytes", -1L);
-            if (expectedSha.isEmpty() || expectedCount < 1 || expectedBytes < 0L) return false;
+            if (expectedSha.isEmpty() || expectedCount < 1 || expectedBytes < 0L) return null;
             JSONObject current = workspaceFingerprint(workspace, cancelled);
-            return expectedSha.equals(current.optString("sha256"))
-                    && expectedCount == current.optInt("fileCount", -2)
-                    && expectedBytes == current.optLong("bytes", -2L);
+            if (!expectedSha.equals(current.optString("sha256"))
+                    || expectedCount != current.optInt("fileCount", -2)
+                    || expectedBytes != current.optLong("bytes", -2L)) return null;
+            return current;
         } catch (InterruptedIOException cancelledError) {
             throw cancelledError;
         } catch (Exception ignored) {
-            return false;
+            return null;
         }
     }
 
