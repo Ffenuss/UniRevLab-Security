@@ -62,6 +62,18 @@ def test_target_switch_invalidates_target_bound_manual_build_state_but_keeps_imp
     assert '"patchpack.zip"' not in cleanup
 
 
+def test_target_preparation_holds_partial_wakelock_until_final_cleanup():
+    source = (ANDROID / "TargetPreparationService.java").read_text(encoding="utf-8")
+    assert "import android.os.PowerManager;" in source
+    assert "private PowerManager.WakeLock wake;" in source
+    acquire = source.index('newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"ModKit:target-preparation")')
+    assert "wake.acquire(30L*60L*1000L);" in source[acquire:acquire + 250]
+    release = source.index("if(wake!=null&&wake.isHeld())wake.release();", acquire)
+    running_false = source.index('putBoolean("running",false)', release)
+    busy_false = source.index("app.busy.set(false)", running_false)
+    assert acquire < release < running_false < busy_false
+
+
 def test_target_preparation_publishes_installed_manifest_atomically():
     source = (ANDROID / "TargetPreparationService.java").read_text(encoding="utf-8")
 
