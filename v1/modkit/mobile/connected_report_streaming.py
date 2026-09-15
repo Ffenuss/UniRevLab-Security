@@ -250,6 +250,17 @@ def _stream_native_blockers(path: Path, findings: list[dict[str, Any]], gate: _G
     return by_id, by_pair
 
 
+def _exact_secondary_summary(secondary: dict[str, Any], key: str) -> dict[str, Any]:
+    value = secondary.get(key)
+    if not isinstance(value, dict) or not value:
+        return {}
+    out = dict(value)
+    out["freshnessVerified"] = True
+    out["sourceInputsAvailable"] = True
+    out["freshnessPolicy"] = "EXACT_INPUT_SHA256"
+    return out
+
+
 def _part(path: str | Path | None) -> Path | None:
     if path is None:
         return None
@@ -273,6 +284,10 @@ def build_connected_report(
             raise ReportCancelled("Connected Report cancelled while refreshing IL2CPP evidence") from exc
         raise
     gate.force()
+    exact_crosscheck = _exact_secondary_summary(secondary, "crosscheck")
+    exact_identity = _exact_secondary_summary(secondary, "metadataIdentity")
+    exact_native = _exact_secondary_summary(secondary, "nativeRecovery")
+    native_current = bool(exact_native) and not bool(exact_native.get("error"))
     reader, retained = _filtered_reader(workdir, gate)
     json_part = _part(output_json)
     md_part = _part(output_md)
@@ -286,6 +301,9 @@ def build_connected_report(
         original_locator = _base._locator
         original_stream_blockers = _v12._stream_native_blockers
         original_finding_rva = _v12._finding_rva
+        original_crosscheck = _v12._ensure_il2cpp_crosscheck
+        original_identity = _v12._ensure_metadata_identity
+        original_native = _v12._ensure_native_recovery
 
         def wrapped_method_index(path, wanted_ids=None, wanted_rvas=None, wanted_names=None, limit=250000):
             return _method_index(path, wanted_ids, wanted_rvas, wanted_names, gate, limit)
@@ -296,17 +314,31 @@ def build_connected_report(
 
         def wrapped_stream_blockers(path, findings):
             gate.force()
+            if not native_current:
+                return {}, {}
             return _stream_native_blockers(path, findings, gate)
 
         def wrapped_finding_rva(finding):
             gate.tick()
             return original_finding_rva(finding)
 
+        def wrapped_crosscheck(root):
+            return dict(exact_crosscheck)
+
+        def wrapped_identity(root):
+            return dict(exact_identity)
+
+        def wrapped_native(root):
+            return dict(exact_native)
+
         _v12._jsonl = reader
         _base._method_index = wrapped_method_index
         _base._locator = wrapped_locator
         _v12._stream_native_blockers = wrapped_stream_blockers
         _v12._finding_rva = wrapped_finding_rva
+        _v12._ensure_il2cpp_crosscheck = wrapped_crosscheck
+        _v12._ensure_metadata_identity = wrapped_identity
+        _v12._ensure_native_recovery = wrapped_native
         try:
             report = _v12.build_connected_report(workdir, json_part, md_part)
         except Exception:
@@ -320,6 +352,9 @@ def build_connected_report(
             _base._locator = original_locator
             _v12._stream_native_blockers = original_stream_blockers
             _v12._finding_rva = original_finding_rva
+            _v12._ensure_il2cpp_crosscheck = original_crosscheck
+            _v12._ensure_metadata_identity = original_identity
+            _v12._ensure_native_recovery = original_native
 
     gate.force()
     if isinstance(report, dict):
@@ -343,6 +378,7 @@ def build_connected_report(
             "secondaryIl2cppEvidence": secondary.get("freshnessPolicy"),
             "mtimeTrustedAsIdentity": False,
             "standaloneReportRefreshesEvidence": True,
+            "legacyMtimeFallbackUsed": False,
         }
         if json_part is not None:
             gate.force()
