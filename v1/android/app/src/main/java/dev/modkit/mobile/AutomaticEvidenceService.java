@@ -24,6 +24,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.zip.ZipEntry;
@@ -171,6 +172,6 @@ public class AutomaticEvidenceService extends Service {
     private static boolean hasError(JSONObject value){return value!=null&&!value.optString("error","").isEmpty();}
     private void stage(int stage,int total,String name)throws Exception{check();JSONObject p=new JSONObject().put("schema","modkit-simple-progress-1.1").put("phase","EVIDENCE").put("stage",stage).put("totalStages",total).put("name",name).put("remainingStages",Math.max(0,total-stage)).put("elapsedMs",Math.max(0,System.currentTimeMillis()-startedAt));JSONObject old=readJson("simple-catalog.json");if(old!=null)p.put("candidates",old.optInt("total")).put("confirmed",old.optInt("actionable")).put("patchReady",old.optInt("buildable"));writeJson("simple-progress.json",p);progress("Автоанализ ["+stage+"/"+total+"]: "+name);}
     private JSONObject readJson(String name){try{File f=app.file(name);return f.isFile()?new JSONObject(Io.readUtf8(f)):null;}catch(Exception ignored){return null;}}
-    private void writeJson(String name,JSONObject value)throws Exception{Files.write(app.file(name).toPath(),value.toString(2).getBytes(StandardCharsets.UTF_8));}
+    private void writeJson(String name,JSONObject value)throws Exception{File destination=app.file(name),part=app.file(name+".part");Files.deleteIfExists(part.toPath());try{Files.write(part.toPath(),value.toString(2).getBytes(StandardCharsets.UTF_8));Files.move(part.toPath(),destination.toPath(),StandardCopyOption.REPLACE_EXISTING);}catch(Exception error){Files.deleteIfExists(part.toPath());throw error;}}
     private void deleteTree(File file)throws IOException{if(file==null||!file.exists())return;check();if(file.isDirectory()){File[] children=file.listFiles();if(children!=null)for(File child:children)deleteTree(child);}check();if(!file.delete()&&file.exists())throw new IOException("Не удалось очистить "+file.getName());}
 }
