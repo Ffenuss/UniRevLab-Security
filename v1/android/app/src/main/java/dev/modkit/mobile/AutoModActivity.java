@@ -72,7 +72,8 @@ public class AutoModActivity extends AppCompatActivity {
     }
 
     private boolean canStart(){if(app.busy.get()){toast("Сейчас выполняется другая операция");return false;}if(!app.file("game.apk").isFile()&&!app.file("installed-target.json").isFile()){toast("Target не выбран");return false;}return true;}
-    private void invalidatePreparedState(){for(String name:new String[]{"menu-spec.json","menu-preflight.json","menu-validation.json","menu-auto-confirm.json","menu-autopilot.json"})app.file(name).delete();}
+    private void invalidatePreparedState(){for(String name:new String[]{"menu-spec.json","menu-preflight.json","menu-validation.json","menu-auto-confirm.json","menu-autopilot.json","menu-native-recovery.json"})app.file(name).delete();}
+    private boolean exactPrepareAuditReady(){JSONObject audit=read("menu-native-recovery.json");return audit!=null&&audit.optBoolean("completed")&&audit.optBoolean("normalBindingRequired")&&audit.optBoolean("preflightRequired")&&!audit.optBoolean("promotesBuildability")&&!audit.optBoolean("addressRecoveryPromotesBuildability");}
 
     private void rebuildPlan(){
         if(planning){toast("AutoMod-план уже обновляется");return;}if(app.busy.get()){toast("Сейчас выполняется другая операция");return;}if(!app.file("simple-catalog.json").isFile()&&!app.file("game.apk").isFile()){toast("Сначала выполните полный анализ");return;}
@@ -96,6 +97,7 @@ public class AutoModActivity extends AppCompatActivity {
 
     private void chooseBuildDestination(){
         JSONObject plan=read("automod-plan.json");if(plan==null){toast("Сначала обновите AutoMod-план");return;}int ready=plan.optInt("readyToBuildCount")+plan.optInt("readyForPreflightCount");if(ready<=0){toast("Нет локальных кандидатов, допущенных до prepare/preflight");return;}
+        if(!exactPrepareAuditReady()){toast("Exact prepare audit отсутствует или не завершён. Сборка fail-closed заблокирована.");return;}
         JSONObject pf=read("menu-preflight.json");if(pf==null||!pf.optBoolean("readyForAutoBuild")){toast("Сначала выполните успешный exact prepare/preflight. Сборка fail-closed заблокирована.");return;}
         boolean apkSet=hasApkSet();String mime=apkSet?"application/zip":"application/vnd.android.package-archive";String name=apkSet?"modkit-automod-signed.apks":"modkit-automod-signed.apk";Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT).setType(mime).addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE,name);startActivityForResult(intent,BUILD_DOCUMENT);
     }
@@ -105,9 +107,9 @@ public class AutoModActivity extends AppCompatActivity {
     private String count(JSONObject plan,String key){return String.valueOf(plan==null?0:plan.optInt(key));}
 
     private void render(){
-        JSONObject plan=read("automod-plan.json");JSONObject pf=read("menu-preflight.json");if(plan==null){summary.setText("План ещё не построен. Выполните полный анализ и нажмите «Обновить AutoMod-план».");candidates.removeAllViews();setButtons(null,pf);return;}
+        JSONObject plan=read("automod-plan.json");JSONObject pf=read("menu-preflight.json");boolean auditReady=exactPrepareAuditReady();if(plan==null){summary.setText("План ещё не построен. Выполните полный анализ и нажмите «Обновить AutoMod-план».");candidates.removeAllViews();setButtons(null,pf);return;}
         summary.setText("Готово к build: "+count(plan,"readyToBuildCount")+" · preflight: "+count(plan,"readyForPreflightCount")+" · runtime/binding: "+count(plan,"runtimeNeededCount")+" · review: "+count(plan,"reviewCount")+" · audit-only: "+count(plan,"auditOnlyCount")+" · исключено: "+count(plan,"excludedCount")+"\nExact locators: "+count(plan,"exactLocatorCount")+" · recovered native RVA: "+count(plan,"nativeRecoveredLocatorCount")+" · runtime VA observed: "+count(plan,"runtimeObservedCount")+" · IL2CPP structural: "+count(plan,"il2cppStructuralObservedCount")+" (both "+count(plan,"il2cppStructuralBothCount")+") · metadata identity/no-RVA: "+count(plan,"metadataIdentityObservedCount")+" (qualified "+count(plan,"metadataQualifiedNoRvaCount")+", token "+count(plan,"metadataTokenNoRvaCount")+") · всего: "+count(plan,"candidateCount"));
-        if(pf==null)preflight.setText("Preflight ещё не выполнен. Сборка заблокирована.");else preflight.setText("Preflight: "+(pf.optBoolean("readyForAutoBuild")?"READY":"BLOCK")+" · controls "+pf.optInt("controlCount",pf.optInt("controls"))+" · blockers "+pf.optInt("blockerCount",pf.optInt("blockers")));
+        if(pf==null)preflight.setText("Preflight ещё не выполнен. Сборка заблокирована.");else preflight.setText("Exact audit: "+(auditReady?"READY":"MISSING/BLOCK")+" · Preflight: "+(pf.optBoolean("readyForAutoBuild")?"READY":"BLOCK")+" · controls "+pf.optInt("controlCount",pf.optInt("controls"))+" · blockers "+pf.optInt("blockerCount",pf.optInt("blockers")));
         candidates.removeAllViews();JSONArray rows=plan.optJSONArray("candidates");int shown=0;if(rows!=null)for(int i=0;i<rows.length()&&shown<24;i++){JSONObject row=rows.optJSONObject(i);if(row==null)continue;String stage=row.optString("stage","REVIEW");if("EXCLUDED".equals(stage)&&shown>=18)continue;candidateCard(row);shown++;}setButtons(plan,pf);
     }
 
@@ -120,7 +122,7 @@ public class AutoModActivity extends AppCompatActivity {
         TextView meta=text(row.optString("stage")+" · "+row.optString("verificationStage","FOUND_STATIC")+(domain.isEmpty()?"":" · "+domain)+locator+recoveredText+runtimeText+il2cppText+identityText,12);meta.setTextColor(muted());box.addView(meta);box.addView(text(row.optString("reason",""),13));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.setMargins(0,dp(5),0,dp(5));candidates.addView(card,lp);
     }
 
-    private void setButtons(JSONObject plan,JSONObject pf){boolean idle=!app.busy.get()&&!planning;int prepareCount=plan==null?0:plan.optInt("readyToBuildCount")+plan.optInt("readyForPreflightCount");refresh.setEnabled(idle);prepare.setEnabled(idle&&prepareCount>0);check.setEnabled(idle&&app.file("menu-spec.json").isFile());boolean preflightReady=pf!=null&&pf.optBoolean("readyForAutoBuild");build.setEnabled(idle&&prepareCount>0&&preflightReady);}
+    private void setButtons(JSONObject plan,JSONObject pf){boolean idle=!app.busy.get()&&!planning;int prepareCount=plan==null?0:plan.optInt("readyToBuildCount")+plan.optInt("readyForPreflightCount");refresh.setEnabled(idle);prepare.setEnabled(idle&&prepareCount>0);check.setEnabled(idle&&app.file("menu-spec.json").isFile());boolean preflightReady=pf!=null&&pf.optBoolean("readyForAutoBuild");build.setEnabled(idle&&prepareCount>0&&preflightReady&&exactPrepareAuditReady());}
     private final Runnable poll=new Runnable(){public void run(){if(revision!=app.revision){revision=app.revision;render();}status.setText(app.status==null?"":app.status);handler.postDelayed(this,600);}};
     @Override protected void onResume(){super.onResume();render();}
     @Override protected void onDestroy(){handler.removeCallbacks(poll);executor.shutdownNow();super.onDestroy();}
