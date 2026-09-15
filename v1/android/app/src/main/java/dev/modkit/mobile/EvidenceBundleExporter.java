@@ -34,7 +34,16 @@ final class EvidenceBundleExporter {
 
     private EvidenceBundleExporter() {}
 
+    static void ensureExportable(Context context) throws Exception {
+        App app = (App)context.getApplicationContext();
+        JSONObject pipeline = readJson(new File(app.getFilesDir(), "automatic-evidence.json"));
+        if (app.busy.get() || (pipeline != null && "RUNNING".equals(pipeline.optString("status")))) {
+            throw new java.io.IOException("Анализ ещё выполняется. Экспорт доступен после завершения или отмены текущего прогона.");
+        }
+    }
+
     static JSONObject export(Context context, Uri output) throws Exception {
+        ensureExportable(context);
         App app = (App)context.getApplicationContext();
         List<File> candidates = collect(app.getFilesDir());
         JSONArray entries = new JSONArray();
