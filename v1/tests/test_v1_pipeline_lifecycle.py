@@ -39,19 +39,35 @@ def test_full_rerun_invalidates_prepared_automod_epoch_before_target_work():
     assert invalidate < resolve < inventory
 
 
-def test_failed_epoch_invalidation_blocks_evidence_handoff():
+def test_failed_epoch_invalidation_is_terminal_reconstruction_failure():
     source = _read("FullAnalysisService.java")
 
     assert "boolean preparedStateInvalidated=false;" in source
-    assert 'if(!preparedStateInvalidated){chain=false;handoffFailure="AUTOMOD_PREPARED_STATE_INVALIDATION_FAILED:' in source
-    assert 'preparedStateInvalidated?"HANDOFF":"RECONSTRUCTION"' in source
+    assert 'reconstructionFailure="AUTOMOD_PREPARED_STATE_INVALIDATION_FAILED:' in source
+    assert 'pipelineState("FAILED","RECONSTRUCTION",false,false,reconstructionFailure)' in source
 
 
-def test_pre_evidence_cancel_and_handoff_failure_are_terminal_states():
+def test_unexpected_reconstruction_error_never_hands_off_evidence_graph():
+    source = _read("FullAnalysisService.java")
+
+    outer_catch = source.index("}catch(Exception e){", source.index("invalidatePreparedAutoModState();preparedStateInvalidated=true;"))
+    outer_finally = source.index("}finally{", outer_catch)
+    catch_block = source[outer_catch:outer_finally]
+    assert "chain=false;" in catch_block
+    assert 'reconstructionFailure="RECONSTRUCTION_FAILED:' in catch_block
+    assert "Evidence Graph не будет запущен на неполной реконструкции" in catch_block
+
+    handoff_gate = source.index("if(chain&&!app.cancelled.get())")
+    evidence_start = source.index("startForegroundService(new Intent(this,AutomaticEvidenceService.class))", handoff_gate)
+    assert handoff_gate < evidence_start
+
+
+def test_pre_evidence_cancel_reconstruction_failure_and_handoff_failure_are_terminal_states():
     source = _read("FullAnalysisService.java")
 
     assert 'pipelineState("CANCELLED","RECONSTRUCTION",false,true,"USER_CANCELLED")' in source
-    assert 'pipelineState("FAILED",preparedStateInvalidated?"HANDOFF":"RECONSTRUCTION",false,false' in source
+    assert 'pipelineState("FAILED","RECONSTRUCTION",false,false,reconstructionFailure)' in source
+    assert 'pipelineState("FAILED","HANDOFF",false,false' in source
     assert 'EVIDENCE_HANDOFF_NOT_STARTED' in source
 
 
