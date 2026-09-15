@@ -16,6 +16,7 @@ SCHEMA = "modkit-simple-cache-1.0"
 _OUTPUTS = (
     "installed-scan.json",
     "analysis.json",
+    "analysis.summary.json",
     "analysis.gameplay-coverage.json",
     "analysis.methods.jsonl",
     "analysis.evidence-graph.jsonl",
@@ -29,6 +30,7 @@ _OUTPUTS = (
 _ANALYSIS_CORE = ("re-analysis.json",)
 _IL2CPP_CORE = (
     "analysis.json",
+    "analysis.summary.json",
     "analysis.methods.jsonl",
     "analysis.gameplay-coverage.json",
     "analysis.evidence-graph.jsonl",
@@ -241,6 +243,7 @@ def record_workspace(workdir: str | Path, manifest_path: str | Path, plan_json: 
             "targetBytesHashedEveryRun": True,
             "changedTargetForcesFreshPipeline": True,
             "changedCoreOutputForcesFreshPipeline": True,
+            "analysisSummaryFingerprintRequiredForIl2cppReuse": True,
             "analysisMethodsFingerprintRequiredForIl2cppReuse": True,
             "gameplayEvidenceFingerprintRequiredForIl2cppReuse": True,
             "cacheDoesNotRelaxValidation": True,
