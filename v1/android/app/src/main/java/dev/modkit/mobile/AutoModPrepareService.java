@@ -60,6 +60,7 @@ public class AutoModPrepareService extends Service {
             catch(Exception e){
                 String cleanup="";
                 try{invalidatePreparedState();}catch(Exception cleanupError){cleanup=" · очистка partial prepare: "+String.valueOf(cleanupError.getMessage());}
+                AnalysisJournal.exception(this,"AUTOMOD_PREPARE_BLOCKED",e);
                 progress((app.cancelled.get()?"AutoMod prepare отменён.":"AutoMod prepare заблокирован: "+String.valueOf(e.getMessage()))+cleanup);
             }
             finally{if(wake!=null&&wake.isHeld())wake.release();getSharedPreferences("state",0).edit().putBoolean("running",false).apply();app.busy.set(false);app.revision++;stopForeground(true);stopSelf();}
@@ -71,9 +72,10 @@ public class AutoModPrepareService extends Service {
         check();
         File metadata=app.file("metadata.bin"),library=app.file("library.so"),catalog=app.file("analysis.methods.jsonl");
         if(!metadata.isFile()||!library.isFile()||!catalog.isFile())throw new IOException("Нужен завершённый IL2CPP-анализ: metadata.bin + library.so + method catalog");
-        File source=targetPatchApk();if(!source.isFile())throw new IOException("Owning APK для подготовки меню не найден");
+        TargetResolver.Target target=TargetResolver.resolve(app);JSONObject targetVerification=TargetResolver.requireVerified(target,app.cancelled);File source=target.patchOwnerApk();
+        if(!source.isFile())throw new IOException("Owning APK для подготовки меню не найден");
         invalidatePreparedState();
-        progress("AutoMod: exact CodeGenModule recovery → Deep Resolver → binding/preflight…");
+        progress("AutoMod: canonical target SHA verified · exact CodeGenModule recovery → Deep Resolver → binding/preflight…");
         if(!Python.isStarted())Python.start(new AndroidPlatform(this));
         PyObject result=Python.getInstance().getModule("modkit.mobile.menu_native_recovery").callAttr("prepare_workspace",getFilesDir().getPath(),source.getPath(),new Progress());
         check();
@@ -81,25 +83,14 @@ public class AutoModPrepareService extends Service {
         JSONObject audit=AutoModAuditVerifier.verifyCurrent(app,source,()->app.cancelled.get());
         JSONObject obj=new JSONObject(result.toString());JSONObject confirm=obj.optJSONObject("confirm"),pre=obj.optJSONObject("preflight");JSONArray promoted=confirm==null?null:confirm.optJSONArray("promoted"),rejected=confirm==null?null:confirm.optJSONArray("rejected");
         int promotedCount=promoted==null?0:promoted.length(),rejectedCount=rejected==null?0:rejected.length();boolean ready=pre!=null&&pre.optBoolean("readyForAutoBuild");
-        progress("AutoMod prepare: exact SHA verified · audit calls "+audit.optInt("calls")+", подтверждено bindings "+promotedCount+", отклонено "+rejectedCount+", auto-build "+(ready?"READY":"BLOCK/REVIEW")+". Recovered RVA не обходит preflight.");
+        AnalysisJournal.append(this,"AUTOMOD_PREPARE_READY","AutoMod exact prepare finished",new JSONObject().put("targetDigest",targetVerification.optString("currentTargetDigest")).put("sourceApk",source.getAbsolutePath()).put("promoted",promotedCount).put("rejected",rejectedCount).put("ready",ready));
+        progress("AutoMod prepare: target + exact SHA verified · audit calls "+audit.optInt("calls")+", подтверждено bindings "+promotedCount+", отклонено "+rejectedCount+", auto-build "+(ready?"READY":"BLOCK/REVIEW")+". Recovered RVA не обходит preflight.");
     }
 
     private void invalidatePreparedState()throws IOException{
         for(String name:new String[]{"menu-spec.json","menu-preflight.json","menu-validation.json","menu-auto-confirm.json","menu-autopilot.json","menu-native-recovery.json","menu-native-recovery.json.tmp"}){
             File file=app.file(name);if(file.exists()&&!file.delete())throw new IOException("Не удалось инвалидировать старый AutoMod artifact: "+name);
         }
-    }
-
-    private File targetPatchApk()throws Exception{
-        File manifest=app.file("installed-target.json");
-        if(manifest.isFile()){
-            JSONObject target=new JSONObject(Io.readUtf8(manifest));JSONObject owner=target.optJSONObject("patchOwner");
-            if(owner!=null){File file=new File(owner.optString("path",""));if(file.isFile())return file;}
-            JSONArray splits=target.optJSONArray("splits");
-            if(splits!=null){for(int i=0;i<splits.length();i++){JSONObject row=splits.optJSONObject(i);if(row==null)continue;String name=row.optString("name","");if("base.apk".equals(name)||name.endsWith("-base.apk")){File file=new File(row.optString("path",""));if(file.isFile())return file;}}}
-        }
-        File fallback=app.file("game.apk");if(fallback.isFile())return fallback;
-        throw new IOException("APK target отсутствует");
     }
 
     private void check()throws IOException{if(app.cancelled.get())throw new IOException("Операция отменена");}
