@@ -14,6 +14,19 @@ from modkit.mobile import artifact_families, cocos_deep, deep_gameplay, flutter_
 SCHEMA = "modkit-embedded-analysis-1.4"
 
 
+class Cancelled(Exception):
+    """Raised only for an explicit user cancellation request."""
+
+
+def _check(cb=None, stage: str | None = None) -> None:
+    if cb is None:
+        return
+    if cb.isCancelled():
+        raise Cancelled("Операция отменена")
+    if stage:
+        cb.progress(stage)
+
+
 def _artifacts(report: dict[str, Any]) -> list[dict[str, Any]]:
     rows = report.setdefault("artifacts", [])
     if not isinstance(rows, list):
@@ -62,6 +75,7 @@ def run_workspace(
     workdir: str | Path,
     artifact_output_path: str | Path | None = None,
     pipeline_output_path: str | Path | None = None,
+    cb=None,
 ) -> dict[str, Any]:
     root = Path(workdir)
     artifact_path = Path(artifact_output_path) if artifact_output_path else root / "artifact-families.json"
@@ -69,6 +83,8 @@ def run_workspace(
 
     runs: list[dict[str, Any]] = []
     static_report: dict[str, Any]
+
+    _check(cb, "Embedded 1/7 · artifact families…")
     try:
         static_report = artifact_families.scan_workspace(root)
         runs.append({
@@ -92,7 +108,9 @@ def run_workspace(
             "truncated": False,
         }
         runs.append({"engineId": "artifact-family-suite", "status": "FAILED", "error": str(exc)})
+    _check(cb)
 
+    _check(cb, "Embedded 2/7 · Lua bytecode…")
     try:
         lua_report = lua_deep.scan_workspace(root, root / "lua-deep.json")
         runs.append({
@@ -105,9 +123,13 @@ def run_workspace(
         _merge_findings(static_report, lua_report, summary_key="deepLua",
                         default_engine=lua_deep.ENGINE_ID, default_kind="LUA_BYTECODE",
                         default_category="Runtime/Lua")
+    except Cancelled:
+        raise
     except Exception as exc:
         runs.append({"engineId": lua_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
+    _check(cb)
 
+    _check(cb, "Embedded 3/7 · Hermes HBC…")
     try:
         deep = hermes_deep.scan_workspace(root, root / "hermes-deep.json")
         runs.append({
@@ -120,10 +142,14 @@ def run_workspace(
         _merge_findings(static_report, deep, summary_key="deepHermes",
                         default_engine="hermes.deep-embedded", default_kind="SCRIPT_SYMBOL",
                         default_category="Runtime/Hermes")
+    except Cancelled:
+        raise
     except Exception as exc:
         runs.append({"engineId": "hermes.deep-embedded", "status": "FAILED", "error": str(exc)})
+    _check(cb)
 
     native_report: dict[str, Any] = {}
+    _check(cb, "Embedded 4/7 · native ELF/ARM64…")
     try:
         native_report = native_deep.scan_workspace(root, root / "native-deep.json")
         runs.append({
@@ -136,9 +162,13 @@ def run_workspace(
         _merge_findings(static_report, native_report, summary_key="deepNative",
                         default_engine=native_deep.ENGINE_ID, default_kind="NATIVE_EVIDENCE",
                         default_category="Native/ARM64")
+    except Cancelled:
+        raise
     except Exception as exc:
         runs.append({"engineId": native_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
+    _check(cb)
 
+    _check(cb, "Embedded 5/7 · Cocos correlation…")
     try:
         cocos_report = cocos_deep.scan_workspace(root, static_report, native_report, root / "cocos-deep.json")
         runs.append({
@@ -152,9 +182,13 @@ def run_workspace(
         _merge_findings(static_report, cocos_report, summary_key="deepCocos",
                         default_engine=cocos_deep.ENGINE_ID, default_kind="COCOS_EVIDENCE",
                         default_category="Runtime/Cocos")
+    except Cancelled:
+        raise
     except Exception as exc:
         runs.append({"engineId": cocos_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
+    _check(cb)
 
+    _check(cb, "Embedded 6/7 · Flutter/Dart AOT…")
     try:
         flutter_report = flutter_deep.scan_workspace(root, native_report, root / "flutter-deep.json")
         runs.append({
@@ -167,9 +201,13 @@ def run_workspace(
         _merge_findings(static_report, flutter_report, summary_key="deepFlutter",
                         default_engine=flutter_deep.ENGINE_ID, default_kind="FLUTTER_AOT_EVIDENCE",
                         default_category="Flutter/Dart AOT")
+    except Cancelled:
+        raise
     except Exception as exc:
         runs.append({"engineId": flutter_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
+    _check(cb)
 
+    _check(cb, "Embedded 7/7 · gameplay semantic correlation…")
     try:
         gameplay_report = deep_gameplay.scan_workspace(root, static_report, native_report, root / "deep-gameplay.json")
         runs.append({
@@ -182,18 +220,23 @@ def run_workspace(
         _merge_findings(static_report, gameplay_report, summary_key="deepGameplay",
                         default_engine=deep_gameplay.ENGINE_ID, default_kind="SEMANTIC_GAMEPLAY_EVIDENCE",
                         default_category="Gameplay/Semantic")
+    except Cancelled:
+        raise
     except Exception as exc:
         runs.append({"engineId": deep_gameplay.ENGINE_ID, "status": "FAILED", "error": str(exc)})
+    _check(cb)
 
     static_report["embeddedEnriched"] = True
     static_report["embeddedPipelineSchema"] = SCHEMA
     static_report["total"] = len(_artifacts(static_report))
+    _check(cb)
     artifact_path.write_text(json.dumps(static_report, ensure_ascii=False, indent=2), encoding="utf-8")
     out = {
         "schema": SCHEMA,
         "mode": "IN_APP_AUTOMATIC",
         "manualImportRequired": False,
         "executesTargetCode": False,
+        "cancelAware": cb is not None,
         "runs": runs,
         "artifactReport": artifact_path.name,
         "luaReport": "lua-deep.json",
@@ -205,5 +248,6 @@ def run_workspace(
         "unavailable": sum(1 for run in runs if run.get("status") == "UNAVAILABLE"),
         "failed": sum(1 for run in runs if run.get("status") == "FAILED"),
     }
+    _check(cb)
     pipeline_path.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
     return out
