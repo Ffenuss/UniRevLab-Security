@@ -139,8 +139,8 @@ public class AutomaticEvidenceService extends Service {
         }
 
         JSONArray degradedReasons=new JSONArray();JSONObject reconstruction=readJson("full-reconstruction.json"),apktoolSummary=readJson("apktool-analysis.json");
-        if(reconstruction==null)degradedReasons.put("JADX_RECONSTRUCTION_MISSING");else if(!reconstruction.optBoolean("complete",false))degradedReasons.put("JADX_RECONSTRUCTION_PARTIAL");
-        if(apktoolSummary==null)degradedReasons.put("APKTOOL_SUMMARY_MISSING");else if(apktoolSummary.optInt("failed")>0)degradedReasons.put("APKTOOL_PARTIAL");
+        if(reconstruction==null)degradedReasons.put("JADX_RECONSTRUCTION_MISSING");else if(!reconstruction.optBoolean("complete",false))degradedReasons.put("JADX_RECONSTRUCTION_PARTIAL");else if(reconstruction.optInt("errors")>0)degradedReasons.put("JADX_DECODE_ERRORS");
+        if(apktoolSummary==null)degradedReasons.put("APKTOOL_SUMMARY_MISSING");else if("FAILED".equals(apktoolSummary.optString("status"))||hasError(apktoolSummary)||apktoolSummary.optInt("failed")>0)degradedReasons.put("APKTOOL_PARTIAL");
         if(embeddedSummary==null)degradedReasons.put("EMBEDDED_SUMMARY_MISSING");else if(embeddedSummary.optInt("failed")>0)degradedReasons.put("EMBEDDED_PARTIAL");
         if("PARTIAL".equals(il2cppStatus))degradedReasons.put("IL2CPP_PARTIAL");if("PARTIAL".equals(reStatus))degradedReasons.put("RE_ANALYSIS_PARTIAL");
         JSONObject noRvaStatus=manifest.optJSONObject("noRvaNative"),autoStatus=manifest.optJSONObject("autoMod"),reportStatus=manifest.optJSONObject("connectedReport");
