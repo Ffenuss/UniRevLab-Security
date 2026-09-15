@@ -12,6 +12,7 @@ def test_target_reset_clears_atomic_output_orphans_and_progress():
         '"il2cpp-crosscheck.methods.jsonl.part"',
         '"il2cpp-metadata-identity.json.part"',
         '"il2cpp-metadata-identity.methods.jsonl.part"',
+        '"il2cpp-no-rva-native.json.part"',
         '"installed-apk-set.zip.tmp"',
         '"simple-progress.json"',
         '"automatic-evidence.json"',
