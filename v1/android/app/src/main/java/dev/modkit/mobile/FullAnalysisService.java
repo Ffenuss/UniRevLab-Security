@@ -53,6 +53,7 @@ public class FullAnalysisService extends Service {
                 normalizeInstalledTarget(scanJson);
                 if(app.cancelled.get()){chain=false;progress("Полный анализ отменён пользователем.");return;}
 
+                progress("Проверяю fingerprint выбранного APK/APK-set…");
                 String digest=targetDigest(inputs);
                 File manifest=app.file("full-reconstruction.json");
                 boolean cached=false;
@@ -146,9 +147,15 @@ public class FullAnalysisService extends Service {
         Files.write(targetFile.toPath(),normalized.toString(2).getBytes(StandardCharsets.UTF_8));
     }
 
-    private static String targetDigest(List<File> files)throws Exception{
+    private String targetDigest(List<File> files)throws Exception{
         MessageDigest d=MessageDigest.getInstance("SHA-256");byte[] buf=new byte[1024*1024];
-        for(File f:files){d.update(f.getCanonicalPath().getBytes(StandardCharsets.UTF_8));d.update(Long.toString(f.length()).getBytes(StandardCharsets.UTF_8));try(FileInputStream in=new FileInputStream(f)){int n;while((n=in.read(buf))!=-1)d.update(buf,0,n);}}
+        for(File f:files){
+            if(app.cancelled.get())throw new java.io.InterruptedIOException("cancelled");
+            d.update(f.getCanonicalPath().getBytes(StandardCharsets.UTF_8));d.update(Long.toString(f.length()).getBytes(StandardCharsets.UTF_8));
+            try(FileInputStream in=new FileInputStream(f)){
+                int n;while((n=in.read(buf))!=-1){if(app.cancelled.get())throw new java.io.InterruptedIOException("cancelled");d.update(buf,0,n);}
+            }
+        }
         StringBuilder out=new StringBuilder();for(byte b:d.digest())out.append(String.format(Locale.ROOT,"%02x",b));return out.toString();
     }
 }
