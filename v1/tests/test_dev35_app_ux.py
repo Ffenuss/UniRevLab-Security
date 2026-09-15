@@ -60,12 +60,19 @@ def test_inventory_engine_marker_alone_does_not_make_ordinary_app_hybrid():
 def test_discovery_rows_remain_fail_closed_after_legacy_dashboard_removal():
     simple = (ROOT / "modkit/mobile/simple_mode.py").read_text(encoding="utf-8")
     auto = (ROOT / "android/app/src/main/java/dev/modkit/mobile/AutoAnalysisActivity.java").read_text(encoding="utf-8")
+    automod = (ROOT / "android/app/src/main/java/dev/modkit/mobile/AutoModActivity.java").read_text(encoding="utf-8")
     assert 'executable = bool(binding) and rva is not None' in simple
     assert '"buildable": executable, "selectable": executable' in simple
     assert '"buildable": False, "selectable": False' in simple
     assert 'safe = [c for c in kept if c.get("binding") and c.get("rva") is not None' in simple
     assert 'ready=cat.optInt("buildable")' in auto
-    assert 'mod.setEnabled(!app.busy.get()&&ready>0)' in auto
+    # AutoMod must be reachable for locator/runtime/review candidates, but the actual signed
+    # build remains gated by smart-prepare + preflight inside AutoMod/WorkerService.
+    assert 'mod.setEnabled(!app.busy.get()&&(ready>0||actionable>0||important>0))' in auto
+    assert 'AutoModActivity.class' in auto
+    assert '"menu_smart_prepare"' in automod
+    assert '"menu_preflight"' in automod
+    assert '"menu_smart_build_apk"' in automod
 
 
 def test_menu_builder_is_context_aware_and_collapses_advanced_tools():
