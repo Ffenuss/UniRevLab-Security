@@ -30,6 +30,19 @@ def test_bundle_keeps_evidence_hashing_and_excludes_raw_target_binaries():
     assert '"hashes.sha256"' in source
 
 
+def test_bundle_excludes_historical_project_trees_and_generated_menu_project():
+    source = Path(
+        "android/app/src/main/java/dev/modkit/mobile/EvidenceBundleExporter.java"
+    ).read_text(encoding="utf-8")
+
+    collect = source.split("private static void collectInto", 1)[1].split("private static boolean isEvidenceFile", 1)[0]
+    assert 'rel.equals("projects")' in collect
+    assert 'rel.startsWith("projects/")' in collect
+    assert 'rel.equals("menu-project")' in collect
+    assert 'rel.startsWith("menu-project/")' in collect
+    assert '.put("historicalProjectTreesIncluded", false)' in source
+
+
 def test_bundle_export_requires_terminal_pipeline_state_and_blocks_running_or_missing_manifest():
     source = Path(
         "android/app/src/main/java/dev/modkit/mobile/EvidenceBundleExporter.java"
