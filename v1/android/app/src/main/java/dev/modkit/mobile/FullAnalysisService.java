@@ -30,25 +30,35 @@ public class FullAnalysisService extends Service {
     private App app;
     private PowerManager.WakeLock wake;
     private volatile long startedAt;
+    private volatile int currentStage=0;
+    private volatile String currentStageName="";
     @Override public void onCreate(){super.onCreate();app=(App)getApplication();((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).createNotificationChannel(new NotificationChannel("full-analysis","Полный анализ",NotificationManager.IMPORTANCE_LOW));}
     @Override public IBinder onBind(Intent intent){return null;}
     private Notification note(String text){Intent stop=new Intent(this,FullAnalysisService.class).setAction("cancel");PendingIntent cancel=PendingIntent.getService(this,92,stop,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);PendingIntent open=PendingIntent.getActivity(this,91,new Intent(this,AutoAnalysisActivity.class),PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);return new Notification.Builder(this,"full-analysis").setSmallIcon(R.drawable.ic_modkit).setContentTitle("ModKit · полный анализ").setContentText(text).setContentIntent(open).setOngoing(true).addAction(0,"Отмена",cancel).build();}
-    private void progress(String text){app.progress(text);((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).notify(91,note(text));}
+    private void progress(String text){app.progress(text);heartbeat(text);((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).notify(91,note(text));}
     private void writeAtomicJson(String name,JSONObject value)throws Exception{
         File temp=app.file(name+".part"),dest=app.file(name);Files.deleteIfExists(temp.toPath());
         try{Files.write(temp.toPath(),value.toString(2).getBytes(StandardCharsets.UTF_8));Files.move(temp.toPath(),dest.toPath(),StandardCopyOption.REPLACE_EXISTING);}
         catch(Exception e){Files.deleteIfExists(temp.toPath());throw e;}
     }
-    private void stage(int index,int total,String name){
-        long elapsed=Math.max(0L,System.currentTimeMillis()-startedAt);
+    private void writeProgressRow(String detail){
+        if(startedAt<=0L||currentStage<=0)return;
+        long now=System.currentTimeMillis(),elapsed=Math.max(0L,now-startedAt);
         try{
-            JSONObject row=new JSONObject().put("schema","modkit-simple-progress-1.1").put("phase","RECONSTRUCTION").put("stage",index).put("totalStages",total).put("name",name).put("remainingStages",Math.max(0,total-index)).put("elapsedMs",elapsed);
+            JSONObject row=new JSONObject().put("schema","modkit-simple-progress-1.1").put("phase","RECONSTRUCTION").put("stage",currentStage).put("totalStages",4).put("name",currentStageName).put("remainingStages",Math.max(0,4-currentStage)).put("startedAtMs",startedAt).put("elapsedMs",elapsed).put("updatedAtMs",now);
+            if(detail!=null&&!detail.isEmpty())row.put("detail",detail);
             writeAtomicJson("simple-progress.json",row);
         }catch(Exception ignored){}
+    }
+    private void heartbeat(String detail){writeProgressRow(detail);}
+    private void stage(int index,int total,String name){
+        currentStage=index;currentStageName=name;writeProgressRow(name);
         progress("Реконструкция ["+index+"/"+total+"]: "+name);
     }
     private void writePipelineState(String status,String phase,boolean complete,boolean cancelled,String error)throws Exception{
-        JSONObject state=new JSONObject().put("schema","modkit-automatic-evidence-1.1").put("status",status).put("phase",phase).put("complete",complete).put("cancelled",cancelled).put("startedAtMs",startedAt).put("updatedAtMs",System.currentTimeMillis());
+        long now=System.currentTimeMillis();
+        JSONObject state=new JSONObject().put("schema","modkit-automatic-evidence-1.1").put("status",status).put("phase",phase).put("complete",complete).put("cancelled",cancelled).put("startedAtMs",startedAt).put("updatedAtMs",now);
+        if(!"RUNNING".equals(status))state.put("finishedAtMs",now);
         if(error!=null&&!error.isEmpty())state.put("error",error);
         writeAtomicJson("automatic-evidence.json",state);
     }
@@ -99,9 +109,11 @@ public class FullAnalysisService extends Service {
         startForeground(91,note("Подготовка полного анализа…"));
         if(wake==null||!wake.isHeld()){wake=((PowerManager)getSystemService(POWER_SERVICE)).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"ModKit:full-analysis");wake.acquire(2L*60L*60L*1000L);}
         startedAt=System.currentTimeMillis();
+        AnalysisJournal.append(this,"RUN_START","Full Analysis started",new JSONObject().put("startedAtMs",startedAt).put("memory",AnalysisJournal.memory()));
         try{
             writePipelineState("RUNNING","RECONSTRUCTION",false,false,null);
         }catch(Exception startError){
+            AnalysisJournal.exception(this,"PIPELINE_MANIFEST_WRITE_FAILED",startError);
             try{Files.deleteIfExists(app.file("automatic-evidence.json.part").toPath());Files.deleteIfExists(app.file("automatic-evidence.json").toPath());}catch(Exception ignored){}
             getSharedPreferences("state",0).edit().putBoolean("running",false).apply();
             progress("Полный анализ не запущен: не удалось опубликовать RUNNING manifest: "+String.valueOf(startError.getMessage()));
@@ -137,27 +149,30 @@ public class FullAnalysisService extends Service {
                         JSONObject old=new JSONObject(Io.readUtf8(manifest));
                         String expectedSha=old.optString("outputSha256","");
                         long expectedSize=old.optLong("outputSize",-1L);
-                        boolean metadataMatches=digest.equals(old.optString("targetDigest"))&&old.optBoolean("complete")&&decompiled.getName().equals(old.optString("output"));
+                        boolean backendMatches=BoundedJadxExporter.BACKEND.equals(old.optString("backend",""));
+                        boolean metadataMatches=backendMatches&&digest.equals(old.optString("targetDigest"))&&old.optBoolean("complete")&&decompiled.getName().equals(old.optString("output"));
                         if(metadataMatches&&expectedSize>=0L&&expectedSize==decompiled.length()&&!expectedSha.isEmpty()){
                             cached=expectedSha.equals(fileSha256(decompiled));
                         }
                     }catch(java.io.InterruptedIOException cancelled){throw cancelled;}catch(Exception ignored){}
                 }
-                if(cached)stage(2,4,"JADX: cache hit · target и export fingerprint совпали");
+                if(cached)stage(2,4,"JADX bounded: cache hit · target и export fingerprint совпали");
                 else{
-                    stage(2,4,"JADX: все classes*.dex и resources во всех split APK");
-                    JSONObject state=new JSONObject().put("schema","modkit-full-reconstruction-1.1").put("targetDigest",digest).put("complete",false).put("startedAtMs",System.currentTimeMillis());
+                    stage(2,4,"JADX bounded: APK/split обрабатываются последовательно с освобождением heap");
+                    JSONObject state=new JSONObject().put("schema","modkit-full-reconstruction-1.1").put("targetDigest",digest).put("backend",BoundedJadxExporter.BACKEND).put("complete",false).put("startedAtMs",System.currentTimeMillis()).put("memoryStart",AnalysisJournal.memory());
                     writeAtomicJson("full-reconstruction.json",state);
-                    try(DecompilerEngine dec=new DecompilerEngine(this)){
-                        dec.open();if(app.cancelled.get())throw new java.io.InterruptedIOException("cancelled");
-                        File zip=dec.exportAllZip(app.cancelled);if(app.cancelled.get())throw new java.io.InterruptedIOException("cancelled");
-                        long outputSize=zip.length();String outputSha=fileSha256(zip);
-                        state.put("backend",DecompilerEngine.BACKEND).put("classCount",dec.classCount()).put("resourceCount",dec.resourceCount()).put("errors",dec.errorCount()).put("warnings",dec.warnCount()).put("output",zip.getName()).put("outputSize",outputSize).put("outputSha256",outputSha);
-                        JSONArray names=new JSONArray();for(File f:dec.inputFiles())names.put(f.getName());state.put("inputs",names);
-                        state.put("complete",true).put("finishedAtMs",System.currentTimeMillis());
-                    }catch(Exception e){
-                        state.put("complete",false).put("cancelled",app.cancelled.get()).put("error",String.valueOf(e.getMessage())).put("finishedAtMs",System.currentTimeMillis());
-                        if(!app.cancelled.get())progress("JADX частичен: "+e.getMessage()+" · продолжаю остальные backend'ы.");
+                    try{
+                        BoundedJadxExporter.Result dec=BoundedJadxExporter.export(this,inputs,app.cancelled,this::progress);
+                        if(app.cancelled.get())throw new java.io.InterruptedIOException("cancelled");
+                        File zip=dec.output;long outputSize=zip.length();String outputSha=fileSha256(zip);
+                        state.put("backend",BoundedJadxExporter.BACKEND).put("classCount",dec.classCount).put("resourceCount",dec.resourceCount).put("errors",dec.errorCount).put("warnings",dec.warnCount).put("failedInputs",dec.failedInputs).put("degradedReasons",dec.degradedReasons).put("inputs",dec.inputs).put("output",zip.getName()).put("outputSize",outputSize).put("outputSha256",outputSha).put("complete",dec.complete).put("partial",!dec.complete).put("memoryFinish",AnalysisJournal.memory()).put("finishedAtMs",System.currentTimeMillis());
+                        if(!dec.complete)progress("JADX завершён частично: ошибок APK/split "+dec.failedInputs+" · продолжаю Apktool и остальные backend'ы.");
+                    }catch(java.io.InterruptedIOException cancelled){throw cancelled;}
+                    catch(Throwable e){
+                        AnalysisJournal.exception(this,e instanceof OutOfMemoryError?"JADX_FATAL_OOM":"JADX_FATAL",e);
+                        state.put("complete",false).put("partial",true).put("errorClass",e.getClass().getName()).put("error",String.valueOf(e.getMessage())).put("memoryFailure",AnalysisJournal.memory()).put("finishedAtMs",System.currentTimeMillis());
+                        if(!app.cancelled.get())progress("JADX частичен: "+e.getClass().getSimpleName()+" · продолжаю Apktool и остальные backend'ы.");
+                        System.gc();
                     }
                     writeAtomicJson("full-reconstruction.json",state);
                 }
@@ -169,10 +184,11 @@ public class FullAnalysisService extends Service {
                     writeAtomicJson("apktool-analysis.json",apktool);
                     int failed=apktool.optInt("failed");progress("Apktool: decoded="+apktool.optInt("decoded")+" · cache="+apktool.optInt("cached")+(failed>0?" · errors="+failed:"")+".");
                 }catch(Throwable e){
-                    JSONObject error=new JSONObject().put("schema","modkit-apktool-analysis-1.0").put("engineId",ApktoolEngine.ENGINE_ID).put("bundled",true).put("status","FAILED").put("error",String.valueOf(e.getMessage()));
+                    AnalysisJournal.exception(this,e instanceof OutOfMemoryError?"APKTOOL_OOM":"APKTOOL_FAILURE",e);
+                    JSONObject error=new JSONObject().put("schema","modkit-apktool-analysis-1.0").put("engineId",ApktoolEngine.ENGINE_ID).put("bundled",true).put("status","FAILED").put("errorClass",e.getClass().getName()).put("error",String.valueOf(e.getMessage())).put("memory",AnalysisJournal.memory());
                     writeAtomicJson("apktool-analysis.json",error);
                     if(app.cancelled.get()){chain=false;progress("Полный анализ отменён пользователем.");return;}
-                    progress("Apktool частичен: "+e.getMessage()+" · остальные backend'ы продолжаются.");
+                    progress("Apktool частичен: "+e.getClass().getSimpleName()+" · остальные backend'ы продолжаются.");System.gc();
                 }
 
                 if(app.cancelled.get()){chain=false;progress("Полный анализ отменён пользователем.");return;}
@@ -184,16 +200,18 @@ public class FullAnalysisService extends Service {
                             app.file("artifact-families.json").getPath(),
                             app.file("embedded-analysis.json").getPath(),new Progress());
                 }catch(Throwable e){
+                    AnalysisJournal.exception(this,e instanceof OutOfMemoryError?"EMBEDDED_OOM":"EMBEDDED_FAILURE",e);
                     if(app.cancelled.get()){chain=false;progress("Полный анализ отменён пользователем.");return;}
-                    progress("Embedded pipeline частичен: "+e.getMessage()+" · Evidence Graph всё равно будет построен.");
+                    progress("Embedded pipeline частичен: "+e.getClass().getSimpleName()+" · Evidence Graph всё равно будет построен.");System.gc();
                 }
                 if(app.cancelled.get()){chain=false;progress("Полный анализ отменён пользователем.");}
-            }catch(Exception e){
+            }catch(Throwable e){
                 chain=false;
+                AnalysisJournal.exception(this,e instanceof OutOfMemoryError?"RECONSTRUCTION_OOM":"RECONSTRUCTION_FAILURE",e);
                 if(!pipelineStarted)reconstructionFailure="PIPELINE_MANIFEST_WRITE_FAILED: "+String.valueOf(e.getMessage());
                 else if(!runStateInvalidated)reconstructionFailure="RUN_EPOCH_INVALIDATION_FAILED: "+String.valueOf(e.getMessage());
-                else if(!app.cancelled.get())reconstructionFailure="RECONSTRUCTION_FAILED: "+String.valueOf(e.getMessage());
-                progress(app.cancelled.get()?"Полный анализ отменён.":"Полный анализ остановлен: "+e.getMessage()+" · Evidence Graph не будет запущен на неполной реконструкции.");
+                else if(!app.cancelled.get())reconstructionFailure="RECONSTRUCTION_FAILED: "+e.getClass().getSimpleName()+": "+String.valueOf(e.getMessage());
+                progress(app.cancelled.get()?"Полный анализ отменён.":"Полный анализ остановлен: "+e.getClass().getSimpleName()+" · Evidence Graph не будет запущен на неполной реконструкции.");
             }finally{
                 boolean handedOff=false;
                 if(chain&&!app.cancelled.get()){
@@ -201,8 +219,10 @@ public class FullAnalysisService extends Service {
                     try{
                         startForegroundService(new Intent(this,AutomaticEvidenceService.class));
                         handedOff=true;
-                    }catch(Exception handoffError){
+                        AnalysisJournal.append(this,"HANDOFF","AutomaticEvidenceService started",new JSONObject().put("memory",AnalysisJournal.memory()));
+                    }catch(Throwable handoffError){
                         handoffFailure=String.valueOf(handoffError.getMessage());
+                        AnalysisJournal.exception(this,"EVIDENCE_HANDOFF_FAILED",handoffError);
                         progress("Не удалось запустить Evidence Graph: "+handoffFailure);
                     }
                 }
@@ -216,6 +236,7 @@ public class FullAnalysisService extends Service {
                     }
                     getSharedPreferences("state",0).edit().putBoolean("running",false).apply();
                     app.busy.set(false);app.revision++;
+                    AnalysisJournal.append(this,"RUN_FINISH",app.cancelled.get()?"Full Analysis cancelled":"Full Analysis stopped before evidence handoff",new JSONObject().put("memory",AnalysisJournal.memory()));
                 }
                 if(wake!=null&&wake.isHeld())wake.release();
                 stopForeground(true);stopSelf();
