@@ -6,10 +6,9 @@ string. The global metadata already tells us the exact MethodDef token domain fo
 that image. We therefore reject every candidate whose methodPointerCount does not
 match that domain before deciding whether the module is ambiguous.
 
-Every no-RVA catalogue row gets a streamed provenance row. Successful recovery is
-emitted only when metadata identity, exact CodeGenModule selection, executable
-pointer validation, and global pointer uniqueness all agree. Failure rows retain the
-precise blocker but remain non-actionable/non-buildable.
+Exact successes stay in the compact methods JSONL consumed by AutoMod. Every failed
+no-RVA attempt is streamed separately to a failure-provenance JSONL so large titles
+do not force AutoMod to materialize 100k+ unresolved rows in RAM.
 """
 from __future__ import annotations
 
@@ -126,8 +125,6 @@ def _metadata_token_domains(meta: Metadata, cb=None) -> tuple[dict[str, int], di
             continue
         counts[image] += 1
         max_rid[image] = max(max_rid[image], rid)
-    # Require a contiguous 1..N MethodDef token domain. If metadata itself has a
-    # hole, count cannot safely discriminate a CodeGenModule.
     exact = {name: max_rid[name] for name in max_rid if counts.get(name) == max_rid[name]}
     rejected = {name: max_rid[name] for name in max_rid if counts.get(name) != max_rid[name]}
     return exact, rejected
@@ -277,6 +274,7 @@ def recover_no_rva(metadata_path: str | Path, library_path: str | Path, catalog_
     catalog_path = Path(catalog_path)
     output_path = Path(output_path)
     rows_path = Path(rows_path) if rows_path else output_path.with_name("il2cpp-no-rva-native.methods.jsonl")
+    failures_path = rows_path.with_name("il2cpp-no-rva-native.failures.jsonl")
     if not metadata_path.is_file() or not library_path.is_file() or not catalog_path.is_file():
         raise ValueError("metadata.bin, library.so and analysis.methods.jsonl are required")
 
@@ -302,11 +300,15 @@ def recover_no_rva(metadata_path: str | Path, library_path: str | Path, catalog_
         samples: list[dict[str, Any]] = []
         failure_samples: list[dict[str, Any]] = []
         rows_path.parent.mkdir(parents=True, exist_ok=True)
-        with catalog_path.open("r", encoding="utf-8", errors="replace") as source, rows_path.open("w", encoding="utf-8") as sink:
+        with (catalog_path.open("r", encoding="utf-8", errors="replace") as source,
+              rows_path.open("w", encoding="utf-8") as success_sink,
+              failures_path.open("w", encoding="utf-8") as failure_sink):
             def emit(row: dict[str, Any]) -> None:
+                success = row.get("status") == _SUCCESS
+                sink = success_sink if success else failure_sink
                 sink.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
                 status_counts[str(row.get("status") or "NATIVE_RVA_UNRESOLVED")] += 1
-                if row.get("status") == _SUCCESS:
+                if success:
                     if len(samples) < 64:
                         samples.append(row)
                 elif len(failure_samples) < 64:
@@ -461,8 +463,9 @@ def recover_no_rva(metadata_path: str | Path, library_path: str | Path, catalog_
             "counts": dict(counts),
             "statusCounts": dict(sorted(status_counts.items())),
             "rowsFile": rows_path.name,
+            "failureRowsFile": failures_path.name,
             "rowsAreFileBacked": True,
-            "rowsIncludeUnresolvedProvenance": True,
+            "failuresAreFileBacked": True,
             "addressResolver": True,
             "requiresUniqueExecutablePointer": True,
             "executesTargetCode": False,
@@ -470,7 +473,7 @@ def recover_no_rva(metadata_path: str | Path, library_path: str | Path, catalog_
             "actionable": False,
             "buildable": False,
             "promotesBuildability": False,
-            "note": "Every no-RVA row records its exact blocker. Only exact metadata identity + unique exact-count CodeGenModule + unique executable pointer yields a recovered RVA; normal binding/preflight is still mandatory.",
+            "note": "Exact successes remain in the compact methods JSONL. Every failed no-RVA attempt is streamed to a separate provenance JSONL with its blocker; normal binding/preflight is still mandatory after recovery.",
             "samples": samples,
             "failureSamples": failure_samples,
         }
