@@ -77,7 +77,7 @@ def test_fresh_evidence_core_outputs_are_invalidated_before_il2cpp_and_re_backen
     ):
         assert f'"{name}"' in helper
 
-    fresh_gate = source.index("if(!unchanged||!haveAnalysis){")
+    fresh_gate = source.index("if(!unchanged||!coreCacheReady){")
     invalidate = source.index("invalidateFreshCoreOutputs();", fresh_gate)
     il2cpp = source.index("runIl2cpp(reTarget)", invalidate)
     re_backend = source.index("runReAnalysis(reTarget)", il2cpp)
@@ -116,6 +116,23 @@ def test_evidence_wakelock_covers_long_release_pipeline():
     acquire = source.index('newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"ModKit:auto-evidence")')
     assert "wake.acquire(2L*60L*60L*1000L);" in source[acquire:acquire + 300]
     assert "if(wake!=null&&wake.isHeld())wake.release();" in source
+
+
+def test_core_cache_hit_requires_re_analysis_and_il2cpp_artifacts_when_pair_exists():
+    source = _read("AutomaticEvidenceService.java")
+    assert 'boolean hasIl2cppPair=app.file("metadata.bin").isFile()&&app.file("library.so").isFile();' in source
+    assert 'boolean haveReAnalysis=app.file("re-analysis.json").isFile();' in source
+    assert 'boolean haveIl2cppAnalysis=!hasIl2cppPair||app.file("analysis.json").isFile()||app.file("analysis.methods.jsonl").isFile();' in source
+    assert 'boolean coreCacheReady=haveReAnalysis&&haveIl2cppAnalysis;' in source
+    assert '.put("cacheHit",unchanged&&coreCacheReady)' in source
+    assert 'if(!unchanged||!coreCacheReady)' in source
+
+
+def test_non_il2cpp_cache_hit_remains_not_applicable_not_fake_il2cpp_cache_hit():
+    source = _read("AutomaticEvidenceService.java")
+    cache_branch = source.split("}else{", source.count("}else{") - 1)[-1] if False else source
+    assert 'engines.put("il2cpp",hasIl2cppPair?new JSONObject().put("status","CACHE_HIT"):new JSONObject().put("status","NOT_APPLICABLE").put("reason","complete IL2CPP pair not found"));' in source
+    assert 'engines.put("re",new JSONObject().put("status","CACHE_HIT"));' in source
 
 
 def test_failed_epoch_invalidation_is_terminal_reconstruction_failure():
