@@ -192,8 +192,12 @@ final class EvidenceBundleExporter {
     private static void collectInto(File root, File node, List<File> out, int depth) throws java.io.InterruptedIOException {
         checkInterrupted();
         if (depth > 8 || node == null || !node.exists()) return;
-        if (node.isFile()) { out.add(node); return; }
         String rel = root.toPath().relativize(node.toPath()).toString().replace(File.separatorChar, '/');
+        if (node.isFile()) {
+            long size = node.length();
+            if (size > 0 && size <= MAX_SINGLE_FILE && isEvidenceFile(rel)) out.add(node);
+            return;
+        }
         if (rel.equals("projects") || rel.startsWith("projects/") ||
                 rel.equals("menu-project") || rel.startsWith("menu-project/") ||
                 rel.startsWith("installed-apks") || rel.startsWith("target-signed-set") ||
