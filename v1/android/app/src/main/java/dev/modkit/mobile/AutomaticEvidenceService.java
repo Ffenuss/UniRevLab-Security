@@ -70,10 +70,10 @@ public class AutomaticEvidenceService extends Service {
         new Thread(()->{
             JSONObject manifest=new JSONObject();
             try{
-                startedAt=System.currentTimeMillis();manifest.put("schema","modkit-automatic-evidence-1.1").put("startedAtMs",startedAt).put("legacyWorkerUsed",false).put("executesTargetCode",false);
-                runPipeline(manifest);manifest.put("complete",!app.cancelled.get()).put("cancelled",app.cancelled.get()).put("finishedAtMs",System.currentTimeMillis());writeJson("automatic-evidence.json",manifest);
+                startedAt=System.currentTimeMillis();manifest.put("schema","modkit-automatic-evidence-1.1").put("startedAtMs",startedAt).put("legacyWorkerUsed",false).put("executesTargetCode",false).put("status","RUNNING");
+                runPipeline(manifest);String status=manifest.optString("status","SUCCESS");if("RUNNING".equals(status))status="SUCCESS";manifest.put("status",status).put("complete",!app.cancelled.get()).put("cancelled",app.cancelled.get()).put("finishedAtMs",System.currentTimeMillis());writeJson("automatic-evidence.json",manifest);
             }catch(Exception e){
-                try{manifest.put("complete",false).put("cancelled",app.cancelled.get()).put("error",String.valueOf(e.getMessage())).put("finishedAtMs",System.currentTimeMillis());writeJson("automatic-evidence.json",manifest);}catch(Exception ignored){}
+                try{manifest.put("status",app.cancelled.get()?"CANCELLED":"FAILED").put("complete",false).put("cancelled",app.cancelled.get()).put("error",String.valueOf(e.getMessage())).put("finishedAtMs",System.currentTimeMillis());writeJson("automatic-evidence.json",manifest);}catch(Exception ignored){}
                 progress(app.cancelled.get()?"Автоанализ отменён.":"Evidence Graph: "+e.getMessage());
             }finally{
                 if(wake!=null&&wake.isHeld())wake.release();getSharedPreferences("state",0).edit().putBoolean("running",false).apply();app.busy.set(false);app.revision++;stopForeground(true);stopSelf();
@@ -109,15 +109,16 @@ public class AutomaticEvidenceService extends Service {
             try{
                 PyObject recovery=Python.getInstance().getModule("modkit.mobile.il2cpp_no_rva_native_release");
                 JSONObject recovered=new JSONObject(recovery.callAttr("recover_workspace",getFilesDir().getPath(),app.file("il2cpp-no-rva-native.json").getPath(),new Progress()).toString());
-                JSONObject rc=recovered.optJSONObject("counts");
-                manifest.put("noRvaNative",new JSONObject().put("status","SUCCESS").put("schema",recovered.optString("schema")).put("resolvedModules",recovered.optInt("resolvedModuleCount")).put("recoveredExact",rc==null?0:rc.optInt("recoveredExact")).put("sharedPointers",rc==null?0:rc.optInt("sharedExecutablePointer")).put("identityMismatch",rc==null?0:rc.optInt("identityMismatch")));
+                JSONObject rc=recovered.optJSONObject("counts");String recoveryError=recovered.optString("error","");
+                manifest.put("noRvaNative",new JSONObject().put("status",recoveryError.isEmpty()?"SUCCESS":"PARTIAL").put("schema",recovered.optString("schema")).put("resolvedModules",recovered.optInt("resolvedModuleCount")).put("recoveredExact",rc==null?0:rc.optInt("recoveredExact")).put("sharedPointers",rc==null?0:rc.optInt("sharedExecutablePointer")).put("identityMismatch",rc==null?0:rc.optInt("identityMismatch")).put("error",recoveryError));
             }catch(Exception e){if(app.cancelled.get())check();manifest.put("noRvaNative",new JSONObject().put("status","PARTIAL").put("error",String.valueOf(e.getMessage())));progress("No-RVA native recovery частичен: "+e.getMessage()+" · продолжаю AutoMod/report.");}
         }else manifest.put("noRvaNative",new JSONObject().put("status","NOT_APPLICABLE").put("reason","complete IL2CPP pair/catalog not available"));
 
         check();
         try{
             PyObject autoMod=Python.getInstance().getModule("modkit.mobile.automod_cancellable");JSONObject autoPlan=new JSONObject(autoMod.callAttr("build_workspace_plan",getFilesDir().getPath(),app.file("automod-plan.json").getPath(),new Progress()).toString());
-            manifest.put("autoMod",new JSONObject().put("readyToBuild",autoPlan.optInt("readyToBuildCount")).put("readyForPreflight",autoPlan.optInt("readyForPreflightCount")).put("runtimeNeeded",autoPlan.optInt("runtimeNeededCount")).put("review",autoPlan.optInt("reviewCount")).put("auditOnly",autoPlan.optInt("auditOnlyCount")).put("excluded",autoPlan.optInt("excludedCount")).put("metadataIdentityNoRva",autoPlan.optInt("metadataIdentityObservedCount")).put("metadataQualifiedNoRva",autoPlan.optInt("metadataQualifiedNoRvaCount")));
+            boolean autoPartial=hasError(autoPlan.optJSONObject("il2cppCrosscheck"))||hasError(autoPlan.optJSONObject("il2cppMetadataIdentity"))||hasError(autoPlan.optJSONObject("il2cppNativeRecovery"));
+            manifest.put("autoMod",new JSONObject().put("status",autoPartial?"PARTIAL":"SUCCESS").put("readyToBuild",autoPlan.optInt("readyToBuildCount")).put("readyForPreflight",autoPlan.optInt("readyForPreflightCount")).put("runtimeNeeded",autoPlan.optInt("runtimeNeededCount")).put("review",autoPlan.optInt("reviewCount")).put("auditOnly",autoPlan.optInt("auditOnlyCount")).put("excluded",autoPlan.optInt("excludedCount")).put("metadataIdentityNoRva",autoPlan.optInt("metadataIdentityObservedCount")).put("metadataQualifiedNoRva",autoPlan.optInt("metadataQualifiedNoRvaCount")));
         }catch(Exception e){if(app.cancelled.get())check();manifest.put("autoMod",new JSONObject().put("status","PARTIAL").put("error",String.valueOf(e.getMessage())));progress("AutoMod-план частичен: "+e.getMessage()+" · основной Evidence Graph сохранён.");}
 
         check();
@@ -136,9 +137,21 @@ public class AutomaticEvidenceService extends Service {
         }else{
             Files.deleteIfExists(app.file("simple-cache.json").toPath());manifest.put("cacheRecorded",false).put("cacheBlockedReason","core analyzer partial or incomplete");
         }
+
+        JSONArray degradedReasons=new JSONArray();JSONObject reconstruction=readJson("full-reconstruction.json"),apktoolSummary=readJson("apktool-analysis.json");
+        if(reconstruction==null)degradedReasons.put("JADX_RECONSTRUCTION_MISSING");else if(!reconstruction.optBoolean("complete",false))degradedReasons.put("JADX_RECONSTRUCTION_PARTIAL");
+        if(apktoolSummary==null)degradedReasons.put("APKTOOL_SUMMARY_MISSING");else if(apktoolSummary.optInt("failed")>0)degradedReasons.put("APKTOOL_PARTIAL");
+        if(embeddedSummary==null)degradedReasons.put("EMBEDDED_SUMMARY_MISSING");else if(embeddedSummary.optInt("failed")>0)degradedReasons.put("EMBEDDED_PARTIAL");
+        if("PARTIAL".equals(il2cppStatus))degradedReasons.put("IL2CPP_PARTIAL");if("PARTIAL".equals(reStatus))degradedReasons.put("RE_ANALYSIS_PARTIAL");
+        JSONObject noRvaStatus=manifest.optJSONObject("noRvaNative"),autoStatus=manifest.optJSONObject("autoMod"),reportStatus=manifest.optJSONObject("connectedReport");
+        if(noRvaStatus!=null&&"PARTIAL".equals(noRvaStatus.optString("status")))degradedReasons.put("NO_RVA_NATIVE_PARTIAL");
+        if(autoStatus!=null&&"PARTIAL".equals(autoStatus.optString("status")))degradedReasons.put("AUTOMOD_PARTIAL");
+        if(reportStatus!=null&&"PARTIAL".equals(reportStatus.optString("status")))degradedReasons.put("CONNECTED_REPORT_PARTIAL");
+        boolean degraded=degradedReasons.length()>0;manifest.put("degraded",degraded).put("degradedReasons",degradedReasons).put("status",degraded?"PARTIAL":"SUCCESS");
+
         check();app.result=readJson("analysis.summary.json");JSONObject autoPlan=readJson("automod-plan.json");JSONObject connected=readJson("connected-report.json");JSONObject nativeRecovery=readJson("il2cpp-no-rva-native.json");JSONObject recoveryCounts=nativeRecovery==null?null:nativeRecovery.optJSONObject("counts");
         String autoText=autoPlan==null?"":" · AutoMod build "+autoPlan.optInt("readyToBuildCount")+" / preflight "+autoPlan.optInt("readyForPreflightCount");String reportText=connected==null?"":" · report links "+connected.optInt("exactLinked")+" / recovered RVA "+connected.optInt("nativeRvaRecoveredFindings")+" / token-no-RVA "+connected.optInt("metadataTokenIdentityFindings")+" / conflicts "+connected.optInt("metadataTokenConflictFindings");String recoveryText=recoveryCounts==null?"":" · native recovery "+recoveryCounts.optInt("recoveredExact");
-        progress("Готово. Найдено "+catalog.optInt("total")+", важных "+catalog.optInt("important")+", точных locator "+catalog.optInt("actionable")+", PATCH_READY "+catalog.optInt("buildable")+", server/trust audit "+catalog.optInt("serverAudit")+autoText+recoveryText+reportText+(unchanged?" · cache hit":" · fresh target")+".");
+        progress((degraded?"Готово частично":"Готово")+". Найдено "+catalog.optInt("total")+", важных "+catalog.optInt("important")+", точных locator "+catalog.optInt("actionable")+", PATCH_READY "+catalog.optInt("buildable")+", server/trust audit "+catalog.optInt("serverAudit")+autoText+recoveryText+reportText+(unchanged?" · cache hit":" · fresh target")+".");
     }
 
     private JSONObject runIl2cpp(File reTarget)throws Exception{
@@ -155,6 +168,7 @@ public class AutomaticEvidenceService extends Service {
     private void writeApkSet(File output,List<File> files,List<String> names)throws Exception{File temp=new File(output.getParentFile(),output.getName()+".tmp");temp.delete();try(ZipOutputStream z=new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(temp)))){z.setLevel(0);byte[] buf=new byte[1024*1024];for(int i=0;i<files.size();i++){check();ZipEntry entry=new ZipEntry(names.get(i));z.putNextEntry(entry);try(InputStream in=new FileInputStream(files.get(i))){int n;while((n=in.read(buf))!=-1){check();z.write(buf,0,n);}}z.closeEntry();}}Files.move(temp.toPath(),output.toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING);}
     private PyObject engine(){if(!Python.isStarted())Python.start(new AndroidPlatform(this));return Python.getInstance().getModule("modkit.mobile.engine");}
     private void check()throws IOException{if(app.cancelled.get())throw new IOException("Автоанализ отменён пользователем");}
+    private static boolean hasError(JSONObject value){return value!=null&&!value.optString("error","").isEmpty();}
     private void stage(int stage,int total,String name)throws Exception{check();JSONObject p=new JSONObject().put("schema","modkit-simple-progress-1.1").put("phase","EVIDENCE").put("stage",stage).put("totalStages",total).put("name",name).put("remainingStages",Math.max(0,total-stage)).put("elapsedMs",Math.max(0,System.currentTimeMillis()-startedAt));JSONObject old=readJson("simple-catalog.json");if(old!=null)p.put("candidates",old.optInt("total")).put("confirmed",old.optInt("actionable")).put("patchReady",old.optInt("buildable"));writeJson("simple-progress.json",p);progress("Автоанализ ["+stage+"/"+total+"]: "+name);}
     private JSONObject readJson(String name){try{File f=app.file(name);return f.isFile()?new JSONObject(Io.readUtf8(f)):null;}catch(Exception ignored){return null;}}
     private void writeJson(String name,JSONObject value)throws Exception{Files.write(app.file(name).toPath(),value.toString(2).getBytes(StandardCharsets.UTF_8));}
