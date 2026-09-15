@@ -8,7 +8,7 @@ fallback, or exact RVA.
 
 Cancellation is cooperative and fail-closed: heavy JSONL/catalogue scans check the
 Android callback and final JSON/Markdown outputs are written through sibling ``.part``
-files, then atomically promoted only after a final cancellation check.
+files, then promoted only after one shared final cancellation gate.
 """
 from __future__ import annotations
 
@@ -326,15 +326,19 @@ def build_connected_report(
                 "schemaSemantics": "UNCHANGED_CONNECTED_REPORT_1_2",
                 "cancelAware": cb is not None,
                 "atomicOutputPromotion": bool(output_json or output_md),
+                "coordinatedFinalCancelGate": True,
+                "multiFileTransactionAtomic": False,
             })
         if json_part is not None:
             gate.force()
             json_part.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    # One final cancellation decision governs the whole output pair. Do not check
+    # again between the two short rename operations: a user cancel cannot leave a
+    # new JSON report paired with an old Markdown report.
     gate.force()
     if json_part is not None and output_json is not None:
         json_part.replace(Path(output_json))
     if md_part is not None and output_md is not None:
-        gate.force()
         md_part.replace(Path(output_md))
     return report
