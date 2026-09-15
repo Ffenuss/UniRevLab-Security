@@ -120,10 +120,13 @@ public class App extends Application {
                 stage="STOPPED";
             }
         }
-        if(wasRunning||targetPreparing||pipelineInterrupted){getSharedPreferences("state",0).edit().putBoolean("running",false).putBoolean("target.preparing",false).apply();}
+        boolean interruptedState=wasRunning||targetPreparing||pipelineInterrupted;
+        if(interruptedState){getSharedPreferences("state",0).edit().putBoolean("running",false).putBoolean("target.preparing",false).apply();}
+        final boolean restorePreviousResult=!interruptedState;
         new Thread(() -> {
             synchronized (this) {
                 if (busy.get()) return;
+                if(!restorePreviousResult){result=null;revision++;return;}
                 try {
                     File f = file("analysis.summary.json");
                     if (f.exists()) result = new JSONObject(new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8));
