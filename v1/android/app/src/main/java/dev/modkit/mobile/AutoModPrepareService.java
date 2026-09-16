@@ -79,12 +79,15 @@ public class AutoModPrepareService extends Service {
         if(!Python.isStarted())Python.start(new AndroidPlatform(this));
         PyObject result=Python.getInstance().getModule("modkit.mobile.menu_native_recovery").callAttr("prepare_workspace",getFilesDir().getPath(),source.getPath(),new Progress());
         check();
-        progress("AutoMod: проверяю exact SHA-256 всех prepare-входов…");
+        progress("AutoMod: привязываю audit к текущему Phase 7 plan + Evidence Graph catalog…");
+        AutoModAuditVerifier.bindPhase7Inputs(app,()->app.cancelled.get());
+        check();
+        progress("AutoMod: проверяю exact SHA-256 target, analysis, plan, catalog и MenuSpec…");
         JSONObject audit=AutoModAuditVerifier.verifyCurrent(app,source,()->app.cancelled.get());
         JSONObject obj=new JSONObject(result.toString());JSONObject confirm=obj.optJSONObject("confirm"),pre=obj.optJSONObject("preflight");JSONArray promoted=confirm==null?null:confirm.optJSONArray("promoted"),rejected=confirm==null?null:confirm.optJSONArray("rejected");
         int promotedCount=promoted==null?0:promoted.length(),rejectedCount=rejected==null?0:rejected.length();boolean ready=pre!=null&&pre.optBoolean("readyForAutoBuild");
-        AnalysisJournal.append(this,"AUTOMOD_PREPARE_READY","AutoMod exact prepare finished",new JSONObject().put("targetDigest",targetVerification.optString("currentTargetDigest")).put("sourceApk",source.getAbsolutePath()).put("promoted",promotedCount).put("rejected",rejectedCount).put("ready",ready));
-        progress("AutoMod prepare: target + exact SHA verified · audit calls "+audit.optInt("calls")+", подтверждено bindings "+promotedCount+", отклонено "+rejectedCount+", auto-build "+(ready?"READY":"BLOCK/REVIEW")+". Recovered RVA не обходит preflight.");
+        AnalysisJournal.append(this,"AUTOMOD_PREPARE_READY","AutoMod exact prepare finished",new JSONObject().put("targetDigest",targetVerification.optString("currentTargetDigest")).put("sourceApk",source.getAbsolutePath()).put("promoted",promotedCount).put("rejected",rejectedCount).put("ready",ready).put("phase7FreshnessPolicy",audit.optString("phase7FreshnessPolicy")));
+        progress("AutoMod prepare: target + analysis + Phase 7 plan/catalog SHA verified · audit calls "+audit.optInt("calls")+", подтверждено bindings "+promotedCount+", отклонено "+rejectedCount+", auto-build "+(ready?"READY":"BLOCK/REVIEW")+". Recovered RVA не обходит preflight.");
     }
 
     private void invalidatePreparedState()throws IOException{
