@@ -71,8 +71,10 @@ def test_phase7_guard_is_opt_in_for_legacy_workspaces(tmp_path):
     assert verify_preflight_workspace(source) == {"required": False, "verified": False}
 
 
-def test_menu_package_exports_guarded_review_preflight():
+def test_menu_package_wraps_both_preflight_and_payload_generation():
     source = Path("modkit/menu/__init__.py").read_text(encoding="utf-8")
     assert "review_preflight as _builder_review_preflight" in source
-    assert "verify_preflight_workspace(source_apk)" in source
+    assert "write_patch_payload as _builder_write_patch_payload" in source
+    assert source.count("verify_preflight_workspace(source_apk)") == 2
     assert "return _builder_review_preflight(spec, source_apk)" in source
+    assert "return _builder_write_patch_payload(" in source
