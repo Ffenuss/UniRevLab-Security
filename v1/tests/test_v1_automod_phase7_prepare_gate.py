@@ -120,6 +120,7 @@ def test_phase7_menu_validation_fails_closed_on_legacy_bypass_control(tmp_path):
 def test_android_automod_surface_separates_lanes_and_requires_phase7_audit():
     activity = (ROOT / "android/app/src/main/java/dev/modkit/mobile/AutoModActivity.java").read_text(encoding="utf-8")
     verifier = (ROOT / "android/app/src/main/java/dev/modkit/mobile/AutoModAuditVerifier.java").read_text(encoding="utf-8")
+    prepare = (ROOT / "android/app/src/main/java/dev/modkit/mobile/AutoModPrepareService.java").read_text(encoding="utf-8")
     recovery = (ROOT / "modkit/mobile/menu_native_recovery.py").read_text(encoding="utf-8")
 
     assert "controlsList" in activity
@@ -134,18 +135,29 @@ def test_android_automod_surface_separates_lanes_and_requires_phase7_audit():
     assert '"modkit-automod-phase7-prepare-gate-1.0"' in verifier
     assert 'phase7.optBoolean("methodIdentityRequiredForBoundRva")' in verifier
     assert 'phase7.optInt("rejectedControlCount",-1)!=0' in verifier
+    assert 'fingerprint(rows,"phase7Plan")' in verifier
+    assert 'fingerprint(rows,"simpleCatalog")' in verifier
+    assert 'verify(rows,"phase7Plan",app.file("automod-plan.json"),gate)' in verifier
+    assert 'verify(rows,"simpleCatalog",app.file("simple-catalog.json"),gate)' in verifier
+    assert '"EXACT_PLAN_AND_CATALOG_SHA256"' in verifier
+    assert 'AutoModAuditVerifier.bindPhase7Inputs' in prepare
 
     assert "automod_cancellable.build_workspace_plan" in recovery
     assert "_phase7_allowed_bindings(plan)" in recovery
     assert "_validate_phase7_menu(root, plan, allowed_rvas, cb, allowed_methods_by_rva)" in recovery
 
 
-def test_legacy_menu_builder_cannot_launch_signed_build_or_auto_prepare_for_il2cpp():
+def test_legacy_menu_builder_cannot_launch_signed_il2cpp_build_or_leave_stale_audit():
     source = (ROOT / "android/app/src/main/java/dev/modkit/mobile/MenuBuilderActivity.java").read_text(encoding="utf-8")
 
     assert 'if(il2cpp){startActivity(new Intent(this,AutoModActivity.class));return;}' in source
     assert 'if(!il2cpp&&!app.file("menu-spec.json").isFile()' in source
     assert 'private boolean signedBuildOp(String op)' in source
+    assert 'private boolean mutatesPreparedMenu(String op)' in source
+    assert 'private void invalidateAutoModPreparedState()' in source
+    assert '"menu-native-recovery.json"' in source
+    assert 'if(mutatesPreparedMenu(op))invalidateAutoModPreparedState()' in source
+    assert 'Io.writeUtf8(app.file("menu-spec.json"),o.toString(2));invalidateAutoModPreparedState();' in source
     for op in (
         "menu_build_apk",
         "menu_auto_build_apk",
@@ -155,6 +167,7 @@ def test_legacy_menu_builder_cannot_launch_signed_build_or_auto_prepare_for_il2c
         "menu_smart_build_apk",
     ):
         assert f'"{op}".equals(op)' in source
-    assert 'if(signedBuildOp(op)){deleteCreatedDocument(i);toast("Подписанная сборка выполняется только через AutoMod Phase 7")' in source
+    assert 'if(hasIl2cppPath()&&signedBuildOp(op))' in source
+    assert 'toast("Подписанная IL2CPP-сборка выполняется только через AutoMod Phase 7")' in source
     assert 'button("Проверить готовность через AutoMod"' in source
     assert 'button("Собрать подписанный APK / APK-set через AutoMod"' in source
