@@ -53,7 +53,7 @@ def test_phase7_menu_validation_accepts_only_current_plan_controls(tmp_path):
         json.dumps({
             "controls": [
                 {"id": "hp", "title": "HP", "type": "toggle", "binding": "bool_setter", "rva": 0x1000},
-                {"id": "speed", "title": "Speed", "type": "slider_float", "binding": "number_setter", "rva": 0x2000},
+                {"id": "speed", "title": "Speed", "type": "slider_float", "binding": "number_setter", "rva": 0x2000, "finding_id": "deep.method.77"},
                 {"id": "watch", "title": "Runtime watch", "type": "label", "rva": 0x9000, "probe_kind": "watch"},
             ]
         }),
@@ -63,11 +63,35 @@ def test_phase7_menu_validation_accepts_only_current_plan_controls(tmp_path):
     assert gate["validated"] is True
     assert gate["validatedMenuControlCount"] == 2
     assert gate["rejectedControlCount"] == 0
+    assert gate["methodIdentityRequiredForBoundRva"] is True
+    assert gate["identityBoundRvaCount"] == 1
+    assert gate["allowedMethodIdsByRva"]["0x2000"] == [77]
     stored = json.loads((tmp_path / "menu-native-recovery.json").read_text(encoding="utf-8"))
     assert stored["completed"] is True
     assert stored["phase7Gate"]["validated"] is True
     assert stored["phase7Gate"]["runtimeEvidencePromotesBuildability"] is False
     assert stored["phase7Gate"]["reviewEvidencePromotesBuildability"] is False
+
+
+def test_phase7_menu_validation_rejects_same_rva_with_wrong_method_identity(tmp_path):
+    (tmp_path / "menu-native-recovery.json").write_text(
+        json.dumps({"completed": True, "phase7PlanRequired": True}), encoding="utf-8"
+    )
+    (tmp_path / "menu-spec.json").write_text(
+        json.dumps({
+            "controls": [
+                {"id": "wrong", "type": "toggle", "binding": "bool_setter", "rva": 0x2000, "finding_id": "deep.method.78"},
+            ]
+        }),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="outside current Evidence Graph allowlist"):
+        _validate_phase7_menu(tmp_path, _plan(), {0x1000, 0x2000})
+    stored = json.loads((tmp_path / "menu-native-recovery.json").read_text(encoding="utf-8"))
+    rejected = stored["phase7Gate"]["rejected"]
+    assert rejected[0]["reason"] == "method-identity-mismatch"
+    assert rejected[0]["metadataMethodId"] == 78
+    assert rejected[0]["expectedMetadataMethodIds"] == [77]
 
 
 def test_phase7_menu_validation_fails_closed_on_legacy_bypass_control(tmp_path):
@@ -90,6 +114,7 @@ def test_phase7_menu_validation_fails_closed_on_legacy_bypass_control(tmp_path):
     assert stored["phase7Gate"]["validated"] is False
     assert stored["phase7Gate"]["rejectedControlCount"] == 1
     assert stored["phase7Gate"]["rejected"][0]["rva"] == 0x9000
+    assert stored["phase7Gate"]["rejected"][0]["reason"] == "rva-not-allowed"
 
 
 def test_android_automod_surface_separates_lanes_and_requires_phase7_audit():
@@ -107,11 +132,12 @@ def test_android_automod_surface_separates_lanes_and_requires_phase7_audit():
     assert 'audit.optBoolean("phase7PlanRequired")' in verifier
     assert 'audit.optJSONObject("phase7Gate")' in verifier
     assert '"modkit-automod-phase7-prepare-gate-1.0"' in verifier
+    assert 'phase7.optBoolean("methodIdentityRequiredForBoundRva")' in verifier
     assert 'phase7.optInt("rejectedControlCount",-1)!=0' in verifier
 
     assert "automod_cancellable.build_workspace_plan" in recovery
-    assert "_phase7_allowed_rvas(plan)" in recovery
-    assert "_validate_phase7_menu(root, plan, allowed_rvas, cb)" in recovery
+    assert "_phase7_allowed_bindings(plan)" in recovery
+    assert "_validate_phase7_menu(root, plan, allowed_rvas, cb, allowed_methods_by_rva)" in recovery
 
 
 def test_legacy_menu_builder_cannot_launch_signed_build_or_auto_prepare_for_il2cpp():
