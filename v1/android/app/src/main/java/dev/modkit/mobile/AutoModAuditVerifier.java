@@ -6,6 +6,8 @@ import org.json.JSONObject;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.util.Locale;
 
@@ -41,28 +43,69 @@ final class AutoModAuditVerifier {
         if(!"EXACT_INPUT_SHA256".equals(audit.optString("freshnessPolicy"))) return false;
         JSONArray rows=audit.optJSONArray("inputFingerprints");
         JSONArray outputs=audit.optJSONArray("outputFingerprints");
-        if(rows==null||rows.length()<4||outputs==null||outputs.length()<1) return false;
+        if(rows==null||rows.length()<6||outputs==null||outputs.length()<1) return false;
         return validFingerprint(fingerprint(rows,"metadata"))
                 &&validFingerprint(fingerprint(rows,"library"))
                 &&validFingerprint(fingerprint(rows,"catalog"))
                 &&validFingerprint(fingerprint(rows,"sourceApk"))
+                &&validFingerprint(fingerprint(rows,"phase7Plan"))
+                &&validFingerprint(fingerprint(rows,"simpleCatalog"))
                 &&validFingerprint(fingerprint(outputs,"menuSpec"));
+    }
+
+    /** Bind the completed Python prepare audit to the exact Evidence Graph projection used by Phase 7. */
+    static JSONObject bindPhase7Inputs(App app,CancelGate gate)throws Exception {
+        check(gate);
+        JSONObject audit=read(app);
+        if(audit==null||!audit.optBoolean("completed"))throw new IOException("Phase 7 prepare audit отсутствует или не завершён");
+        JSONObject phase7=audit.optJSONObject("phase7Gate");
+        if(phase7==null||!phase7.optBoolean("validated")||phase7.optInt("rejectedControlCount",-1)!=0)
+            throw new IOException("Phase 7 executable-control gate не подтверждён");
+        JSONArray existing=audit.optJSONArray("inputFingerprints");
+        if(existing==null)throw new IOException("Phase 7 prepare audit не содержит input fingerprints");
+        JSONArray rows=new JSONArray();
+        for(int i=0;i<existing.length();i++){
+            JSONObject row=existing.optJSONObject(i);if(row==null)continue;
+            String role=row.optString("role","");
+            if("phase7Plan".equals(role)||"simpleCatalog".equals(role))continue;
+            rows.put(row);
+        }
+        rows.put(currentFingerprint("phase7Plan",app.file("automod-plan.json"),gate));
+        rows.put(currentFingerprint("simpleCatalog",app.file("simple-catalog.json"),gate));
+        audit.put("inputFingerprints",rows);
+        audit.put("phase7FreshnessPolicy","EXACT_PLAN_AND_CATALOG_SHA256");
+        File destination=app.file("menu-native-recovery.json"),temp=app.file("menu-native-recovery.json.tmp");
+        Io.writeUtf8(temp,audit.toString(2));
+        check(gate);
+        Files.move(temp.toPath(),destination.toPath(),StandardCopyOption.REPLACE_EXISTING);
+        check(gate);
+        return audit;
     }
 
     static JSONObject verifyCurrent(App app,File sourceApk,CancelGate gate)throws Exception {
         JSONObject audit=read(app);
-        if(!structurallyReady(audit))throw new IOException("Exact recovery audit не содержит обязательную Phase 7 identity + SHA-256 freshness proof");
+        if(!structurallyReady(audit))throw new IOException("Exact recovery audit не содержит обязательную Phase 7 identity + plan/catalog SHA-256 freshness proof");
         JSONArray rows=audit.getJSONArray("inputFingerprints");
         JSONArray outputs=audit.getJSONArray("outputFingerprints");
         verify(rows,"metadata",app.file("metadata.bin"),gate);
         verify(rows,"library",app.file("library.so"),gate);
         verify(rows,"catalog",app.file("analysis.methods.jsonl"),gate);
         verify(rows,"sourceApk",sourceApk,gate);
+        verify(rows,"phase7Plan",app.file("automod-plan.json"),gate);
+        verify(rows,"simpleCatalog",app.file("simple-catalog.json"),gate);
         verify(outputs,"menuSpec",app.file("menu-spec.json"),gate);
         JSONObject phase7=audit.getJSONObject("phase7Gate");
         if(!phase7.optBoolean("validated")||!phase7.optBoolean("methodIdentityRequiredForBoundRva")||phase7.optInt("rejectedControlCount",-1)!=0)
             throw new IOException("AutoMod Phase 7 identity gate stale или содержит rejected executable control");
+        if(!"EXACT_PLAN_AND_CATALOG_SHA256".equals(audit.optString("phase7FreshnessPolicy")))
+            throw new IOException("AutoMod Phase 7 plan/catalog freshness policy отсутствует");
         return audit;
+    }
+
+    private static JSONObject currentFingerprint(String role,File file,CancelGate gate)throws Exception {
+        check(gate);
+        if(file==null||!file.isFile())throw new IOException("Exact recovery audit: вход "+role+" отсутствует");
+        return new JSONObject().put("role",role).put("name",file.getName()).put("size",file.length()).put("sha256",sha256(file,gate));
     }
 
     private static JSONObject fingerprint(JSONArray rows,String role) {
