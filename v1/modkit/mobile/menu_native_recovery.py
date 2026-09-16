@@ -11,6 +11,8 @@ force; this adapter only removes a false module ambiguity.
 Phase 7 adds a second fail-closed boundary: immediately before prepare the current
 AutoMod plan is rebuilt from the Evidence Graph, and every executable MenuSpec control
 produced by the legacy autopilot must map to an RVA explicitly admitted by that plan.
+When the Evidence Graph also carries an exact metadata MethodDef id, the generated
+control must preserve that same method identity; sharing an RVA alone is not enough.
 Runtime/read-only and review evidence therefore cannot become executable controls via
 a legacy prepare path.
 
@@ -21,6 +23,7 @@ provenance so a prepared menu can be audited without treating recovery as build 
 from __future__ import annotations
 
 import json
+import re
 import threading
 from pathlib import Path
 from typing import Any
@@ -88,17 +91,47 @@ def _number(value: Any) -> int | None:
     return None
 
 
-def _phase7_allowed_rvas(plan: dict[str, Any]) -> set[int]:
+def _candidate_method_id(row: dict[str, Any]) -> int | None:
+    for key in ("locator", "resolvedLocator", "nativeRvaRecovery"):
+        source = row.get(key) if isinstance(row.get(key), dict) else {}
+        for name in ("metadataMethodId", "methodId", "methodIndex", "id"):
+            method_id = _number(source.get(name))
+            if method_id is not None and method_id >= 0:
+                return method_id
+    return None
+
+
+def _control_method_id(control: dict[str, Any]) -> int | None:
+    for name in ("metadataMethodId", "methodId", "methodIndex"):
+        method_id = _number(control.get(name))
+        if method_id is not None and method_id >= 0:
+            return method_id
+    verification = control.get("method_verification") if isinstance(control.get("method_verification"), dict) else {}
+    for name in ("metadataMethodId", "methodId", "methodIndex"):
+        method_id = _number(verification.get(name))
+        if method_id is not None and method_id >= 0:
+            return method_id
+    finding = str(control.get("finding_id") or control.get("findingId") or "")
+    match = re.fullmatch(r"deep\.method\.(\d+)", finding)
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def _phase7_allowed_bindings(plan: dict[str, Any]) -> tuple[set[int], dict[int, set[int]]]:
     policy = plan.get("phase7Policy") if isinstance(plan.get("phase7Policy"), dict) else {}
     if not policy.get("refinedCatalogRequiresControlCandidate"):
         raise ValueError("AutoMod Phase 7 policy missing: rebuild the Evidence Graph plan")
     candidates = plan.get("candidates") if isinstance(plan.get("candidates"), list) else []
     allowed: set[int] = set()
+    methods_by_rva: dict[int, set[int]] = {}
     executable_rows = 0
     for row in candidates:
         if not isinstance(row, dict) or not bool(row.get("executableControl")):
             continue
         executable_rows += 1
+        method_id = _candidate_method_id(row)
+        row_rvas: set[int] = set()
         for key in ("locator", "resolvedLocator", "nativeRvaRecovery"):
             source = row.get(key) if isinstance(row.get(key), dict) else {}
             rva = _number(source.get("rva"))
@@ -106,6 +139,11 @@ def _phase7_allowed_rvas(plan: dict[str, Any]) -> set[int]:
                 rva = _number(source.get("rvaHex"))
             if rva is not None and rva > 0:
                 allowed.add(rva)
+                row_rvas.add(rva)
+        for rva in row_rvas:
+            bucket = methods_by_rva.setdefault(rva, set())
+            if method_id is not None:
+                bucket.add(method_id)
     declared = int(plan.get("executableControlCount") or 0)
     if declared <= 0 or executable_rows <= 0:
         raise ValueError("AutoMod Phase 7: no quality-gated executable controls")
@@ -113,16 +151,24 @@ def _phase7_allowed_rvas(plan: dict[str, Any]) -> set[int]:
         raise ValueError("AutoMod Phase 7: executable control count mismatch")
     if not allowed:
         raise ValueError("AutoMod Phase 7: executable controls have no exact native RVA")
+    return allowed, methods_by_rva
+
+
+def _phase7_allowed_rvas(plan: dict[str, Any]) -> set[int]:
+    allowed, _ = _phase7_allowed_bindings(plan)
     return allowed
 
 
-def _validate_phase7_menu(root: str | Path, plan: dict[str, Any], allowed_rvas: set[int], cb=None) -> dict[str, Any]:
+def _validate_phase7_menu(root: str | Path, plan: dict[str, Any], allowed_rvas: set[int], cb=None,
+                          allowed_methods_by_rva: dict[int, set[int]] | None = None) -> dict[str, Any]:
     workspace = Path(root)
     audit_path = workspace / "menu-native-recovery.json"
     menu_path = workspace / "menu-spec.json"
     audit = _load_json(audit_path)
     menu = _load_json(menu_path)
     controls = menu.get("controls") if isinstance(menu.get("controls"), list) else []
+    if allowed_methods_by_rva is None:
+        _, allowed_methods_by_rva = _phase7_allowed_bindings(plan)
     accepted: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
     for index, control in enumerate(controls):
@@ -136,19 +182,31 @@ def _validate_phase7_menu(root: str | Path, plan: dict[str, Any], allowed_rvas: 
         executable = bool(binding) and rva is not None and rva > 0 and visual != "label" and not probe
         if not executable:
             continue
+        method_id = _control_method_id(control)
+        expected_methods = allowed_methods_by_rva.get(rva, set())
         row = {
             "index": index,
             "id": control.get("id"),
             "title": control.get("title"),
+            "findingId": control.get("finding_id") or control.get("findingId"),
+            "metadataMethodId": method_id,
             "rva": rva,
             "rvaHex": f"0x{rva:x}",
             "binding": binding,
         }
-        if rva in allowed_rvas:
+        reason = None
+        if rva not in allowed_rvas:
+            reason = "rva-not-allowed"
+        elif expected_methods and method_id is None:
+            reason = "method-identity-missing"
+        elif expected_methods and method_id not in expected_methods:
+            reason = "method-identity-mismatch"
+        if reason is None:
             accepted.append(row)
         else:
-            rejected.append(row)
+            rejected.append({**row, "reason": reason, "expectedMetadataMethodIds": sorted(expected_methods)})
 
+    identity_bound = {rva: sorted(ids) for rva, ids in allowed_methods_by_rva.items() if ids}
     gate = {
         "schema": PHASE7_GATE_SCHEMA,
         "validated": not rejected,
@@ -156,9 +214,12 @@ def _validate_phase7_menu(root: str | Path, plan: dict[str, Any], allowed_rvas: 
         "policySchema": (plan.get("phase7Policy") or {}).get("schema") if isinstance(plan.get("phase7Policy"), dict) else None,
         "executableControlCount": int(plan.get("executableControlCount") or 0),
         "allowedRvaCount": len(allowed_rvas),
+        "identityBoundRvaCount": len(identity_bound),
+        "methodIdentityRequiredForBoundRva": True,
         "validatedMenuControlCount": len(accepted),
         "rejectedControlCount": len(rejected),
         "allowedRvas": [f"0x{value:x}" for value in sorted(allowed_rvas)],
+        "allowedMethodIdsByRva": {f"0x{rva:x}": ids for rva, ids in sorted(identity_bound.items())},
         "accepted": accepted,
         "rejected": rejected,
         "runtimeEvidencePromotesBuildability": False,
@@ -169,7 +230,7 @@ def _validate_phase7_menu(root: str | Path, plan: dict[str, Any], allowed_rvas: 
     if rejected:
         audit["completed"] = False
         audit["errorType"] = "Phase7ExecutableControlRejected"
-        audit["error"] = "Generated MenuSpec contains executable controls outside the current Evidence Graph allowlist"
+        audit["error"] = "Generated MenuSpec contains executable controls outside the current Evidence Graph identity allowlist"
     _write_audit(audit_path, audit)
     engine.check(cb)
     if rejected:
@@ -287,7 +348,7 @@ def prepare_workspace(workspace: str | Path, source_apk: str | Path, cb=None):
     # executable controls after the Evidence Graph or exact native evidence changed.
     from modkit.mobile import automod_cancellable
     plan = automod_cancellable.build_workspace_plan(root, root / "automod-plan.json", cb)
-    allowed_rvas = _phase7_allowed_rvas(plan)
+    allowed_rvas, allowed_methods_by_rva = _phase7_allowed_bindings(plan)
 
     result = prepare(
         root / "metadata.bin",
@@ -306,5 +367,5 @@ def prepare_workspace(workspace: str | Path, source_apk: str | Path, cb=None):
         cb=cb,
         audit_path=root / "menu-native-recovery.json",
     )
-    _validate_phase7_menu(root, plan, allowed_rvas, cb)
+    _validate_phase7_menu(root, plan, allowed_rvas, cb, allowed_methods_by_rva)
     return result
