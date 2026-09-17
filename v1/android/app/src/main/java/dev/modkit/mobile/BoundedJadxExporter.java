@@ -19,10 +19,13 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.Enumeration;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 import java.util.zip.ZipOutputStream;
 
 import jadx.api.JadxArgs;
@@ -34,12 +37,15 @@ import jadx.api.security.impl.JadxSecurity;
 import jadx.core.plugins.files.IJadxFilesGetter;
 
 /**
- * Bounded-memory full reconstruction exporter.
+ * Bounded-memory source reconstruction exporter.
  *
- * Full Analysis must not keep an entire base+split APK set inside one long-lived
- * JadxDecompiler. Each APK member is loaded, saved, closed and garbage-collected
- * before the next member is opened. Cross-split interactive xrefs remain a later
- * Decompiler 2.0 concern; this class exists to make full reconstruction reliable.
+ * Large games such as AFK Journey can contain a very large base.apk. Loading every
+ * classes*.dex from that APK into one JadxDecompiler can exceed the Android heap
+ * before Java gets a chance to throw/catch OutOfMemoryError. To keep the process
+ * alive, each APK is now opened only as a ZIP container and every root classes*.dex
+ * is extracted, decompiled, saved and closed independently. Apktool owns resource,
+ * manifest and smali reconstruction in the next pipeline stage, so JADX deliberately
+ * skips resources here instead of duplicating them in memory.
  */
 final class BoundedJadxExporter {
     static final String BACKEND="JADX 1.5.6 bounded";
@@ -54,6 +60,11 @@ final class BoundedJadxExporter {
         Result(File output,int classCount,int resourceCount,int errorCount,int warnCount,int failedInputs,boolean complete,JSONArray inputs,JSONArray degradedReasons){
             this.output=output;this.classCount=classCount;this.resourceCount=resourceCount;this.errorCount=errorCount;this.warnCount=warnCount;this.failedInputs=failedInputs;this.complete=complete;this.inputs=inputs;this.degradedReasons=degradedReasons;
         }
+    }
+
+    private static final class DexEntryInfo {
+        final String name; final long uncompressedSize;
+        DexEntryInfo(String name,long uncompressedSize){this.name=name;this.uncompressedSize=uncompressedSize;}
     }
 
     private BoundedJadxExporter(){}
@@ -73,55 +84,91 @@ final class BoundedJadxExporter {
             check(cancelled);
             File input=targetInputs.get(i);
             JSONObject row=new JSONObject().put("index",i).put("name",input.getName()).put("size",input.length());
-            File itemRoot=new File(root,String.format(Locale.ROOT,"%03d-%s",i,safe(input.getName())));
-            File outDir=new File(itemRoot,"out"),configDir=new File(itemRoot,"config"),cacheDir=new File(itemRoot,"cache"),tempDir=new File(itemRoot,"tmp");
-            mkdir(outDir);mkdir(configDir);mkdir(cacheDir);mkdir(tempDir);
-            JadxDecompiler jadx=null;
-            try{
-                if(progress!=null)progress.progress("JADX bounded: "+(i+1)+"/"+targetInputs.size()+" · "+input.getName());
-                JSONObject memoryStart=AnalysisJournal.memory();
-                AnalysisJournal.append(context,"BACKEND_START","JADX "+input.getName(),new JSONObject().put("index",i).put("total",targetInputs.size()).put("memory",memoryStart));
-                JadxArgs args=new JadxArgs();
-                args.setInputFiles(Collections.singletonList(input));
-                args.setOutDir(outDir);
-                args.setThreadsCount(1);
-                args.setCodeCache(NoOpCodeCache.INSTANCE);
-                args.setCodeWriterProvider(SimpleCodeWriter::new);
-                java.util.Set<JadxSecurityFlag> flags=JadxSecurityFlag.all();flags.remove(JadxSecurityFlag.SECURE_XML_PARSER);args.setSecurity(new JadxSecurity(flags));
-                args.setLoadJadxClsSetFile(false);
-                args.setFilesGetter(new IJadxFilesGetter(){
-                    @Override public Path getConfigDir(){return configDir.toPath();}
-                    @Override public Path getCacheDir(){return cacheDir.toPath();}
-                    @Override public Path getTempDir(){return tempDir.toPath();}
-                });
-                jadx=new JadxDecompiler(args);
-                jadx.load();check(cancelled);
-                int c=jadx.getClasses().size(),r=jadx.getResources().size();
-                jadx.save();check(cancelled);
-                int e=jadx.getErrorsCount(),w=jadx.getWarnsCount();
-                classes+=c;resources+=r;errors+=e;warns+=w;
-                row.put("status","SUCCESS").put("classes",c).put("resources",r).put("errors",e).put("warnings",w);
-                completedDirs.add(itemRoot);
-                AnalysisJournal.append(context,"BACKEND_FINISH","JADX "+input.getName(),new JSONObject().put("status","SUCCESS").put("classes",c).put("resources",r).put("errors",e).put("warnings",w).put("memory",AnalysisJournal.memory()));
-            }catch(InterruptedIOException cancelledError){throw cancelledError;}
-            catch(Throwable t){
+            File itemRoot=new File(root,String.format(Locale.ROOT,"%03d-%s",i,safe(input.getName())));mkdir(itemRoot);
+            List<DexEntryInfo> dexEntries;
+            try{dexEntries=listDexEntries(input);}catch(Throwable t){
                 failed++;
                 String message=safeMessage(t);
-                row.put("status","FAILED").put("errorClass",t.getClass().getName()).put("error",message).put("memory",AnalysisJournal.memory());
-                degraded.put(input.getName()+": "+t.getClass().getSimpleName()+": "+message);
-                AnalysisJournal.exception(context,t instanceof OutOfMemoryError?"JADX_OOM":"JADX_FAILURE",t);
-                if(progress!=null)progress.progress("JADX частичен: "+input.getName()+" · "+t.getClass().getSimpleName()+" · продолжаю следующий APK/backend.");
-            }finally{
-                if(jadx!=null)try{jadx.close();}catch(Throwable ignored){}
-                rows.put(row);
-                System.gc();
+                row.put("status","FAILED").put("dexCount",0).put("errorClass",t.getClass().getName()).put("error",message);
+                rows.put(row);degraded.put(input.getName()+": "+t.getClass().getSimpleName()+": "+message);
+                AnalysisJournal.exception(context,"JADX_CONTAINER_FAILURE",t);
+                continue;
             }
+            row.put("dexCount",dexEntries.size()).put("resourcesDelegatedToApktool",true);
+            if(dexEntries.isEmpty()){
+                row.put("status","NO_DEX").put("dexSucceeded",0).put("dexFailed",0);
+                rows.put(row);completedDirs.add(itemRoot);continue;
+            }
+
+            int apkClasses=0,apkErrors=0,apkWarns=0,dexSucceeded=0,dexFailed=0;
+            JSONArray dexRows=new JSONArray();
+            for(int d=0;d<dexEntries.size();d++){
+                check(cancelled);
+                DexEntryInfo dexInfo=dexEntries.get(d);
+                File dexRoot=new File(itemRoot,String.format(Locale.ROOT,"dex-%03d-%s",d,safe(dexInfo.name)));
+                File outDir=new File(dexRoot,"out"),configDir=new File(dexRoot,"config"),cacheDir=new File(dexRoot,"cache"),tempDir=new File(dexRoot,"tmp"),dexFile=new File(dexRoot,"input.dex");
+                mkdir(outDir);mkdir(configDir);mkdir(cacheDir);mkdir(tempDir);
+                JSONObject dexRow=new JSONObject().put("index",d).put("entry",dexInfo.name).put("declaredSize",dexInfo.uncompressedSize);
+                JadxDecompiler jadx=null;
+                try{
+                    if(progress!=null)progress.progress("JADX bounded: "+(i+1)+"/"+targetInputs.size()+" · "+input.getName()+" · DEX "+(d+1)+"/"+dexEntries.size()+" · "+dexInfo.name);
+                    extractDex(input,dexInfo.name,dexFile,cancelled);
+                    dexRow.put("size",dexFile.length());
+                    AnalysisJournal.append(context,"BACKEND_START","JADX "+input.getName()+"!"+dexInfo.name,new JSONObject().put("apkIndex",i).put("dexIndex",d).put("dexTotal",dexEntries.size()).put("memory",AnalysisJournal.memory()));
+
+                    JadxArgs args=new JadxArgs();
+                    args.setInputFiles(Collections.singletonList(dexFile));
+                    args.setOutDir(outDir);
+                    args.setThreadsCount(1);
+                    args.setSkipResources(true);
+                    args.setCodeCache(NoOpCodeCache.INSTANCE);
+                    args.setCodeWriterProvider(SimpleCodeWriter::new);
+                    java.util.Set<JadxSecurityFlag> flags=JadxSecurityFlag.all();flags.remove(JadxSecurityFlag.SECURE_XML_PARSER);args.setSecurity(new JadxSecurity(flags));
+                    args.setLoadJadxClsSetFile(false);
+                    args.setFilesGetter(new IJadxFilesGetter(){
+                        @Override public Path getConfigDir(){return configDir.toPath();}
+                        @Override public Path getCacheDir(){return cacheDir.toPath();}
+                        @Override public Path getTempDir(){return tempDir.toPath();}
+                    });
+                    jadx=new JadxDecompiler(args);
+                    jadx.load();check(cancelled);
+                    int c=jadx.getClasses().size();
+                    jadx.save();check(cancelled);
+                    int e=jadx.getErrorsCount(),w=jadx.getWarnsCount();
+                    apkClasses+=c;apkErrors+=e;apkWarns+=w;classes+=c;errors+=e;warns+=w;dexSucceeded++;
+                    dexRow.put("status","SUCCESS").put("classes",c).put("errors",e).put("warnings",w);
+                    AnalysisJournal.append(context,"BACKEND_FINISH","JADX "+input.getName()+"!"+dexInfo.name,new JSONObject().put("status","SUCCESS").put("classes",c).put("errors",e).put("warnings",w).put("memory",AnalysisJournal.memory()));
+                }catch(InterruptedIOException cancelledError){throw cancelledError;}
+                catch(Throwable t){
+                    dexFailed++;
+                    String message=safeMessage(t);
+                    dexRow.put("status","FAILED").put("errorClass",t.getClass().getName()).put("error",message).put("memory",AnalysisJournal.memory());
+                    degraded.put(input.getName()+"!"+dexInfo.name+": "+t.getClass().getSimpleName()+": "+message);
+                    AnalysisJournal.exception(context,t instanceof OutOfMemoryError?"JADX_DEX_OOM":"JADX_DEX_FAILURE",t);
+                    if(progress!=null)progress.progress("JADX DEX частичен: "+input.getName()+"!"+dexInfo.name+" · "+t.getClass().getSimpleName()+" · продолжаю следующий DEX.");
+                }finally{
+                    if(jadx!=null)try{jadx.close();}catch(Throwable ignored){}
+                    dexRows.put(dexRow);
+                    try{Files.deleteIfExists(dexFile.toPath());}catch(Exception ignored){}
+                    try{deleteTree(cacheDir);}catch(Exception ignored){}
+                    try{deleteTree(tempDir);}catch(Exception ignored){}
+                    System.gc();
+                }
+            }
+
+            boolean apkComplete=dexFailed==0;
+            if(!apkComplete)failed++;
+            row.put("status",apkComplete?"SUCCESS":"PARTIAL").put("dexSucceeded",dexSucceeded).put("dexFailed",dexFailed)
+                    .put("classes",apkClasses).put("errors",apkErrors).put("warnings",apkWarns).put("dex",dexRows);
+            rows.put(row);completedDirs.add(itemRoot);
         }
 
         check(cancelled);
         JSONObject manifest=new JSONObject()
-                .put("schema","modkit-jadx-bounded-1.0")
+                .put("schema","modkit-jadx-bounded-1.1")
                 .put("backend",BACKEND)
+                .put("strategy","APK_CONTAINER_TO_SINGLE_DEX")
+                .put("resourcesDelegatedToApktool",true)
                 .put("complete",failed==0)
                 .put("inputCount",targetInputs.size())
                 .put("failedInputs",failed)
@@ -136,6 +183,34 @@ final class BoundedJadxExporter {
         catch(Error e){try{Files.deleteIfExists(tmp.toPath());}catch(Exception ignored){}throw e;}
         Files.move(tmp.toPath(),zip.toPath(),StandardCopyOption.REPLACE_EXISTING);
         return new Result(zip,classes,resources,errors,warns,failed,failed==0,rows,degraded);
+    }
+
+    private static List<DexEntryInfo> listDexEntries(File apk)throws IOException{
+        ArrayList<DexEntryInfo> out=new ArrayList<>();
+        try(ZipFile zip=new ZipFile(apk)){
+            Enumeration<? extends ZipEntry> entries=zip.entries();
+            while(entries.hasMoreElements()){
+                ZipEntry entry=entries.nextElement();if(entry.isDirectory())continue;
+                String name=entry.getName();
+                if(name.matches("classes(?:\\d+)?\\.dex"))out.add(new DexEntryInfo(name,entry.getSize()));
+            }
+        }
+        out.sort(Comparator.comparingInt(value->dexOrdinal(value.name)));
+        return out;
+    }
+
+    private static int dexOrdinal(String name){
+        if("classes.dex".equals(name))return 1;
+        try{return Integer.parseInt(name.substring("classes".length(),name.length()-".dex".length()));}catch(Exception ignored){return Integer.MAX_VALUE;}
+    }
+
+    private static void extractDex(File apk,String entryName,File destination,AtomicBoolean cancelled)throws Exception{
+        try(ZipFile zip=new ZipFile(apk)){
+            ZipEntry entry=zip.getEntry(entryName);if(entry==null||entry.isDirectory())throw new IOException("DEX entry исчез: "+entryName);
+            try(InputStream in=new BufferedInputStream(zip.getInputStream(entry));BufferedOutputStream out=new BufferedOutputStream(new FileOutputStream(destination))){
+                byte[] buffer=new byte[256*1024];int n;while((n=in.read(buffer))!=-1){check(cancelled);out.write(buffer,0,n);}out.flush();
+            }
+        }catch(Exception e){try{Files.deleteIfExists(destination.toPath());}catch(Exception ignored){}throw e;}
     }
 
     private static void check(AtomicBoolean cancelled)throws InterruptedIOException{if((cancelled!=null&&cancelled.get())||Thread.currentThread().isInterrupted())throw new InterruptedIOException("cancelled");}
