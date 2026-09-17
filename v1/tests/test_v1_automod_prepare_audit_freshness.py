@@ -119,6 +119,25 @@ def test_automod_build_routes_through_final_sha_guard_only_for_automod_path():
     assert '()->app.cancelled.get()' in guard
 
 
+def test_build_guard_restores_canonical_preflight_after_legacy_worker_finishes():
+    guard = (ANDROID / "AutoModBuildGuardService.java").read_text(encoding="utf-8")
+
+    worker = guard.index('startForegroundService(worker);')
+    handoff = guard.index('handedOff=true;', worker)
+    restore_call = guard.index('restoreCanonicalStateAfterWorker(source);', handoff)
+    helper = guard.index('private void restoreCanonicalStateAfterWorker(File originalSource)')
+    wait = guard.index('while(app.busy.get()&&!app.cancelled.get()', helper)
+    target = guard.index('TargetResolver.requireVerified(current,app.cancelled)', wait)
+    refresh = guard.index('AutoModAuditVerifier.refreshCanonicalPreflight', target)
+    verify = guard.index('AutoModAuditVerifier.verifyCurrent', refresh)
+    ready_journal = guard.index('"AUTOMOD_POSTBUILD_CANONICAL_READY"', verify)
+    assert worker < handoff < restore_call < helper < wait < target < refresh < verify < ready_journal
+    assert 'WORKER_WAIT_MS=45L*60L*1000L' in guard
+    assert '"AUTOMOD_POSTBUILD_REFRESH_TIMEOUT"' in guard
+    assert '"AUTOMOD_POSTBUILD_REFRESH_FAILED"' in guard
+    assert 'source.getCanonicalPath().equals(originalSource.getCanonicalPath())' in guard
+
+
 def test_patch_lab_cleans_saf_destination_and_busy_state_when_build_service_does_not_start():
     activity = (ANDROID / "AutoModActivity.java").read_text(encoding="utf-8")
 
