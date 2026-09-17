@@ -65,8 +65,13 @@ def test_created_saf_outputs_are_removed_when_worker_cannot_start():
     assert "DocumentsContract.deleteDocument" in patch
     assert '"native_save_uri".equals(op)' in native
     assert "DocumentsContract.deleteDocument" in native
-    assert 'buildOp="workspace_build".equals' in workspace
-    assert "deleteCreatedDocument(output)" in workspace
+
+    # File Workspace now routes builds through a dedicated SHA-bound guard rather
+    # than WorkerService's old workspace_build operation. Both the busy rejection
+    # and launch-failure paths must delete the newly-created SAF destination.
+    assert "WorkspaceBuildGuardService.class" in workspace
+    assert "if(app.busy.get()){deleteCreatedDocument(uri);" in workspace
+    assert "catch(Exception e){app.busy.set(false);app.revision++;deleteCreatedDocument(uri);" in workspace
 
 
 def test_input_documents_are_not_classified_as_created_outputs():
