@@ -100,7 +100,7 @@ public class TargetPreparationService extends Service {
             "menu-spec.json","menu-result.json","menu-preflight.json","menu-validation.json","menu-auto-prepare.json","menu-auto-prepare-deep.json","menu-auto-confirm.json","menu-autopilot.json","menu-probe-prepare.json","menu-spec.simple-source.json","menu-native-recovery.json","menu-native-recovery.json.tmp","menu-project",
             "menu-payload-report.json","menu-apk-report.json","menu-payload-build.zip","menu-unsigned.apk",
             "patchpack-report.json","patchpack-unsigned.apk",
-            "workspace-patch.zip","workspace-patch.zip.tmp","workspace-source.json","workspace-report.json","workspace-edit.bin","workspace-unsigned.apk",
+            "workspace-patch.zip","workspace-patch.zip.tmp","workspace-patch-stale","workspace-source.json","workspace-source.json.part","workspace-report.json","workspace-edit.bin","workspace-preview.bin","workspace-preview.bin.part","workspace-preview.json","workspace-preview.json.part","workspace-unsigned.apk",
             "target-signed.apk","target-signed.apks","target-signed-set",
             "connected-report.json","connected-report.json.part","connected-report.md","connected-report.md.part","evidence-bundle.zip"
         };
