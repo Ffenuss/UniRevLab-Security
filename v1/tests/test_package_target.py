@@ -130,3 +130,79 @@ def test_build_output_plan_is_fail_closed_and_marks_exact_owner(tmp_path):
     blocked = json.loads(build_output_plan(target))
     assert blocked["ready"] is False
     assert "partial-scan" in blocked["blockers"]
+
+
+def test_build_target_manifest_malformed_numeric_scan_is_partial_not_exception(tmp_path):
+    base = tmp_path / "base.apk"
+    base.write_bytes(b"base")
+    scan = {
+        "splits": [{
+            "index": "not-an-index",
+            "name": base.name,
+            "path": str(base),
+            "size": "bad-size",
+            "sha256": hashlib.sha256(base.read_bytes()).hexdigest(),
+            "dexCount": "bad-dex",
+            "nativeCount": "bad-native",
+        }],
+        "selected": {"library": {"splitIndex": "bad-owner"}},
+        "fullIl2cppPair": True,
+    }
+    target = json.loads(build_target_manifest(scan, "dev.test", expected_apk_count=1, copy_errors_json=[]))
+    assert target["scanCompleteness"] == "PARTIAL"
+    assert target["patchOwner"] is None
+    assert target["normalizationErrors"]
+    assert "split[0]:invalid-index" in target["normalizationErrors"]
+    assert "selected-library:invalid-split-index" in target["normalizationErrors"]
+    verify = json.loads(verify_target_manifest(target))
+    assert verify["ok"] is False
+    assert verify["splits"][0]["reason"] == "invalid-index"
+
+
+def test_verify_target_manifest_malformed_external_indices_fail_closed(tmp_path):
+    base = tmp_path / "base.apk"
+    base.write_bytes(b"base")
+    target = json.loads(build_target_manifest({"splits": [_split(base, 0)]}, "dev.test", expected_apk_count=1, copy_errors_json=[]))
+    target["splits"][0]["index"] = {"hostile": "shape"}
+    verify = json.loads(verify_target_manifest(target))
+    assert verify["ok"] is False
+    assert verify["splits"][0]["reason"] == "invalid-index"
+    assert verify["fingerprintOk"] is True  # fingerprinting stays deterministic and non-throwing
+
+
+def test_verify_target_manifest_malformed_patch_owner_index_fail_closed(tmp_path):
+    base = tmp_path / "base.apk"
+    base.write_bytes(b"base")
+    scan = {
+        "splits": [_split(base, 0)],
+        "selected": {"library": {"splitIndex": 0, "entry": "lib/arm64-v8a/libil2cpp.so"}},
+        "fullIl2cppPair": True,
+    }
+    target = json.loads(build_target_manifest(scan, "dev.test", expected_apk_count=1, copy_errors_json=[]))
+    target["patchOwner"]["splitIndex"] = [0]
+    verify = json.loads(verify_target_manifest(target))
+    assert verify["ok"] is False
+    assert verify["patchOwnerOk"] is False
+
+
+def test_build_output_plan_rejects_malformed_or_duplicate_indexes_without_raising(tmp_path):
+    base = tmp_path / "base.apk"
+    other = tmp_path / "other.apk"
+    base.write_bytes(b"base")
+    other.write_bytes(b"other")
+    target = json.loads(build_target_manifest(
+        {"splits": [_split(base, 0), _split(other, 1)]},
+        "dev.test", expected_apk_count=2, copy_errors_json=[]))
+    target["splits"][0]["index"] = "bad"
+    target["splits"][1]["index"] = "bad-too"
+    plan = json.loads(build_output_plan(target))
+    assert plan["ready"] is False
+    assert "invalid-split-index" in plan["blockers"]
+    assert plan["entries"] == []
+
+
+def test_verify_target_manifest_invalid_json_returns_fail_closed_report():
+    verify = json.loads(verify_target_manifest("{not-json"))
+    assert verify["ok"] is False
+    assert verify["schemaOk"] is False
+    assert verify["countOk"] is False
