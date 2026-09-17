@@ -53,9 +53,11 @@ def test_prepare_service_independently_verifies_python_audit_before_ready_messag
     source = (ANDROID / "AutoModPrepareService.java").read_text(encoding="utf-8")
 
     prepare = source.index('callAttr("prepare_workspace"')
-    verify = source.index("AutoModAuditVerifier.verifyCurrent", prepare)
-    ready = source.index("exact SHA verified", verify)
-    assert prepare < verify < ready
+    bind = source.index("AutoModAuditVerifier.bindPhase7Inputs", prepare)
+    verify = source.index("AutoModAuditVerifier.verifyCurrent", bind)
+    journal = source.index('"AUTOMOD_PREPARE_READY"', verify)
+    ready = source.index("Phase 7 plan/catalog SHA verified", journal)
+    assert prepare < bind < verify < journal < ready
     assert '()->app.cancelled.get()' in source
     assert '"menu-native-recovery.json.tmp"' in source
 
@@ -64,7 +66,7 @@ def test_patch_lab_requires_sha_bound_audit_for_build_gate():
     source = (ANDROID / "AutoModActivity.java").read_text(encoding="utf-8")
 
     assert 'AutoModAuditVerifier.structurallyReady(read("menu-native-recovery.json"))' in source
-    assert "Exact SHA audit:" in source
+    assert "Phase 7 audit:" in source
     assert "не SHA-bound" in source
     assert 'build.setEnabled(idle&&prepareCount>0&&preflightReady&&exactPrepareAuditReady())' in source
 
