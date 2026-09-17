@@ -6,6 +6,7 @@ android {
     namespace 'dev.modkit.mobile'
     compileSdk 34
     ndkVersion '26.1.10909125'
+    buildFeatures { buildConfig true }
     defaultConfig {
         applicationId 'dev.modkit.mobile'
         minSdk 26
