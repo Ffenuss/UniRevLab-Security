@@ -44,6 +44,25 @@ def test_workspace_source_entry_identity_survives_working_copy_saves():
     assert "sha256(original)" not in prepare
 
 
+def test_workspace_editor_mode_switch_preserves_current_bytes_and_unsaved_edits():
+    src = read("FileWorkspaceActivity.java")
+    assert 'private String renderedEditorText="";' in src
+    assert 'modeButton=button("Режим: AUTO",root,v->switchMode())' in src
+
+    render = src.split("private void render()", 1)[1].split("private byte[] editedBytes()", 1)[0]
+    assert "renderedEditorText=hexMode?toHex(original):new String(original,StandardCharsets.UTF_8)" in render
+    assert "editor.setText(renderedEditorText)" in render
+
+    edited = src.split("private byte[] editedBytes()", 1)[1].split("private void switchMode()", 1)[0]
+    assert "if(s.equals(renderedEditorText))return original" in edited
+
+    switch = src.split("private void switchMode()", 1)[1].split("private void saveWorking()", 1)[0]
+    assert "byte[] current=editedBytes()" in switch
+    assert "original=current" in switch
+    assert "hexMode=!hexMode" in switch
+    assert "render()" in switch
+
+
 def test_workspace_build_goes_through_guard_not_direct_worker():
     src = read("FileWorkspaceActivity.java")
     start_build = src.split("private void startBuild(Uri uri)", 1)[1].split("private boolean startWork", 1)[0]
