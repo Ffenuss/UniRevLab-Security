@@ -30,7 +30,10 @@ def test_package_target_uses_library_owning_split_and_requires_whole_set_signing
     assert target["scanCompleteness"] == "COMPLETE"
     assert target["patchOwner"]["splitIndex"] == 1
     assert target["patchOwner"]["path"] == str(arm64)
-    assert json.loads(verify_target_manifest(target))["ok"] is True
+    verify = json.loads(verify_target_manifest(target))
+    assert verify["ok"] is True
+    assert verify["countOk"] is True
+    assert verify["patchOwnerOk"] is True
 
 
 def test_package_target_marks_copy_errors_partial_and_detects_tamper(tmp_path):
@@ -42,7 +45,67 @@ def test_package_target_marks_copy_errors_partial_and_detects_tamper(tmp_path):
     base.write_bytes(b"changed")
     verify = json.loads(verify_target_manifest(target))
     assert verify["ok"] is False
+    assert verify["scanComplete"] is False
+    assert verify["countOk"] is False
     assert verify["splits"][0]["reason"] == "sha256-mismatch"
+
+
+def test_verify_target_manifest_rejects_partial_even_when_present_members_match(tmp_path):
+    base = tmp_path / "000-base.apk"
+    base.write_bytes(b"base")
+    scan = {"splits": [_split(base, 0)], "selected": {}, "fullIl2cppPair": False}
+    target = json.loads(build_target_manifest(scan, "dev.test", expected_apk_count=2, copy_errors_json=["missing split"]))
+    verify = json.loads(verify_target_manifest(target))
+    assert verify["splits"][0]["ok"] is True
+    assert verify["ok"] is False
+    assert verify["scanComplete"] is False
+    assert verify["countOk"] is False
+
+
+def test_verify_target_manifest_rejects_full_il2cpp_pair_without_patch_owner(tmp_path):
+    base = tmp_path / "000-base.apk"
+    base.write_bytes(b"base")
+    scan = {"splits": [_split(base, 0)], "selected": {}, "fullIl2cppPair": True}
+    target = json.loads(build_target_manifest(scan, "dev.test", expected_apk_count=1, copy_errors_json=[]))
+    assert target["patchOwner"] is None
+    verify = json.loads(verify_target_manifest(target))
+    assert verify["ok"] is False
+    assert verify["patchOwnerOk"] is False
+
+
+def test_verify_target_manifest_rejects_owner_path_or_sha_not_bound_to_member(tmp_path):
+    base = tmp_path / "000-base.apk"
+    arm64 = tmp_path / "001-arm64.apk"
+    base.write_bytes(b"base")
+    arm64.write_bytes(b"arm64")
+    scan = {
+        "splits": [_split(base, 0), _split(arm64, 1)],
+        "selected": {"library": {"splitIndex": 1, "entry": "lib/arm64-v8a/libil2cpp.so", "abi": "arm64-v8a"}},
+        "fullIl2cppPair": True,
+    }
+    target = json.loads(build_target_manifest(scan, "dev.test", expected_apk_count=2, copy_errors_json=[]))
+    target["patchOwner"]["path"] = str(base)
+    verify = json.loads(verify_target_manifest(target))
+    assert verify["ok"] is False
+    assert verify["patchOwnerOk"] is False
+
+    target = json.loads(build_target_manifest(scan, "dev.test", expected_apk_count=2, copy_errors_json=[]))
+    target["patchOwner"]["sha256"] = "0" * 64
+    verify = json.loads(verify_target_manifest(target))
+    assert verify["ok"] is False
+    assert verify["patchOwnerOk"] is False
+
+
+def test_verify_target_manifest_rejects_duplicate_member_identity(tmp_path):
+    base = tmp_path / "000-base.apk"
+    other = tmp_path / "001-other.apk"
+    base.write_bytes(b"base")
+    other.write_bytes(b"other")
+    target = json.loads(build_target_manifest({"splits": [_split(base, 0), _split(other, 1)]}, "dev.test", expected_apk_count=2, copy_errors_json=[]))
+    target["splits"][1]["index"] = 0
+    verify = json.loads(verify_target_manifest(target))
+    assert verify["ok"] is False
+    assert verify["splits"][1]["reason"] == "duplicate-or-invalid-index"
 
 
 def test_build_output_plan_is_fail_closed_and_marks_exact_owner(tmp_path):
