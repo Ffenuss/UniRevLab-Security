@@ -1,5 +1,9 @@
 package dev.modkit.mobile;
 
+import com.chaquo.python.PyObject;
+import com.chaquo.python.Python;
+import com.chaquo.python.android.AndroidPlatform;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -95,9 +99,44 @@ final class AutoModAuditVerifier {
         return audit;
     }
 
+    /**
+     * Rebuild the preflight from the exact current MenuSpec/source APK before a build.
+     *
+     * Legacy Menu Builder callers may rewrite menu-preflight.json without the newer
+     * callable/range readiness fields.  We never trust or merely re-hash that file:
+     * all stable inputs and MenuSpec are verified first, the base report is regenerated
+     * by the canonical Python review_preflight implementation, then callable_preflight
+     * augments it, and only that regenerated artifact is SHA-bound into the audit.
+     */
+    static JSONObject refreshCanonicalPreflight(App app,File sourceApk,CancelGate gate)throws Exception {
+        JSONObject audit=read(app);
+        if(!structurallyReady(audit))throw new IOException("Exact recovery audit не готов к canonical preflight refresh");
+        verifyStableInputs(app,sourceApk,audit,gate);
+        check(gate);
+        if(!Python.isStarted())Python.start(new AndroidPlatform(app));
+        PyObject engine=Python.getInstance().getModule("modkit.mobile.engine");
+        engine.callAttr("menu_review_preflight",
+                app.file("menu-spec.json").getPath(),sourceApk.getPath(),app.file("menu-preflight.json").getPath(),null);
+        check(gate);
+        PyObject callable=Python.getInstance().getModule("modkit.menu.callable_preflight");
+        JSONObject preflight=new JSONObject(callable.callAttr("augment_preflight_json",
+                app.file("menu-spec.json").getPath(),app.file("menu-preflight.json").getPath(),sourceApk.getPath(),0.85).toString());
+        check(gate);
+        bindPhase7Inputs(app,gate);
+        verifyCurrent(app,sourceApk,gate);
+        return preflight;
+    }
+
     static JSONObject verifyCurrent(App app,File sourceApk,CancelGate gate)throws Exception {
         JSONObject audit=read(app);
         if(!structurallyReady(audit))throw new IOException("Exact recovery audit не содержит обязательную Phase 7 identity + plan/catalog/preflight SHA-256 freshness proof");
+        verifyStableInputs(app,sourceApk,audit,gate);
+        JSONArray outputs=audit.getJSONArray("outputFingerprints");
+        verify(outputs,"menuPreflight",app.file("menu-preflight.json"),gate);
+        return audit;
+    }
+
+    private static void verifyStableInputs(App app,File sourceApk,JSONObject audit,CancelGate gate)throws Exception {
         JSONArray rows=audit.getJSONArray("inputFingerprints");
         JSONArray outputs=audit.getJSONArray("outputFingerprints");
         verify(rows,"metadata",app.file("metadata.bin"),gate);
@@ -107,13 +146,11 @@ final class AutoModAuditVerifier {
         verify(rows,"phase7Plan",app.file("automod-plan.json"),gate);
         verify(rows,"simpleCatalog",app.file("simple-catalog.json"),gate);
         verify(outputs,"menuSpec",app.file("menu-spec.json"),gate);
-        verify(outputs,"menuPreflight",app.file("menu-preflight.json"),gate);
         JSONObject phase7=audit.getJSONObject("phase7Gate");
         if(!phase7.optBoolean("validated")||!phase7.optBoolean("methodIdentityRequiredForBoundRva")||phase7.optInt("rejectedControlCount",-1)!=0)
             throw new IOException("AutoMod Phase 7 identity gate stale или содержит rejected executable control");
         if(!"EXACT_PLAN_AND_CATALOG_SHA256".equals(audit.optString("phase7FreshnessPolicy")))
             throw new IOException("AutoMod Phase 7 plan/catalog freshness policy отсутствует");
-        return audit;
     }
 
     private static JSONObject currentFingerprint(String role,File file,CancelGate gate)throws Exception {
