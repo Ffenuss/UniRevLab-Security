@@ -7,7 +7,7 @@ def test_evidence_service_never_demotes_user_cancel_to_partial():
     # IL2CPP, RE, no-RVA recovery, AutoMod and Connected Report all have local
     # partial-error recovery. A user cancellation must escape through the common
     # cancelled path before any of those blocks records PARTIAL or continues.
-    assert source.count("catch(Exception e){if(app.cancelled.get())check();") >= 5
+    assert source.count("catch(Throwable e){if(app.cancelled.get())check();") >= 5
     assert 'progress(app.cancelled.get()?"Автоанализ отменён."' in source
 
 
