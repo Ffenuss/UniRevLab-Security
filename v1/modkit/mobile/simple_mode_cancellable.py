@@ -2,10 +2,11 @@
 
 The ranking/ownership/readiness semantics remain owned by ``simple_mode``.  This
 adapter temporarily wraps the high-volume row/card hooks and replaces engine detection
-with an equivalent cancellable implementation. The release catalogue is then passed
-through the evidence-quality layer which deduplicates normalized surfaces/candidates
-without promoting weak evidence. The final catalogue is only written after a last
-cancellation check, so user cancellation never publishes a partial file.
+with an equivalent cancellable implementation. The release catalogue is enriched with
+bounded file-backed IL2CPP MethodDef/RVA evidence, then passed through the evidence-
+quality layer which deduplicates normalized surfaces/candidates without promoting weak
+evidence. The final catalogue is only written after a last cancellation check, so user
+cancellation never publishes a partial file.
 """
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ import zipfile
 
 from modkit.mobile import simple_mode as _base
 from modkit.mobile import evidence_quality as _quality
+from modkit.mobile import filebacked_method_handoff as _handoff
 
 # Keep the cancellation-aware entry point on the exact same public catalogue
 # contract as the canonical implementation; otherwise consumers see different
@@ -175,6 +177,11 @@ def build_catalog(workdir: str | Path, output_path: str | Path | None = None,
             _base._menu_card = original_menu
             _base._json = original_json
 
+    gate.force()
+    # The compact analysis.json intentionally does not inline hundreds of thousands
+    # of IL2CPP methods. Stream the bounded autopilot index here so exact MethodDef
+    # identities/RVAs reach AutoMod/connected-report without loading the full JSONL.
+    report = _handoff.enrich_catalog(report, workdir, gate.tick)
     gate.force()
     report = _quality.refine_catalog(report)
     gate.force()
