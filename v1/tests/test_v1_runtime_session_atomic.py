@@ -63,6 +63,7 @@ def test_full_rerun_invalidates_ephemeral_runtime_session_before_static_backends
         assert f'"{name}"' in helper
 
     invalidate = source.index("invalidatePerRunEvidenceState();")
-    resolve = source.index("DecompilerEngine.resolveTargetInputs(app)", invalidate)
-    inventory = source.index('stage(1,4,"Inventory:', resolve)
-    assert invalidate < resolve < inventory
+    resolve = source.index("TargetResolver.resolve(app)", invalidate)
+    verify = source.index("TargetResolver.requireVerified(target,app.cancelled)", resolve)
+    inventory = source.index('stage(1,4,"Inventory:', verify)
+    assert invalidate < resolve < verify < inventory
