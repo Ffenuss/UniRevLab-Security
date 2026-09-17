@@ -21,6 +21,7 @@ def _workspace(tmp_path: Path):
         "phase7Plan": tmp_path / "automod-plan.json",
         "simpleCatalog": tmp_path / "simple-catalog.json",
         "menuSpec": tmp_path / "menu-spec.json",
+        "menuPreflight": tmp_path / "menu-preflight.json",
     }
     for i, (role, path) in enumerate(files.items()):
         path.write_bytes((role + ":" + str(i)).encode("utf-8"))
@@ -32,7 +33,10 @@ def _workspace(tmp_path: Path):
         "inputFingerprints": [_fp(role, files[role]) for role in (
             "metadata", "library", "catalog", "sourceApk", "phase7Plan", "simpleCatalog"
         )],
-        "outputFingerprints": [_fp("menuSpec", files["menuSpec"])],
+        "outputFingerprints": [
+            _fp("menuSpec", files["menuSpec"]),
+            _fp("menuPreflight", files["menuPreflight"]),
+        ],
         "phase7Gate": {
             "schema": "modkit-automod-phase7-prepare-gate-1.0",
             "validated": True,
@@ -57,11 +61,21 @@ def test_phase7_preflight_guard_rechecks_every_bound_input(tmp_path):
     assert result["identityBoundRvaCount"] == 1
 
 
-@pytest.mark.parametrize("role", ["menuSpec", "sourceApk", "phase7Plan", "simpleCatalog", "catalog", "library", "metadata"])
+@pytest.mark.parametrize("role", ["menuPreflight", "menuSpec", "sourceApk", "phase7Plan", "simpleCatalog", "catalog", "library", "metadata"])
 def test_phase7_preflight_guard_blocks_handoff_tampering(tmp_path, role):
     files = _workspace(tmp_path)
     files[role].write_bytes(files[role].read_bytes() + b"-changed")
     with pytest.raises(Phase7PreflightError, match="changed"):
+        verify_preflight_workspace(files["sourceApk"])
+
+
+def test_phase7_guard_rejects_missing_preflight_fingerprint(tmp_path):
+    files = _workspace(tmp_path)
+    audit_path = tmp_path / "menu-native-recovery.json"
+    audit = json.loads(audit_path.read_text(encoding="utf-8"))
+    audit["outputFingerprints"] = [row for row in audit["outputFingerprints"] if row["role"] != "menuPreflight"]
+    audit_path.write_text(json.dumps(audit), encoding="utf-8")
+    with pytest.raises(Phase7PreflightError, match="menuPreflight"):
         verify_preflight_workspace(files["sourceApk"])
 
 
