@@ -241,8 +241,8 @@ def test_decompiler_is_upstream_jadx_apkset_workspace():
     assert "io.github.skylot:jadx-core:1.5.6" in gradle
     assert "io.github.skylot:jadx-dex-input:1.5.6" in gradle
     assert 'DecompilerActivity' in manifest and 'DecompilerActivity.class' in full
-    assert 'installed-target.json' in engine and 'optJSONArray("splits")' in engine
-    assert 'game.apk' in engine
+    assert 'TargetResolver.resolve(app)' in engine
+    assert 'target.apkFiles()' in engine
 
 
 def test_decompiler_is_lazy_bounded_and_smali_capable():
