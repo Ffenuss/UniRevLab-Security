@@ -49,7 +49,7 @@ def build_target_manifest(
 ) -> str:
     """Normalize Installed Scanner output into the stable package-target contract.
 
-    This contract is deliberately independent from the Android UI.  Downstream
+    This contract is deliberately independent from the Android UI. Downstream
     build/preflight code can therefore identify the exact APK which owns
     libil2cpp.so instead of silently falling back to base.apk.
     """
@@ -127,12 +127,29 @@ def verify_target_manifest(target_json: str | dict[str, Any]) -> str:
     target = _load(target_json)
     rows = []
     ok = True
+    seen_indexes: set[int] = set()
+    seen_paths: set[str] = set()
     for split in target.get("splits") or []:
         if not isinstance(split, dict):
+            ok = False
             continue
+        index = int(split.get("index", -1))
         path = Path(str(split.get("path") or ""))
         expected = str(split.get("sha256") or "")
-        row = {"index": int(split.get("index", -1)), "name": str(split.get("name") or ""), "path": str(path)}
+        row = {"index": index, "name": str(split.get("name") or ""), "path": str(path)}
+        canonical = str(path.resolve(strict=False))
+        if index < 0 or index in seen_indexes:
+            row.update({"ok": False, "reason": "duplicate-or-invalid-index"})
+            ok = False
+            rows.append(row)
+            continue
+        seen_indexes.add(index)
+        if canonical in seen_paths:
+            row.update({"ok": False, "reason": "duplicate-path"})
+            ok = False
+            rows.append(row)
+            continue
+        seen_paths.add(canonical)
         if not path.is_file():
             row.update({"ok": False, "reason": "missing"})
             ok = False
@@ -147,24 +164,75 @@ def verify_target_manifest(target_json: str | dict[str, Any]) -> str:
                 row["reason"] = "sha256-mismatch" if expected else "missing-fingerprint"
                 ok = False
         rows.append(row)
-    owner = target.get("patchOwner") if isinstance(target.get("patchOwner"), dict) else None
-    if owner is not None and not any(row.get("ok") and row.get("index") == int(owner.get("splitIndex", -1)) for row in rows):
+
+    scan_complete = target.get("scanCompleteness") == "COMPLETE"
+    if not scan_complete:
         ok = False
+    try:
+        expected_count = int(target.get("expectedApkCount"))
+    except (TypeError, ValueError):
+        expected_count = -1
+    try:
+        copied_count = int(target.get("copiedApkCount"))
+    except (TypeError, ValueError):
+        copied_count = -1
+    count_ok = expected_count > 0 and copied_count == expected_count and len(rows) == expected_count
+    if not count_ok:
+        ok = False
+
+    owner = target.get("patchOwner") if isinstance(target.get("patchOwner"), dict) else None
+    full_pair = bool(target.get("fullIl2cppPair"))
+    owner_ok = True
+    if full_pair and owner is None:
+        owner_ok = False
+        ok = False
+    if owner is not None:
+        try:
+            owner_index = int(owner.get("splitIndex", -1))
+        except (TypeError, ValueError):
+            owner_index = -1
+        owner_row = next((row for row in rows if row.get("index") == owner_index), None)
+        owner_ok = bool(owner_row and owner_row.get("ok"))
+        if not owner_ok:
+            ok = False
+        else:
+            owner_path = str(owner.get("path") or "")
+            owner_sha = str(owner.get("sha256") or "")
+            matched_split = next((split for split in target.get("splits") or [] if isinstance(split, dict) and int(split.get("index", -1)) == owner_index), None)
+            if matched_split is None:
+                owner_ok = False
+            else:
+                owner_ok = (
+                    owner_path == str(matched_split.get("path") or "")
+                    and bool(owner_sha)
+                    and owner_sha == str(matched_split.get("sha256") or "")
+                )
+            if not owner_ok:
+                ok = False
+
     package_name = str(target.get("packageName") or "")
     try:
         version_code = int(target.get("versionCode") or 0)
     except (TypeError, ValueError):
         version_code = 0
-    actual_fingerprint = _fingerprint(package_name, version_code, [x for x in target.get("splits") or [] if isinstance(x, dict)])
+    split_rows = [x for x in target.get("splits") or [] if isinstance(x, dict)]
+    actual_fingerprint = _fingerprint(package_name, version_code, split_rows)
     expected_fingerprint = str(target.get("fingerprintSha256") or "")
     fingerprint_ok = bool(expected_fingerprint and actual_fingerprint == expected_fingerprint)
     if not fingerprint_ok:
         ok = False
     return json.dumps({
-        "schema": "modkit-package-target-verify-1.0",
+        "schema": "modkit-package-target-verify-1.1",
         "ok": ok and bool(rows),
         "targetId": target.get("targetId"),
         "scanCompleteness": target.get("scanCompleteness", "PARTIAL"),
+        "scanComplete": scan_complete,
+        "expectedApkCount": expected_count,
+        "copiedApkCount": copied_count,
+        "memberCount": len(rows),
+        "countOk": count_ok,
+        "fullIl2cppPair": full_pair,
+        "patchOwnerOk": owner_ok,
         "fingerprintOk": fingerprint_ok,
         "actualFingerprintSha256": actual_fingerprint,
         "expectedFingerprintSha256": expected_fingerprint,
