@@ -403,5 +403,9 @@ def prepare_workspace(workspace: str | Path, source_apk: str | Path, cb=None):
         audit_path=root / "menu-native-recovery.json",
     )
     _validate_phase7_menu(root, plan, allowed_rvas, cb, allowed_methods_by_rva)
+    from modkit.menu.callable_preflight import augment_preflight
+    preflight = augment_preflight(root / "menu-spec.json", root / "menu-preflight.json", source_apk)
+    if isinstance(result, dict):
+        result["preflight"] = preflight
     _bind_phase7_freshness(root, cb)
     return result
