@@ -19,6 +19,7 @@ import java.io.IOException;
 /** Final exact-SHA gate before handing an AutoMod build to the legacy build worker. */
 public class AutoModBuildGuardService extends Service {
     private static final int NOTE_ID=98;
+    private static final long WORKER_WAIT_MS=45L*60L*1000L;
     private App app;
     private PowerManager.WakeLock wake;
 
@@ -40,7 +41,7 @@ public class AutoModBuildGuardService extends Service {
     @Override public int onStartCommand(Intent intent,int flags,int startId){
         if(intent!=null&&"cancel".equals(intent.getAction())){app.cancelled.set(true);progress("AutoMod build: отмена запрошена…");return START_NOT_STICKY;}
         startForeground(NOTE_ID,note("Проверяю canonical target и exact SHA перед сборкой…"));
-        wake=((PowerManager)getSystemService(POWER_SERVICE)).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"ModKit:automod-build-guard");wake.acquire(20L*60L*1000L);
+        wake=((PowerManager)getSystemService(POWER_SERVICE)).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"ModKit:automod-build-guard");wake.acquire(WORKER_WAIT_MS+5L*60L*1000L);
         getSharedPreferences("state",0).edit().putBoolean("running",true).apply();
         new Thread(()->{
             boolean handedOff=false;
@@ -71,6 +72,7 @@ public class AutoModBuildGuardService extends Service {
                                 .put("callableVerified",callableVerified)
                                 .put("parameterPolicyPending",parameterPending));
                 progress("AutoMod build: canonical target + exact SHA + canonical preflight актуальны · передаю в штатную signing сборку…");
+                restoreCanonicalStateAfterWorker(source);
             }catch(Exception e){
                 AnalysisJournal.exception(this,"AUTOMOD_BUILD_BLOCKED",e);
                 if(destination!=null&&!handedOff)try{DocumentsContract.deleteDocument(getContentResolver(),destination);}catch(Exception ignored){}
@@ -82,6 +84,40 @@ public class AutoModBuildGuardService extends Service {
             }
         },"modkit-automod-build-guard").start();
         return START_NOT_STICKY;
+    }
+
+    /**
+     * WorkerService still performs its generic menu preflight immediately before
+     * packaging. That is useful for binary safety but it rewrites menu-preflight.json
+     * without AutoMod's callable/range readiness fields. Keep this guard alive until
+     * the worker finishes, then regenerate and SHA-bind canonical state so reopening
+     * Patch Lab cannot observe a stale legacy report.
+     */
+    private void restoreCanonicalStateAfterWorker(File originalSource){
+        long deadline=System.currentTimeMillis()+WORKER_WAIT_MS;
+        try{
+            while(app.busy.get()&&!app.cancelled.get()&&System.currentTimeMillis()<deadline)Thread.sleep(250L);
+            if(app.cancelled.get())return;
+            if(app.busy.get()){
+                AnalysisJournal.append(this,"AUTOMOD_POSTBUILD_REFRESH_TIMEOUT","Legacy build worker did not finish before canonical refresh timeout",
+                        new JSONObject().put("timeoutMs",WORKER_WAIT_MS));
+                return;
+            }
+            String workerStatus=app.status;
+            TargetResolver.Target current=TargetResolver.resolve(app);TargetResolver.requireVerified(current,app.cancelled);File source=current.patchOwnerApk();
+            if(!source.getCanonicalPath().equals(originalSource.getCanonicalPath()))throw new IOException("AutoMod target изменился во время сборки");
+            JSONObject preflight=AutoModAuditVerifier.refreshCanonicalPreflight(app,source,()->app.cancelled.get());
+            AutoModAuditVerifier.verifyCurrent(app,source,()->app.cancelled.get());
+            AnalysisJournal.append(this,"AUTOMOD_POSTBUILD_CANONICAL_READY","Canonical AutoMod preflight restored after legacy build worker",
+                    new JSONObject().put("readyForAutoBuild",preflight.optBoolean("readyForAutoBuild"))
+                            .put("readyForModificationPayload",preflight.optBoolean("readyForModificationPayload"))
+                            .put("readyForProbePayload",preflight.optBoolean("readyForProbePayload"))
+                            .put("parameterPolicyPending",preflight.optInt("parameterPolicyPending",0)));
+            if(workerStatus!=null&&!workerStatus.isEmpty())progress(workerStatus+" · AutoMod preflight SHA восстановлен.");
+        }catch(Exception e){
+            AnalysisJournal.exception(this,"AUTOMOD_POSTBUILD_REFRESH_FAILED",e);
+            progress("AutoMod build завершён; canonical preflight требует повторного Exact prepare: "+String.valueOf(e.getMessage()));
+        }
     }
 
     private void check()throws IOException{if(app.cancelled.get())throw new java.io.InterruptedIOException("AutoMod build cancelled");}
