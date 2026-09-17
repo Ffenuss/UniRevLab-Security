@@ -170,7 +170,7 @@ public class WorkerService extends Service {
         for(String name:new String[]{"installed-target.json","installed-scan.json","analysis.json","analysis.summary.json","analysis.gameplay-coverage.json","re-analysis.json","re-analysis.ui.json","re-analysis.menu.json","menu-spec.json","menu-preflight.json"}){
             File source=app.file(name);if(!source.isFile())continue;try{Files.copy(source.toPath(),new File(out,name).toPath(),StandardCopyOption.REPLACE_EXISTING);}catch(Exception ignored){}
         }
-        try{Files.write(new File(project,"session.json").toPath(),new JSONObject().put("schema","modkit-project-session-1.0").put("targetId",project.getName()).put("updatedAtMs",System.currentTimeMillis()).put("modkitVersion","0.9.0-dev32").toString(2).getBytes(java.nio.charset.StandardCharsets.UTF_8));}catch(Exception ignored){}
+        try{Files.write(new File(project,"session.json").toPath(),new JSONObject().put("schema","modkit-project-session-1.0").put("targetId",project.getName()).put("updatedAtMs",System.currentTimeMillis()).put("modkitVersion",BuildConfig.VERSION_NAME).toString(2).getBytes(java.nio.charset.StandardCharsets.UTF_8));}catch(Exception ignored){}
     }
     private void persistProjectTarget(JSONObject target) throws Exception {
         String id=target.optString("targetId","").replaceAll("[^A-Za-z0-9._-]","");if(id.isEmpty())return;
