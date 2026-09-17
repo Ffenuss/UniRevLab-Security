@@ -1,11 +1,12 @@
 """Second Phase-7 freshness gate for Menu preflight/build.
 
 The Android build guard verifies the prepare audit immediately before handing work to
-the legacy WorkerService.  This module repeats the immutable-input checks from inside
-the Python preflight itself, closing the handoff window: a MenuSpec or owning APK which
-changes after the Java guard cannot become a different signed payload.
+the legacy WorkerService. This module repeats the immutable-input checks from inside
+the Python preflight itself, closing the handoff window: a MenuSpec, preflight result,
+or owning APK which changes after the Java guard cannot become a different signed
+payload.
 
-Non-AutoMod/legacy MenuSpecs remain compatible.  The guard activates only when a
+Non-AutoMod/legacy MenuSpecs remain compatible. The guard activates only when a
 sibling ``menu-native-recovery.json`` explicitly declares ``phase7PlanRequired``.
 """
 from __future__ import annotations
@@ -68,7 +69,7 @@ def _workspace(source_apk: str | Path) -> tuple[Path, dict[str, Any]] | tuple[No
             return root, audit
 
         # Explicit legacy opt-out remains supported only for workspaces which do not
-        # contain Phase-7 AutoMod artifacts.  Otherwise a truncated/tampered audit
+        # contain Phase-7 AutoMod artifacts. Otherwise a truncated/tampered audit
         # could turn an AutoMod workspace into an unguarded legacy one.
         if (root / "automod-plan.json").exists() or (root / "simple-catalog.json").exists():
             raise Phase7PreflightError("Phase 7 artifacts present while audit disables Phase 7")
@@ -107,7 +108,7 @@ def _verify_file(rows: Any, role: str, path: Path) -> None:
 def verify_preflight_workspace(source_apk: str | Path) -> dict[str, Any]:
     """Verify a completed Phase-7 audit when one owns this workspace.
 
-    Returns a compact status for diagnostics.  Absence of a Phase-7 audit is not an
+    Returns a compact status for diagnostics. Absence of a Phase-7 audit is not an
     error because legacy/non-IL2CPP Menu Builder flows intentionally remain supported.
     """
     root, audit = _workspace(source_apk)
@@ -142,6 +143,7 @@ def verify_preflight_workspace(source_apk: str | Path) -> dict[str, Any]:
     ):
         _verify_file(inputs, role, path)
     _verify_file(outputs, "menuSpec", root / "menu-spec.json")
+    _verify_file(outputs, "menuPreflight", root / "menu-preflight.json")
     return {
         "required": True,
         "verified": True,
