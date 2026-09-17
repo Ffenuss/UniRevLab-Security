@@ -30,7 +30,9 @@ def test_prepare_audit_binds_all_exact_inputs_and_generated_menu_spec():
     assert '"outputFingerprints": []' in source
     for role in ("metadata", "library", "catalog", "sourceApk"):
         assert f'_fingerprint("{role}"' in source
-    assert 'audit["outputFingerprints"] = [_fingerprint("menuSpec", menu_json_path, cb)]' in source
+    assert 'outputs = [_fingerprint("menuSpec", menu_json_path, cb)]' in source
+    assert 'outputs.append(_fingerprint("menuPreflight", output_preflight, cb))' in source
+    assert 'audit["outputFingerprints"] = outputs' in source
     assert "engine.digest(file, cb)" in source
     assert "mtime" not in source.lower()
 
