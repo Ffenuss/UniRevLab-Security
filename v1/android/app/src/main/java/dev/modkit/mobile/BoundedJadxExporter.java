@@ -39,7 +39,7 @@ import jadx.core.plugins.files.IJadxFilesGetter;
 /**
  * Bounded-memory source reconstruction exporter.
  *
- * Large games such as AFK Journey can contain a very large base.apk. Loading every
+ * Large split-heavy games can contain a very large base.apk. Loading every
  * classes*.dex from that APK into one JadxDecompiler can exceed the Android heap
  * before Java gets a chance to throw/catch OutOfMemoryError. To keep the process
  * alive, each APK is now opened only as a ZIP container and every root classes*.dex
@@ -144,7 +144,7 @@ final class BoundedJadxExporter {
                     String message=safeMessage(t);
                     dexRow.put("status","FAILED").put("errorClass",t.getClass().getName()).put("error",message).put("memory",AnalysisJournal.memory());
                     degraded.put(input.getName()+"!"+dexInfo.name+": "+t.getClass().getSimpleName()+": "+message);
-                    AnalysisJournal.exception(context,t instanceof OutOfMemoryError?"JADX_DEX_OOM":"JADX_DEX_FAILURE",t);
+                    AnalysisJournal.exception(context,t instanceof OutOfMemoryError?"JADX_OOM":"JADX_DEX_FAILURE",t);
                     if(progress!=null)progress.progress("JADX DEX частичен: "+input.getName()+"!"+dexInfo.name+" · "+t.getClass().getSimpleName()+" · продолжаю следующий DEX.");
                 }finally{
                     if(jadx!=null)try{jadx.close();}catch(Throwable ignored){}
