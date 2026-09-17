@@ -26,9 +26,11 @@ class Phase7PreflightError(ValueError):
 def _load(path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
-        return value if isinstance(value, dict) else {}
-    except Exception:
-        return {}
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise Phase7PreflightError(f"Phase 7 audit is unreadable: {path.name}") from exc
+    if not isinstance(value, dict):
+        raise Phase7PreflightError(f"Phase 7 audit root must be an object: {path.name}")
+    return value
 
 
 def _sha256(path: Path) -> str:
@@ -60,8 +62,16 @@ def _workspace(source_apk: str | Path) -> tuple[Path, dict[str, Any]] | tuple[No
         if not audit_path.is_file():
             continue
         audit = _load(audit_path)
+        if "phase7PlanRequired" not in audit:
+            raise Phase7PreflightError("Phase 7 audit missing phase7PlanRequired policy")
         if audit.get("phase7PlanRequired"):
             return root, audit
+
+        # Explicit legacy opt-out remains supported only for workspaces which do not
+        # contain Phase-7 AutoMod artifacts.  Otherwise a truncated/tampered audit
+        # could turn an AutoMod workspace into an unguarded legacy one.
+        if (root / "automod-plan.json").exists() or (root / "simple-catalog.json").exists():
+            raise Phase7PreflightError("Phase 7 artifacts present while audit disables Phase 7")
     return None, None
 
 
