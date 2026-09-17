@@ -41,6 +41,44 @@ jobs:
           set -euo pipefail
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager 'platform-tools' 'platforms;android-34' 'build-tools;34.0.0' "ndk;${NDK_PIN}" 'cmake;3.22.1'
+      - name: Resolve release metadata
+        id: release_meta
+        working-directory: v1
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(python - <<'PY'
+          import re
+          from pathlib import Path
+
+          text = Path('android/app/build.gradle').read_text(encoding='utf-8')
+          match = re.search(r"versionName\s+['\"]([^'\"]+)['\"]", text)
+          if not match:
+              raise SystemExit('versionName not found in android/app/build.gradle')
+          print(match.group(1))
+          PY
+          )"
+          test -n "$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "artifact=ModKit-Android-${VERSION}-debug" >> "$GITHUB_OUTPUT"
+          echo "Canonical version: $VERSION"
+      - name: Release source hygiene
+        working-directory: v1
+        shell: bash
+        run: |
+          set -euo pipefail
+          MODEL_FILES="$(find . -type f \( -iname '*.gguf' -o -iname '*.safetensors' -o -iname '*.onnx' -o -iname '*.pt' -o -iname '*.pth' -o -iname '*.ckpt' \) -print)"
+          if [ -n "$MODEL_FILES" ]; then
+            echo 'Forbidden offline-AI/model files are tracked in the release source tree:'
+            echo "$MODEL_FILES"
+            exit 1
+          fi
+          PRIVATE_KEYS="$(grep -RIl --exclude-dir=.git --exclude='*.md' -E 'BEGIN (RSA |OPENSSH )?PRIVATE KEY' . || true)"
+          if [ -n "$PRIVATE_KEYS" ]; then
+            echo 'Private-key material detected in release sources:'
+            echo "$PRIVATE_KEYS"
+            exit 1
+          fi
       - name: Python tests and runtime guards
         working-directory: v1
         run: |
@@ -61,25 +99,44 @@ jobs:
       - name: Android assemble
         working-directory: v1/android
         run: gradle --no-daemon :app:assembleDebug
-      - name: Verify APK container, alignment and signature
+      - name: Verify APK container, alignment, signature and release hygiene
         working-directory: v1
+        shell: bash
         run: |
           set -euo pipefail
           APK=android/app/build/outputs/apk/debug/app-debug.apk
+          CHECKSUM="${{ steps.release_meta.outputs.artifact }}.apk.sha256"
           test -s "$APK"
           unzip -t "$APK" >/dev/null
+          unzip -Z1 "$APK" | tee apk-inventory.txt >/dev/null
           "${ANDROID_HOME}/build-tools/34.0.0/zipalign" -c -p -v 4 "$APK" >/dev/null
           "${ANDROID_HOME}/build-tools/34.0.0/apksigner" verify --verbose --print-certs "$APK" | tee apk-signature.txt
-          sha256sum "$APK" | tee ModKit-Android-1.1.0-dev1-debug.apk.sha256
+          sha256sum "$APK" | tee "$CHECKSUM"
           test "$(unzip -p "$APK" AndroidManifest.xml | wc -c)" -gt 0
+
+          APK_AUDIT="$(mktemp -d)"
+          trap 'rm -rf "$APK_AUDIT"' EXIT
+          unzip -qq "$APK" -d "$APK_AUDIT"
+          PACKAGED_MODELS="$(find "$APK_AUDIT" -type f \( -iname '*.gguf' -o -iname '*.safetensors' -o -iname '*.onnx' -o -iname '*.pt' -o -iname '*.pth' -o -iname '*.ckpt' \) -print)"
+          if [ -n "$PACKAGED_MODELS" ]; then
+            echo 'Forbidden offline-AI/model files are packaged in the APK:'
+            echo "$PACKAGED_MODELS"
+            exit 1
+          fi
+          if grep -RIl -E 'BEGIN (RSA |OPENSSH )?PRIVATE KEY' "$APK_AUDIT" >/tmp/modkit-private-key-hits.txt 2>/dev/null; then
+            echo 'Private-key material is packaged in the APK:'
+            cat /tmp/modkit-private-key-hits.txt
+            exit 1
+          fi
       - name: Upload validated APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ModKit-Android-1.1.0-dev1-debug
+          name: ${{ steps.release_meta.outputs.artifact }}
           path: |
             v1/android/app/build/outputs/apk/debug/app-debug.apk
-            v1/ModKit-Android-1.1.0-dev1-debug.apk.sha256
+            v1/${{ steps.release_meta.outputs.artifact }}.apk.sha256
             v1/apk-signature.txt
+            v1/apk-inventory.txt
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
