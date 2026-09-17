@@ -15,8 +15,12 @@ def test_failed_or_cancelled_target_cannot_leave_ready_stale_artifacts():
     source = SOURCE.read_text(encoding="utf-8")
     catch = source.index("catch(Exception e){AnalysisJournal.exception")
     cleanup_call = source.index("try{cleanupFailedPreparation();}", catch)
-    progress = source.index("app.progress(", cleanup_call)
-    assert catch < cleanup_call < progress
+    # The terminal user-visible status is emitted through the service progress()
+    # wrapper after fail-closed cleanup succeeds. The old test looked for a direct
+    # app.progress() call which is no longer the service contract.
+    terminal_progress = source.index("progress(app.cancelled.get()?", cleanup_call)
+    finally_block = source.index("}finally{", terminal_progress)
+    assert catch < cleanup_call < terminal_progress < finally_block
     cleanup = source.split("private void cleanupFailedPreparation", 1)[1].split("private void checkCancelled", 1)[0]
     for name in ("installed-target.json", "installed-apks", "game.apk", "game.apk.part"):
         assert name in cleanup
