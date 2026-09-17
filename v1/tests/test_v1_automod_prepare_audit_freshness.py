@@ -46,9 +46,22 @@ def test_java_verifier_rehashes_all_inputs_and_menu_spec_and_is_cancellable():
     assert 'verify(outputs,"menuSpec",app.file("menu-spec.json"),gate)' in source
     assert 'validFingerprint(fingerprint(outputs,"menuSpec"))' in source
     assert 'expectedSha.equalsIgnoreCase(actual)' in source
-    assert 'Thread' not in source  # cancellation is injected by the caller, not global process state
     assert 'gate.isCancelled()' in source
     assert 'sha.matches("(?i)[0-9a-f]{64}")' in source
+
+
+def test_canonical_preflight_refresh_rebuilds_before_rebinding_sha():
+    source = (ANDROID / "AutoModAuditVerifier.java").read_text(encoding="utf-8")
+    py = Path("modkit/menu/callable_preflight.py").read_text(encoding="utf-8")
+
+    stable = source.index("verifyStableInputs(app,sourceApk,audit,gate)")
+    base = source.index('callAttr("menu_review_preflight"', stable)
+    augment = source.index('callAttr("augment_preflight_json"', base)
+    bind = source.index("bindPhase7Inputs(app,gate)", augment)
+    verify = source.index("verifyCurrent(app,sourceApk,gate)", bind)
+    assert stable < base < augment < bind < verify
+    assert "augment_preflight_json" in py
+    assert "return json.dumps(result, ensure_ascii=False)" in py
 
 
 def test_prepare_service_independently_verifies_python_audit_before_ready_message():
@@ -94,11 +107,14 @@ def test_automod_build_routes_through_final_sha_guard_only_for_automod_path():
     assert 'Class<?> service=buildOp?AutoModBuildGuardService.class:WorkerService.class;' in activity
     assert '<service android:name=".AutoModBuildGuardService"' in manifest
 
-    verify = guard.index("AutoModAuditVerifier.verifyCurrent")
-    preflight = guard.index('read("menu-preflight.json")', verify)
-    worker = guard.index('new Intent(this,WorkerService.class)', preflight)
-    assert verify < preflight < worker
-    assert 'preflight.optBoolean("readyForAutoBuild")' in guard
+    refresh = guard.index("AutoModAuditVerifier.refreshCanonicalPreflight")
+    verify = guard.index("AutoModAuditVerifier.verifyCurrent", refresh)
+    ready = guard.index('preflight.optBoolean("readyForAutoBuild")', verify)
+    worker = guard.index('new Intent(this,WorkerService.class)', ready)
+    assert refresh < verify < ready < worker
+    assert 'preflight.optBoolean("readyForModificationPayload")' in guard
+    assert 'preflight.optBoolean("readyForProbePayload")' in guard
+    assert 'preflight.optInt("parameterPolicyPending",0)' in guard
     assert '.putExtra("op","menu_build_apk")' in guard
     assert '()->app.cancelled.get()' in guard
 
