@@ -282,3 +282,12 @@ def augment_preflight(menu_spec_path: str | Path, preflight_path: str | Path, so
     preflight["callableVerifiedNotBuildable"] = verified > 0 and bound == 0
     _write(preflight_path, preflight)
     return preflight
+
+
+def augment_preflight_json(menu_spec_path: str | Path, preflight_path: str | Path,
+                           source_apk: str | Path, min_confidence: float = 0.85) -> str:
+    """Chaquopy-safe adapter which returns canonical JSON rather than ``dict.__str__``."""
+    result = augment_preflight(
+        menu_spec_path, preflight_path, source_apk, min_confidence=float(min_confidence)
+    )
+    return json.dumps(result, ensure_ascii=False)
