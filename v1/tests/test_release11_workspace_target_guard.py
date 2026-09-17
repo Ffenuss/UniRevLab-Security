@@ -27,6 +27,23 @@ def test_workspace_patch_records_target_and_split_identity():
     assert "sourceMember(target)" in src
 
 
+def test_workspace_source_entry_identity_survives_working_copy_saves():
+    src = read("FileWorkspaceActivity.java")
+    assert 'private String sourceEntrySha256="";' in src
+
+    opened = src.split("private void setOpened", 1)[1].split("private void openUri", 1)[0]
+    assert 'sourceEntrySha256=apk!=null&&entry!=null?sha256(data):""' in opened
+
+    saved = src.split("private void saveWorking()", 1)[1].split("private void exportEdited", 1)[0]
+    assert "original=b" in saved
+    assert "sourceEntrySha256=" not in saved
+
+    prepare = src.split("private void preparePatch()", 1)[1].split("private void buildPatched", 1)[0]
+    assert 'if(sourceEntrySha256.isEmpty())throw new IOException' in prepare
+    assert 'String originalSha=sourceEntrySha256,editedSha=sha256(b)' in prepare
+    assert "sha256(original)" not in prepare
+
+
 def test_workspace_build_goes_through_guard_not_direct_worker():
     src = read("FileWorkspaceActivity.java")
     start_build = src.split("private void startBuild(Uri uri)", 1)[1].split("private boolean startWork", 1)[0]
