@@ -26,6 +26,7 @@ public class FileWorkspaceActivity extends Activity {
     private Button save,export,patch,build,modeButton,specialized;
     private byte[] original=new byte[0];
     private String sourceEntrySha256="";
+    private String renderedEditorText="";
     private boolean hexMode=false;
     private String displayName="",targetEntry=null;
     private File sourceApk=null;
@@ -45,7 +46,7 @@ public class FileWorkspaceActivity extends Activity {
         LinearLayout top=new LinearLayout(this);top.setOrientation(LinearLayout.HORIZONTAL);root.addView(top);
         button("Открыть любой файл",top,v->startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE),OPEN_FILE));
         button("Файл из APK / split",top,v->showApkSources());
-        modeButton=button("Режим: AUTO",root,v->{if(original.length==0)return;hexMode=!hexMode;render();});
+        modeButton=button("Режим: AUTO",root,v->switchMode());
         specialized=button("Специализированный просмотр",root,v->openSpecialized());specialized.setVisibility(View.GONE);
         meta=text("Файл не открыт",13);root.addView(meta);
         editor=new EditText(this);editor.setTextColor(Color.WHITE);editor.setHintTextColor(Color.GRAY);editor.setTypeface(Typeface.MONOSPACE);editor.setTextSize(12);editor.setGravity(Gravity.TOP|Gravity.START);editor.setHorizontallyScrolling(true);editor.setSingleLine(false);editor.setPadding(dp(10),dp(10),dp(10),dp(10));
@@ -89,9 +90,10 @@ public class FileWorkspaceActivity extends Activity {
 
     private void openEntry(File apk,String name){try(ZipFile z=new ZipFile(apk)){ZipEntry e=z.getEntry(name);if(e==null)throw new FileNotFoundException(name);if(e.getSize()>MAX_EDIT_BYTES)throw new IOException("Entry больше 16 МБ. Для больших DEX/.so/Unity data используйте Decompiler, Native или RE Workspace.");byte[] data;try(InputStream in=z.getInputStream(e)){data=readLimited(in,MAX_EDIT_BYTES+1);}setOpened(data,apk.getName()+"!"+name,apk,name,"APK entry открыт. После редактирования можно подготовить Patch Pack и собрать подписанный APK/APK-set.");}catch(Exception ex){toast(ex.getMessage());}}
 
-    private void render(){if(original.length==0)return;if(format==null)format=FileFormatDetector.detect(targetEntry==null?displayName:targetEntry,original);if(hexMode){editor.setText(toHex(original));modeButton.setText("Режим: HEX · "+format.label);}else{editor.setText(new String(original,StandardCharsets.UTF_8));modeButton.setText("Режим: UTF-8 · "+format.label);}String inspection=BinaryFormatInspector.inspect(format,original,displayName);meta.setText(displayName+" · "+original.length+" bytes"+(targetEntry==null?"":"\nAPK: "+sourceApk.getName()+"\nEntry: "+targetEntry)+"\n"+inspection);updateButtons();}
-    private byte[] editedBytes() throws Exception{String s=editor.getText()==null?"":editor.getText().toString();return hexMode?fromHex(s):s.getBytes(StandardCharsets.UTF_8);}
-    private void saveWorking(){try{byte[] b=editedBytes();Files.write(app.file("workspace-edit.bin").toPath(),b);original=b;format=FileFormatDetector.detect(targetEntry==null?displayName:targetEntry,b);meta.setText(displayName+" · "+b.length+" bytes · рабочая копия сохранена\n"+BinaryFormatInspector.inspect(format,b,displayName));status.setText("Рабочая копия сохранена. SHA-256 исходного APK entry сохранён отдельно и не меняется.");updateButtons();}catch(Exception e){toast("Ошибка: "+e.getMessage());}}
+    private void render(){if(original.length==0)return;if(format==null)format=FileFormatDetector.detect(targetEntry==null?displayName:targetEntry,original);renderedEditorText=hexMode?toHex(original):new String(original,StandardCharsets.UTF_8);editor.setText(renderedEditorText);if(hexMode)modeButton.setText("Режим: HEX · "+format.label);else modeButton.setText("Режим: UTF-8 · "+format.label);String inspection=BinaryFormatInspector.inspect(format,original,displayName);meta.setText(displayName+" · "+original.length+" bytes"+(targetEntry==null?"":"\nAPK: "+sourceApk.getName()+"\nEntry: "+targetEntry)+"\n"+inspection);updateButtons();}
+    private byte[] editedBytes() throws Exception{String s=editor.getText()==null?"":editor.getText().toString();if(s.equals(renderedEditorText))return original;return hexMode?fromHex(s):s.getBytes(StandardCharsets.UTF_8);}
+    private void switchMode(){if(original.length==0)return;try{byte[] current=editedBytes();original=current;format=FileFormatDetector.detect(targetEntry==null?displayName:targetEntry,current);hexMode=!hexMode;render();status.setText("Режим изменён без потери текущих правок. Исходный APK entry остаётся привязан отдельным SHA-256.");}catch(Exception e){toast("Не удалось переключить режим: "+e.getMessage());}}
+    private void saveWorking(){try{byte[] b=editedBytes();Files.write(app.file("workspace-edit.bin").toPath(),b);original=b;format=FileFormatDetector.detect(targetEntry==null?displayName:targetEntry,b);renderedEditorText=editor.getText()==null?"":editor.getText().toString();meta.setText(displayName+" · "+b.length+" bytes · рабочая копия сохранена\n"+BinaryFormatInspector.inspect(format,b,displayName));status.setText("Рабочая копия сохранена. SHA-256 исходного APK entry сохранён отдельно и не меняется.");updateButtons();}catch(Exception e){toast("Ошибка: "+e.getMessage());}}
     private void exportEdited(){if(original.length==0)return;startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/octet-stream").addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE,targetEntry==null?displayName:new File(targetEntry).getName()),EXPORT_FILE);}
     private void writeEdited(Uri uri){try(OutputStream out=getContentResolver().openOutputStream(uri,"w")){if(out==null)throw new IOException("openOutputStream returned null");out.write(editedBytes());out.flush();status.setText("Изменённый файл экспортирован.");}catch(Exception e){deleteCreatedDocument(uri);toast(e.getMessage());}}
 
