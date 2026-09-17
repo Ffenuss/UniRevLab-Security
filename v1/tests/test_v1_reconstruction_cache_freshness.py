@@ -29,3 +29,16 @@ def test_reconstruction_hashing_remains_cancellable_and_old_manifests_fail_close
     assert 'catch(java.io.InterruptedIOException cancelled){throw cancelled;}' in source
     # Missing outputSha256/outputSize never enters the verified cache-hit branch.
     assert 'expectedSize>=0L' in source and '!expectedSha.isEmpty()' in source
+
+
+def test_large_apk_jadx_is_bounded_per_dex_instead_of_loading_whole_apk():
+    source = (ROOT / "android/app/src/main/java/dev/modkit/mobile/BoundedJadxExporter.java").read_text(encoding="utf-8")
+    assert "ZipFile" in source
+    assert 'name.matches("classes(?:\\\\d+)?\\\\.dex")' in source
+    assert "extractDex(input,dexInfo.name,dexFile,cancelled)" in source
+    assert "args.setInputFiles(Collections.singletonList(dexFile))" in source
+    assert "args.setSkipResources(true)" in source
+    assert "jadx.close()" in source
+    assert "Files.deleteIfExists(dexFile.toPath())" in source
+    assert 'put("strategy","APK_CONTAINER_TO_SINGLE_DEX")' in source
+    assert "args.setInputFiles(Collections.singletonList(input))" not in source
