@@ -65,7 +65,9 @@ def test_target_selection_prepares_only_and_full_analysis_runs_once():
     assert 'putExtra("kind","apk")' in selector
     assert 'analysisPerformed",false' in prep
     assert "WorkerService.class" not in selector
-    assert "DecompilerEngine.resolveTargetInputs" in service
+    assert "TargetResolver.resolve(app)" in service
+    assert "TargetResolver.requireVerified(target,app.cancelled)" in service
+    assert "target.apkFiles()" in service
     assert 'getModule("modkit.mobile.apkset")' in service
     assert 'callAttr("inspect_apk_paths"' in service
     assert 'getModule("modkit.mobile.package_target")' in service
