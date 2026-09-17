@@ -14,7 +14,11 @@ def test_full_reconstruction_persists_stage_remaining_and_elapsed():
     assert 'put("elapsedMs",elapsed)' in compact
     assert 'writeAtomicJson("simple-progress.json",row)' in source
     assert 'stage(1,4,"Inventory:' in source
-    assert 'stage(2,4,"JADX:' in source
+    # Stage 2 may be either a verified cache hit or a fresh bounded JADX export.
+    # Both routes must remain explicitly represented as stage 2 rather than relying
+    # on an obsolete label from the earlier exporter implementation.
+    assert 'stage(2,4,"JADX bounded: cache hit' in source
+    assert 'stage(2,4,"JADX bounded: APK/split' in source
     assert 'stage(3,4,"Apktool ' in source
     assert 'stage(4,4,"Lua/JS/Hermes deep' in source
 
