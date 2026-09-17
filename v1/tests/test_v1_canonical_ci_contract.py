@@ -22,7 +22,7 @@ def test_canonical_ci_runs_full_validation_before_artifact_upload():
         assert token in workflow
 
     assemble = workflow.index(":app:assembleDebug")
-    verify = workflow.index("Verify APK container, alignment and signature")
+    verify = workflow.index("Verify APK container, alignment, signature and release hygiene")
     upload = workflow.index("Upload validated APK artifact")
     assert assemble < verify < upload
 
@@ -33,4 +33,7 @@ def test_canonical_ci_stays_scoped_to_modkit1_and_v1():
     assert "branches: [ Modkit1 ]" in workflow
     assert "working-directory: v1" in workflow
     assert "working-directory: v1/android" in workflow
-    assert "name: ModKit-Android-1.1.0-dev1-debug" in workflow
+    assert "id: release_meta" in workflow
+    assert "versionName" in workflow
+    assert "name: ${{ steps.release_meta.outputs.artifact }}" in workflow
+    assert "ModKit-Android-1.1.0-dev1-debug" not in workflow
