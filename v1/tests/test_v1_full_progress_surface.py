@@ -8,9 +8,9 @@ def test_full_reconstruction_persists_stage_remaining_and_elapsed():
     source = (ROOT / "android/app/src/main/java/dev/modkit/mobile/FullAnalysisService.java").read_text(encoding="utf-8")
     compact = "".join(source.split())
     assert 'put("phase","RECONSTRUCTION")' in compact
-    assert 'put("stage",index)' in compact
-    assert 'put("totalStages",total)' in compact
-    assert 'put("remainingStages",Math.max(0,total-index))' in compact
+    assert 'put("stage",currentStage)' in compact
+    assert 'put("totalStages",4)' in compact
+    assert 'put("remainingStages",Math.max(0,4-currentStage))' in compact
     assert 'put("elapsedMs",elapsed)' in compact
     assert 'writeAtomicJson("simple-progress.json",row)' in source
     assert 'stage(1,4,"Inventory:' in source
@@ -21,7 +21,7 @@ def test_full_reconstruction_persists_stage_remaining_and_elapsed():
 
 def test_auto_analysis_renders_elapsed_without_fake_eta():
     source = (ROOT / "android/app/src/main/java/dev/modkit/mobile/AutoAnalysisActivity.java").read_text(encoding="utf-8")
-    assert 'p.optLong("elapsedMs")' in source
+    assert 'progressRow.optLong("elapsedMs",0L)' in source
     assert 'p.optInt("remainingStages")' in source
     assert 'phase(p)' in source
     assert 'прошло:' in source
