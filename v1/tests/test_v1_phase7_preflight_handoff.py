@@ -71,6 +71,43 @@ def test_phase7_guard_is_opt_in_for_legacy_workspaces(tmp_path):
     assert verify_preflight_workspace(source) == {"required": False, "verified": False}
 
 
+def test_phase7_guard_allows_explicit_legacy_audit_without_phase7_artifacts(tmp_path):
+    source = tmp_path / "game.apk"
+    source.write_bytes(b"legacy")
+    (tmp_path / "menu-native-recovery.json").write_text(
+        json.dumps({"phase7PlanRequired": False}), encoding="utf-8"
+    )
+    assert verify_preflight_workspace(source) == {"required": False, "verified": False}
+
+
+def test_phase7_guard_rejects_malformed_audit(tmp_path):
+    source = tmp_path / "game.apk"
+    source.write_bytes(b"target")
+    (tmp_path / "menu-native-recovery.json").write_text("{not-json", encoding="utf-8")
+    with pytest.raises(Phase7PreflightError, match="unreadable"):
+        verify_preflight_workspace(source)
+
+
+def test_phase7_guard_rejects_missing_required_policy(tmp_path):
+    files = _workspace(tmp_path)
+    audit_path = tmp_path / "menu-native-recovery.json"
+    audit = json.loads(audit_path.read_text(encoding="utf-8"))
+    audit.pop("phase7PlanRequired")
+    audit_path.write_text(json.dumps(audit), encoding="utf-8")
+    with pytest.raises(Phase7PreflightError, match="missing phase7PlanRequired"):
+        verify_preflight_workspace(files["sourceApk"])
+
+
+def test_phase7_guard_rejects_disabled_phase7_when_automod_artifacts_exist(tmp_path):
+    files = _workspace(tmp_path)
+    audit_path = tmp_path / "menu-native-recovery.json"
+    audit = json.loads(audit_path.read_text(encoding="utf-8"))
+    audit["phase7PlanRequired"] = False
+    audit_path.write_text(json.dumps(audit), encoding="utf-8")
+    with pytest.raises(Phase7PreflightError, match="artifacts present"):
+        verify_preflight_workspace(files["sourceApk"])
+
+
 def test_menu_package_wraps_both_preflight_and_payload_generation():
     source = Path("modkit/menu/__init__.py").read_text(encoding="utf-8")
     assert "review_preflight as _builder_review_preflight" in source
