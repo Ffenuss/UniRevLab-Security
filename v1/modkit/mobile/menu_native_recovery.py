@@ -73,6 +73,43 @@ def _load_json(path: str | Path) -> dict[str, Any]:
         return {}
 
 
+def _upsert_fingerprint(rows: list[dict[str, Any]], row: dict[str, Any]) -> list[dict[str, Any]]:
+    role = str(row.get("role") or "")
+    out = [item for item in rows if not isinstance(item, dict) or str(item.get("role") or "") != role]
+    out.append(row)
+    return out
+
+
+def _bind_phase7_freshness(root: str | Path, cb=None) -> dict[str, Any]:
+    """Finish the Phase 7 audit entirely in Python with exact current SHA bindings.
+
+    Android keeps an idempotent verifier/binder for backward compatibility, but a
+    pure-Python ``prepare_workspace`` must be independently complete.  Otherwise the
+    same prepare result is considered fresh only after crossing the Java bridge.
+    """
+    workspace = Path(root)
+    audit_path = workspace / "menu-native-recovery.json"
+    audit = _load_json(audit_path)
+    if not audit.get("completed"):
+        raise ValueError("AutoMod Phase 7: native-recovery audit is not completed")
+    gate = audit.get("phase7Gate") if isinstance(audit.get("phase7Gate"), dict) else {}
+    if not gate.get("validated") or int(gate.get("rejectedControlCount") or 0) != 0:
+        raise ValueError("AutoMod Phase 7: executable-control identity gate is not validated")
+
+    inputs = audit.get("inputFingerprints") if isinstance(audit.get("inputFingerprints"), list) else []
+    outputs = audit.get("outputFingerprints") if isinstance(audit.get("outputFingerprints"), list) else []
+    inputs = _upsert_fingerprint(inputs, _fingerprint("phase7Plan", workspace / "automod-plan.json", cb))
+    inputs = _upsert_fingerprint(inputs, _fingerprint("simpleCatalog", workspace / "simple-catalog.json", cb))
+    outputs = _upsert_fingerprint(outputs, _fingerprint("menuSpec", workspace / "menu-spec.json", cb))
+    outputs = _upsert_fingerprint(outputs, _fingerprint("menuPreflight", workspace / "menu-preflight.json", cb))
+    audit["inputFingerprints"] = inputs
+    audit["outputFingerprints"] = outputs
+    audit["phase7FreshnessPolicy"] = "EXACT_PLAN_AND_CATALOG_SHA256"
+    _write_audit(audit_path, audit)
+    engine.check(cb)
+    return audit
+
+
 def _number(value: Any) -> int | None:
     if value is None or isinstance(value, bool):
         return None
@@ -246,9 +283,6 @@ def _strict_modules_factory(original, expected_counts: dict[str, int], audit: di
         stats: dict[str, Any] = {"requested": 0, "resolved": 0, "ambiguous": 0, "noString": 0, "noCandidate": 0, "modules": {}}
         if expected:
             resolved, stats = _resolve_modules_expected(self, expected, getattr(self, "cb", None))
-        # Only images for which metadata could not prove a contiguous token domain
-        # fall back to the original conservative resolver. We never let an original
-        # ambiguous result override exact-count evidence.
         fallback_names = wanted - set(expected)
         fallback: dict[str, tuple[int, int]] = {}
         if fallback_names:
@@ -326,7 +360,10 @@ def prepare(metadata_path: str | Path, library_path: str | Path, catalog_path: s
                 str(dump_dir) if dump_dir else None,
                 str(title), int(max_deep), int(target_controls), cb,
             )
-            audit["outputFingerprints"] = [_fingerprint("menuSpec", menu_json_path, cb)]
+            outputs = [_fingerprint("menuSpec", menu_json_path, cb)]
+            if output_preflight is not None:
+                outputs.append(_fingerprint("menuPreflight", output_preflight, cb))
+            audit["outputFingerprints"] = outputs
             audit["completed"] = True
             return result
         except Exception as exc:
@@ -344,8 +381,6 @@ def prepare_workspace(workspace: str | Path, source_apk: str | Path, cb=None):
     deep.mkdir(parents=True, exist_ok=True)
     dump = root / "rodroid"
 
-    # Rebuild the plan immediately before prepare so a stale UI plan cannot authorize
-    # executable controls after the Evidence Graph or exact native evidence changed.
     from modkit.mobile import automod_cancellable
     plan = automod_cancellable.build_workspace_plan(root, root / "automod-plan.json", cb)
     allowed_rvas, allowed_methods_by_rva = _phase7_allowed_bindings(plan)
@@ -368,4 +403,5 @@ def prepare_workspace(workspace: str | Path, source_apk: str | Path, cb=None):
         audit_path=root / "menu-native-recovery.json",
     )
     _validate_phase7_menu(root, plan, allowed_rvas, cb, allowed_methods_by_rva)
+    _bind_phase7_freshness(root, cb)
     return result
