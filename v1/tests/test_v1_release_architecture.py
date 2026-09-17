@@ -187,3 +187,14 @@ def test_canonical_ci_never_reconstructs_dev_patch_chain():
     assert ".dev40" not in workflow and "apply-dev" not in workflow
     assert "assembleDebug" in workflow and "lintDebug" in workflow
     assert "zipalign" in workflow and "apksigner" in workflow
+
+
+def test_canonical_ci_derives_release_identity_and_audits_packaged_apk():
+    workflow = (ROOT.parent / ".github/workflows/modkit-v1-ci.yml").read_text(encoding="utf-8")
+    assert "id: release_meta" in workflow
+    assert "versionName" in workflow
+    assert "steps.release_meta.outputs.artifact" in workflow
+    assert "apk-inventory.txt" in workflow
+    for suffix in ("*.gguf", "*.safetensors", "*.onnx", "*.pt", "*.pth", "*.ckpt"):
+        assert suffix in workflow
+    assert "ModKit-Android-1.1.0-dev1-debug" not in workflow
