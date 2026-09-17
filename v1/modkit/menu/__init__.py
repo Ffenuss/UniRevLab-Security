@@ -30,13 +30,13 @@ def write_patch_payload(spec, source_apk, runtime_so, output_zip, *, host_so=Non
     # closes the preflight -> payload handoff window without changing legacy flows.
     verify_preflight_workspace(source_apk)
 
-    # Some production Unity ELFs (including the AFK Journey sample) have no usable
-    # trailing slack in .dynstr, so the conservative direct DT_NEEDED insertion in
-    # builder.py cannot add libmk.so. Patch Pack already supports the safer fallback:
-    # replace one allowlisted system dependency only when the runtime itself depends
-    # on that displaced library, preserving host -> runtime -> system-lib. Keep the
-    # fallback scoped to this serialized payload build and always restore the class
-    # method so unrelated ELF analysis is unaffected.
+    # Some tightly packed production Unity ELFs have no usable trailing slack in
+    # .dynstr, so the conservative direct DT_NEEDED insertion in builder.py cannot
+    # add libmk.so. Patch Pack already supports the safer fallback: replace one
+    # allowlisted system dependency only when the runtime itself depends on that
+    # displaced library, preserving host -> runtime -> system-lib. Keep the fallback
+    # scoped to this serialized payload build and always restore the class method so
+    # unrelated ELF analysis is unaffected.
     from pathlib import Path
     from modkit.elf.reader import ElfFile
 
