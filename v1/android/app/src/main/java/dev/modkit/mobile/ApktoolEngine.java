@@ -1,6 +1,7 @@
 package dev.modkit.mobile;
 
 import android.content.Context;
+import android.os.Build;
 
 import brut.androlib.ApkDecoder;
 import brut.androlib.Config;
@@ -40,8 +41,14 @@ public final class ApktoolEngine {
         if (!root.isDirectory() && !root.mkdirs()) throw new IOException("Cannot create Apktool workspace");
         File framework = new File(context.getFilesDir(), "apktool-framework");
         if (!framework.isDirectory() && !framework.mkdirs()) throw new IOException("Cannot create Apktool framework directory");
-        String userHome = System.getProperty("user.home");
-        if (userHome == null || userHome.trim().isEmpty()) System.setProperty("user.home", context.getFilesDir().getAbsolutePath());
+
+        // Apktool's desktop-oriented OSDetection class initializes static fields from
+        // os.name and sun.arch.data.model and dereferences both without null checks.
+        // Android/ART does not guarantee sun.arch.data.model, so the first Config()
+        // could fail with ExceptionInInitializerError and every later split would then
+        // report NoClassDefFoundError: brut.androlib.Config. Seed the portable JVM
+        // properties before Config/OSDetection is initialized.
+        prepareApktoolJvmProperties(context);
 
         JSONArray rows = new JSONArray();
         int decoded = 0;
@@ -115,14 +122,14 @@ public final class ApktoolEngine {
                     rows.put(row);
                     break;
                 }
-                row.put("status", "FAILED").put("error", String.valueOf(error.getMessage()));
+                putFailure(row, error);
                 failed++;
             }
             rows.put(row);
         }
 
         return new JSONObject()
-                .put("schema", "modkit-apktool-analysis-1.0")
+                .put("schema", "modkit-apktool-analysis-1.1")
                 .put("engineId", ENGINE_ID)
                 .put("apktoolVersion", APKTOOL_VERSION)
                 .put("bundled", true)
@@ -133,6 +140,37 @@ public final class ApktoolEngine {
                 .put("failed", failed)
                 .put("cancelled", isCancelled(cancelled))
                 .put("inputs", rows);
+    }
+
+    private static void prepareApktoolJvmProperties(Context context) {
+        setIfBlank("user.home", context.getFilesDir().getAbsolutePath());
+        setIfBlank("java.io.tmpdir", context.getCacheDir().getAbsolutePath());
+        setIfBlank("os.name", "Linux");
+        if (blank(System.getProperty("sun.arch.data.model"))) {
+            boolean has64 = Build.SUPPORTED_64_BIT_ABIS != null && Build.SUPPORTED_64_BIT_ABIS.length > 0;
+            System.setProperty("sun.arch.data.model", has64 ? "64" : "32");
+        }
+    }
+
+    private static void setIfBlank(String key, String value) {
+        if (blank(System.getProperty(key)) && value != null && !value.isEmpty()) System.setProperty(key, value);
+    }
+
+    private static boolean blank(String value) {
+        return value == null || value.trim().isEmpty();
+    }
+
+    private static void putFailure(JSONObject row, Throwable error) {
+        row.put("status", "FAILED");
+        row.put("errorClass", error.getClass().getName());
+        String message = error.getMessage();
+        row.put("error", blank(message) ? error.toString() : message);
+        Throwable root = error;
+        int depth = 0;
+        while (root.getCause() != null && root.getCause() != root && depth++ < 12) root = root.getCause();
+        row.put("rootCauseClass", root.getClass().getName());
+        String rootMessage = root.getMessage();
+        row.put("rootCause", blank(rootMessage) ? root.toString() : rootMessage);
     }
 
     private static JSONObject verifiedCacheFingerprint(File marker, File workspace, String sha, AtomicBoolean cancelled) throws Exception {
