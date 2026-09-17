@@ -161,16 +161,22 @@ public final class ApktoolEngine {
     }
 
     private static void putFailure(JSONObject row, Throwable error) {
-        row.put("status", "FAILED");
-        row.put("errorClass", error.getClass().getName());
-        String message = error.getMessage();
-        row.put("error", blank(message) ? error.toString() : message);
-        Throwable root = error;
-        int depth = 0;
-        while (root.getCause() != null && root.getCause() != root && depth++ < 12) root = root.getCause();
-        row.put("rootCauseClass", root.getClass().getName());
-        String rootMessage = root.getMessage();
-        row.put("rootCause", blank(rootMessage) ? root.toString() : rootMessage);
+        try {
+            row.put("status", "FAILED");
+            row.put("errorClass", error.getClass().getName());
+            String message = error.getMessage();
+            row.put("error", blank(message) ? error.toString() : message);
+            Throwable root = error;
+            int depth = 0;
+            while (root.getCause() != null && root.getCause() != root && depth++ < 12) root = root.getCause();
+            row.put("rootCauseClass", root.getClass().getName());
+            String rootMessage = root.getMessage();
+            row.put("rootCause", blank(rootMessage) ? root.toString() : rootMessage);
+        } catch (Exception ignored) {
+            // Diagnostics must never mask the original Apktool failure or abort the
+            // remaining APK/split inputs. JSONObject only contains strings here,
+            // so this is a final fail-safe for platform-specific JSON behavior.
+        }
     }
 
     private static JSONObject verifiedCacheFingerprint(File marker, File workspace, String sha, AtomicBoolean cancelled) throws Exception {
