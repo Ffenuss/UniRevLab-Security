@@ -19,9 +19,10 @@ def test_rerun_publishes_running_manifest_before_worker_and_reconstruction():
     publish = source.index('writePipelineState("RUNNING","RECONSTRUCTION",false,false,null);', started)
     worker = source.index("new Thread(()->", publish)
     prepared = source.index("invalidatePreparedAutoModState();", worker)
-    resolve = source.index("DecompilerEngine.resolveTargetInputs(app)", prepared)
-    inventory = source.index('stage(1,4,"Inventory:', resolve)
-    assert started < publish < worker < prepared < resolve < inventory
+    resolve = source.index("TargetResolver.resolve(app)", prepared)
+    verify = source.index("TargetResolver.requireVerified(target,app.cancelled)", resolve)
+    inventory = source.index('stage(1,4,"Inventory:', verify)
+    assert started < publish < worker < prepared < resolve < verify < inventory
 
 
 def test_running_manifest_write_failure_blocks_worker_and_all_reconstruction_backends():
@@ -42,9 +43,10 @@ def test_running_manifest_write_failure_blocks_worker_and_all_reconstruction_bac
     assert "stopSelf()" in failure
     assert "return START_NOT_STICKY" in failure
 
-    resolve = source.index("DecompilerEngine.resolveTargetInputs(app)", worker)
-    inventory = source.index('stage(1,4,"Inventory:', resolve)
-    assert publish < failure_start < worker < resolve < inventory
+    resolve = source.index("TargetResolver.resolve(app)", worker)
+    verify = source.index("TargetResolver.requireVerified(target,app.cancelled)", resolve)
+    inventory = source.index('stage(1,4,"Inventory:', verify)
+    assert publish < failure_start < worker < resolve < verify < inventory
     assert "boolean pipelineStarted=true;" in source[worker:resolve]
 
 
@@ -94,9 +96,10 @@ def test_full_rerun_invalidates_prepared_automod_and_per_run_evidence_before_tar
     prepared = source.index("invalidatePreparedAutoModState();")
     per_run = source.index("invalidatePerRunEvidenceState();", prepared)
     invalidated = source.index("runStateInvalidated=true;", per_run)
-    resolve = source.index("DecompilerEngine.resolveTargetInputs(app)", invalidated)
-    inventory = source.index('stage(1,4,"Inventory:')
-    assert prepared < per_run < invalidated < resolve < inventory
+    resolve = source.index("TargetResolver.resolve(app)", invalidated)
+    verify = source.index("TargetResolver.requireVerified(target,app.cancelled)", resolve)
+    inventory = source.index('stage(1,4,"Inventory:', verify)
+    assert prepared < per_run < invalidated < resolve < verify < inventory
 
 
 def test_embedded_outputs_are_invalidated_before_same_target_rerun_backend_executes():
@@ -231,7 +234,7 @@ def test_unexpected_reconstruction_error_never_hands_off_evidence_graph():
     source = _read("FullAnalysisService.java")
 
     invalidated = source.index("runStateInvalidated=true;")
-    outer_catch = source.index("}catch(Exception e){", invalidated)
+    outer_catch = source.index("}catch(Throwable e){", invalidated)
     outer_finally = source.index("}finally{", outer_catch)
     catch_block = source[outer_catch:outer_finally]
     assert "chain=false;" in catch_block
