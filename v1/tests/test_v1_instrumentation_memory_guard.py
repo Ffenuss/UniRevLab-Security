@@ -11,7 +11,7 @@ def test_instrumentation_memory_access_is_session_bound_and_fail_closed():
     assert "startTicks" in source
     assert "stale process lease" in source
     assert '"dd if=/proc/" + pid + "/mem' in source
-    assert '" | dd of=/proc/" + pid + "/mem' in source
+    assert "' | dd of=/proc/\" + pid + \"/mem" in source
     assert "compare-before-write failed" in source
     assert "mapping is not writable" in source
     assert "write verification failed; rollback attempted" in source
