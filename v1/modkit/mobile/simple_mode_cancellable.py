@@ -1,6 +1,6 @@
 """Cancellation-aware release entry point for ``simple_mode.build_catalog``.
 
-The ranking/ownership/readiness semantics remain owned by ``simple_mode``. This
+The ranking/ownership/readiness semantics remain owned by ``simple_mode``.  This
 adapter temporarily wraps the high-volume row/card hooks and replaces engine detection
 with an equivalent cancellable implementation. The release catalogue is then passed
 through the evidence-quality layer which deduplicates normalized surfaces/candidates
@@ -18,10 +18,9 @@ import zipfile
 from modkit.mobile import simple_mode as _base
 from modkit.mobile import evidence_quality as _quality
 
-# The cancellable adapter must publish the exact same catalogue schema as the
-# canonical implementation. Keeping a second literal here allowed the two entry
-# points to drift (1.3 vs 1.4) and made consumers depend on which path happened
-# to execute rather than on the ModKit catalogue contract.
+# Keep the cancellation-aware entry point on the exact same public catalogue
+# contract as the canonical implementation; otherwise consumers see different
+# schemas depending on which execution path ran.
 SCHEMA = _base.SCHEMA
 _LOCK = threading.RLock()
 
@@ -123,49 +122,77 @@ def _detect_engines(apk_paths: Iterable[str | Path], gate: _Gate) -> dict:
                     mark("cocos2dx_lua", name)
             if low.endswith((".js", ".jsc")) and ("jsb-adapter" in low or low.startswith("assets/src/")):
                 mark("cocos2dx_js", name)
-            if "libcocos" in base or "cocos2d" in low:
-                mark("cocos2dx_cpp", name)
-            if "cocos" in low and ("creator" in low or "jsb-adapter" in low):
+            if "jsb-adapter" in low or (low.endswith((".prefab", ".scene")) and ("assets/" in low or "res/" in low)):
                 mark("cocos_creator", name)
-    return evidence
-
-
-def build_catalog(workspace: str | Path, output: str | Path | None = None, cancel: Any | None = None) -> dict:
-    root = Path(workspace)
-    gate = _Gate(cancel)
+            if low.endswith((".csb", ".ccb")):
+                mark("cocos2dx_cpp", name)
     gate.force()
+    return {"schema": "modkit-engine-detection-1.0", "detected": [k for k, v in evidence.items() if v], "evidence": evidence}
 
-    original_iter = _base._iter_rows
-    original_detect = _base._detect_engines
 
-    def iter_rows(obj: Any, wanted: set[str]):
-        yield from _iter_rows(obj, wanted, gate)
-
-    def detect_engines(paths: Iterable[str | Path]):
-        return _detect_engines(paths, gate)
-
-    # build_catalog uses module-level helpers. The lock keeps the temporary adapter
-    # replacement thread-safe for callers sharing one embedded Python interpreter.
+def build_catalog(workdir: str | Path, output_path: str | Path | None = None,
+                  cb: Any | None = None) -> dict:
+    gate = _Gate(cb)
+    gate.force()
     with _LOCK:
-        _base._iter_rows = iter_rows
-        _base._detect_engines = detect_engines
+        original_iter = _base._iter_rows
+        original_detect = _base.detect_engines
+        original_generic = _base._generic_card
+        original_menu = _base._menu_card
+        original_json = _base._json
+
+        def wrapped_iter(obj, wanted):
+            yield from _iter_rows(obj, wanted, gate)
+
+        def wrapped_detect(paths):
+            return _detect_engines(paths, gate)
+
+        def wrapped_generic(*args, **kwargs):
+            gate.tick()
+            return original_generic(*args, **kwargs)
+
+        def wrapped_menu(*args, **kwargs):
+            gate.tick()
+            return original_menu(*args, **kwargs)
+
+        def wrapped_json(path):
+            gate.force()
+            value = original_json(path)
+            gate.force()
+            return value
+
+        _base._iter_rows = wrapped_iter
+        _base.detect_engines = wrapped_detect
+        _base._generic_card = wrapped_generic
+        _base._menu_card = wrapped_menu
+        _base._json = wrapped_json
         try:
-            report = _base.build_catalog(root)
+            report = _base.build_catalog(workdir, None)
         finally:
             _base._iter_rows = original_iter
-            _base._detect_engines = original_detect
+            _base.detect_engines = original_detect
+            _base._generic_card = original_generic
+            _base._menu_card = original_menu
+            _base._json = original_json
 
     gate.force()
-    report = _quality.normalize_catalog(report)
-    # Preserve the canonical catalogue contract after quality normalization too.
-    report["schema"] = _base.SCHEMA
+    report = _quality.refine_catalog(report)
     gate.force()
-
-    if output is not None:
-        dst = Path(output)
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        tmp = dst.with_name(dst.name + ".part")
-        tmp.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    if isinstance(report, dict):
+        # Normalization may carry its own internal schema; the public output must
+        # remain compatible with the canonical catalogue consumer contract.
+        report["schema"] = _base.SCHEMA
+        report["cancelAware"] = cb is not None
+    if output_path:
         gate.force()
-        tmp.replace(dst)
+        destination = Path(output_path)
+        temporary = destination.with_name(destination.name + ".part")
+        temporary.unlink(missing_ok=True)
+        try:
+            temporary.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+            gate.force()
+            temporary.replace(destination)
+        except Exception:
+            temporary.unlink(missing_ok=True)
+            raise
     return report
