@@ -71,7 +71,9 @@ def test_target_selection_prepares_only_and_full_analysis_runs_once():
     assert 'getModule("modkit.mobile.apkset")' in service
     assert 'callAttr("inspect_apk_paths"' in service
     assert 'getModule("modkit.mobile.package_target")' in service
-    assert "exportAllZip(app.cancelled)" in service
+    # The release reconstruction path now exports the canonical APK/APK-set via
+    # the bounded JADX exporter. The removed exportAllZip helper was a legacy path.
+    assert "BoundedJadxExporter.export(this,inputs,app.cancelled,this::progress)" in service
     assert "ApktoolEngine.analyze(this,inputs,app.cancelled)" in service
     assert 'getModule("modkit.mobile.embedded_pipeline")' in service
     assert "AutomaticEvidenceService.class" in service
