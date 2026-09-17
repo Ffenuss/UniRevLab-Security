@@ -51,16 +51,26 @@ public class AutoModBuildGuardService extends Service {
                 destination=Uri.parse(uriText);
                 check();
                 TargetResolver.Target target=TargetResolver.resolve(app);JSONObject targetVerification=TargetResolver.requireVerified(target,app.cancelled);File source=target.patchOwnerApk();
-                progress("AutoMod build: target SHA verified · повторно сверяю metadata/lib/catalog/owning APK…");
-                AutoModAuditVerifier.verifyCurrent(app,source,()->app.cancelled.get());
+                progress("AutoMod build: target SHA verified · пересобираю canonical preflight из текущего MenuSpec/source APK…");
+                JSONObject preflight=AutoModAuditVerifier.refreshCanonicalPreflight(app,source,()->app.cancelled.get());
+                JSONObject audit=AutoModAuditVerifier.verifyCurrent(app,source,()->app.cancelled.get());
                 check();
-                JSONObject preflight=read("menu-preflight.json");
-                if(preflight==null||!preflight.optBoolean("readyForAutoBuild"))throw new IOException("AutoMod preflight больше не READY; повторите Exact prepare");
+                if(!preflight.optBoolean("readyForAutoBuild"))throw new IOException("AutoMod preflight больше не READY; повторите Exact prepare");
+                JSONObject counts=preflight.optJSONObject("counts");
+                int callableVerified=counts==null?0:counts.optInt("callableVerified",0);
+                int parameterPending=preflight.optInt("parameterPolicyPending",0);
                 Intent worker=new Intent(this,WorkerService.class).putExtra("op","menu_build_apk").putExtra("uri",destination.toString());
                 startForegroundService(worker);
                 handedOff=true;
-                AnalysisJournal.append(this,"AUTOMOD_BUILD_HANDOFF","AutoMod build target verified",new JSONObject().put("targetDigest",targetVerification.optString("currentTargetDigest")).put("sourceApk",source.getAbsolutePath()));
-                progress("AutoMod build: canonical target + exact SHA актуальны · передаю в штатную preflight/signing сборку…");
+                AnalysisJournal.append(this,"AUTOMOD_BUILD_HANDOFF","AutoMod build target + canonical preflight verified",
+                        new JSONObject().put("targetDigest",targetVerification.optString("currentTargetDigest"))
+                                .put("sourceApk",source.getAbsolutePath())
+                                .put("phase7FreshnessPolicy",audit.optString("phase7FreshnessPolicy"))
+                                .put("readyForModificationPayload",preflight.optBoolean("readyForModificationPayload"))
+                                .put("readyForProbePayload",preflight.optBoolean("readyForProbePayload"))
+                                .put("callableVerified",callableVerified)
+                                .put("parameterPolicyPending",parameterPending));
+                progress("AutoMod build: canonical target + exact SHA + canonical preflight актуальны · передаю в штатную signing сборку…");
             }catch(Exception e){
                 AnalysisJournal.exception(this,"AUTOMOD_BUILD_BLOCKED",e);
                 if(destination!=null&&!handedOff)try{DocumentsContract.deleteDocument(getContentResolver(),destination);}catch(Exception ignored){}
@@ -74,6 +84,5 @@ public class AutoModBuildGuardService extends Service {
         return START_NOT_STICKY;
     }
 
-    private JSONObject read(String name){try{File f=app.file(name);return f.isFile()?new JSONObject(Io.readUtf8(f)):null;}catch(Exception ignored){return null;}}
     private void check()throws IOException{if(app.cancelled.get())throw new java.io.InterruptedIOException("AutoMod build cancelled");}
 }
