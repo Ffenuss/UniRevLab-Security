@@ -52,9 +52,9 @@ jobs:
           from pathlib import Path
 
           text = Path('android/app/build.gradle').read_text(encoding='utf-8')
-          match = re.search(r"versionName\s+['\"]([^'\"]+)['\"]", text)
+          match = re.search(r"^\s*versionName\s+['\"]([^'\"]+)['\"]\s*$", text, re.MULTILINE)
           if not match:
-              raise SystemExit('versionName not found in android/app/build.gradle')
+              raise SystemExit('active versionName not found in android/app/build.gradle')
           print(match.group(1))
           PY
           )"
