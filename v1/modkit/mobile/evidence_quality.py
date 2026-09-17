@@ -1,4 +1,4 @@
-"""Release evidence-quality normalization for Simple Mode / Evidence Graph.
+"""Release evidence-quality normalization for the Evidence Graph catalogue.
 
 This module does not invent confirmation. It collapses duplicate representations of the
 same locator/surface, separates raw semantic discovery from method-bound evidence and
@@ -259,7 +259,9 @@ def refine_catalog(report: dict[str, Any]) -> dict[str, Any]:
         status = _text(card.get("status")) or "UNKNOWN";counts[status] = counts.get(status, 0) + 1
         tier = _text(card.get("evidenceTier")) or "DISCOVERED_SURFACE";tiers[tier] = tiers.get(tier, 0) + 1
     report = dict(report)
-    report["schema"] = "modkit-simple-mode-1.4"
+    # Do not replace the caller's public catalogue schema here. Quality refinement
+    # is an internal layer; changing the outer schema caused canonical and
+    # cancellation-aware catalogue paths to become incompatible.
     report["cards"] = cards
     report["counts"] = counts
     report["total"] = len(cards)
