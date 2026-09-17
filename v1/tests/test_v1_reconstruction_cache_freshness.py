@@ -17,8 +17,9 @@ def test_jadx_manifest_becomes_complete_only_after_export_fingerprint():
     source = (ROOT / "android/app/src/main/java/dev/modkit/mobile/FullAnalysisService.java").read_text(encoding="utf-8")
     fingerprint = source.index('String outputSha=fileSha256(zip)')
     sha_field = source.index('put("outputSha256",outputSha)', fingerprint)
-    complete = source.index('state.put("complete",true)', sha_field)
-    assert fingerprint < sha_field < complete
+    complete = source.index('put("complete",dec.complete)', sha_field)
+    partial = source.index('put("partial",!dec.complete)', complete)
+    assert fingerprint < sha_field < complete < partial
 
 
 def test_reconstruction_hashing_remains_cancellable_and_old_manifests_fail_closed():
