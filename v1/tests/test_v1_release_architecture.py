@@ -16,10 +16,13 @@ def test_release_version_is_consistent():
     gradle = read("android/app/build.gradle")
     package = read("pyproject.toml")
     init = read("modkit/__init__.py")
+    worker = read("android/app/src/main/java/dev/modkit/mobile/WorkerService.java")
     assert "versionCode 47" in gradle
     assert "versionName '1.1.0-dev1'" in gradle
     assert 'version = "1.1.0.dev1"' in package
     assert '__version__ = "1.1.0.dev1"' in init
+    assert '.put("modkitVersion",BuildConfig.VERSION_NAME)' in worker
+    assert '"0.9.0-dev32"' not in worker
 
 
 def test_release_home_and_runtime_lab_are_private_except_launcher():
