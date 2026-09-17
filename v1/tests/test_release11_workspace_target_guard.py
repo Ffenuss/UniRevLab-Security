@@ -52,6 +52,8 @@ def test_workspace_editor_mode_switch_preserves_current_bytes_and_unsaved_edits(
     render = src.split("private void render()", 1)[1].split("private byte[] editedBytes()", 1)[0]
     assert "renderedEditorText=hexMode?toHex(original):new String(original,StandardCharsets.UTF_8)" in render
     assert "editor.setText(renderedEditorText)" in render
+    assert "suppressEditorChange=true" in render
+    assert "suppressEditorChange=false" in render
 
     edited = src.split("private byte[] editedBytes()", 1)[1].split("private void switchMode()", 1)[0]
     assert "if(s.equals(renderedEditorText))return original" in edited
@@ -61,6 +63,30 @@ def test_workspace_editor_mode_switch_preserves_current_bytes_and_unsaved_edits(
     assert "original=current" in switch
     assert "hexMode=!hexMode" in switch
     assert "render()" in switch
+
+
+def test_workspace_invalidates_prepared_patch_when_source_or_editor_changes():
+    src = read("FileWorkspaceActivity.java")
+    assert "workspace-patch-stale" in src
+    assert "preparedPatchStale=false" in src
+    assert "patchIsStale()" in src
+    assert 'afterTextChanged(android.text.Editable e){if(!suppressEditorChange)invalidatePreparedPatch("Текущие правки изменились после подготовки Patch Pack.")' in src
+
+    opened = src.split("private void setOpened", 1)[1].split("private void openUri", 1)[0]
+    assert 'invalidatePreparedPatch("Открыт новый файл или APK entry.")' in opened
+
+    buttons = src.split("private void updateButtons()", 1)[1].split("private boolean specialRouteSupported", 1)[0]
+    assert 'app.file("workspace-source.json").isFile()' in buttons
+    assert "!patchIsStale()" in buttons
+
+    prepare = src.split("private void preparePatch()", 1)[1].split("private void buildPatched", 1)[0]
+    assert 'beginPatchTransaction("Patch Pack пересобирается из текущих правок.")' in prepare
+    assert "finishPatchTransaction()" in prepare
+
+    build = src.split("private void buildPatched()", 1)[1].split("private boolean isInstalledSet", 1)[0]
+    assert "if(patchIsStale())" in build
+    start = src.split("private void startBuild(Uri uri)", 1)[1].split("private boolean startWork", 1)[0]
+    assert "if(patchIsStale())" in start
 
 
 def test_workspace_build_goes_through_guard_not_direct_worker():
@@ -85,6 +111,16 @@ def test_workspace_guard_rehashes_target_and_checks_source_membership():
     assert 'found.name.equals(expectedName)' in guard
     assert 'safe(found.sha256).equals(expectedMemberSha)' in guard
     assert 'putExtra("op","workspace_build")' in guard
+
+
+def test_workspace_guard_rejects_stale_marker_before_and_after_artifact_verification():
+    guard = read("WorkspaceBuildGuardService.java")
+    assert 'app.file("workspace-patch-stale").isFile()' in guard
+    first = guard.index("requirePreparedPatchFresh();JSONObject binding")
+    verify = guard.index("verifyPatchArtifact(patch,member.file,binding)", first)
+    second = guard.index("requirePreparedPatchFresh();String source", verify)
+    worker = guard.index('new Intent(this,WorkerService.class).putExtra("op","workspace_build")', second)
+    assert first < verify < second < worker
 
 
 def test_workspace_guard_binds_current_patch_zip_manifest_and_payload_sha():
