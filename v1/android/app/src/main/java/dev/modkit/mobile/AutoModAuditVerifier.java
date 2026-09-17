@@ -41,16 +41,18 @@ final class AutoModAuditVerifier {
         if(phase7.optInt("executableControlCount",0)<=0||phase7.optInt("allowedRvaCount",0)<=0) return false;
         if(phase7.optBoolean("runtimeEvidencePromotesBuildability")||phase7.optBoolean("reviewEvidencePromotesBuildability")) return false;
         if(!"EXACT_INPUT_SHA256".equals(audit.optString("freshnessPolicy"))) return false;
+        if(!"EXACT_PLAN_AND_CATALOG_SHA256".equals(audit.optString("phase7FreshnessPolicy"))) return false;
         JSONArray rows=audit.optJSONArray("inputFingerprints");
         JSONArray outputs=audit.optJSONArray("outputFingerprints");
-        if(rows==null||rows.length()<6||outputs==null||outputs.length()<1) return false;
+        if(rows==null||rows.length()<6||outputs==null||outputs.length()<2) return false;
         return validFingerprint(fingerprint(rows,"metadata"))
                 &&validFingerprint(fingerprint(rows,"library"))
                 &&validFingerprint(fingerprint(rows,"catalog"))
                 &&validFingerprint(fingerprint(rows,"sourceApk"))
                 &&validFingerprint(fingerprint(rows,"phase7Plan"))
                 &&validFingerprint(fingerprint(rows,"simpleCatalog"))
-                &&validFingerprint(fingerprint(outputs,"menuSpec"));
+                &&validFingerprint(fingerprint(outputs,"menuSpec"))
+                &&validFingerprint(fingerprint(outputs,"menuPreflight"));
     }
 
     /** Bind the completed Python prepare audit to the exact Evidence Graph projection used by Phase 7. */
@@ -73,6 +75,17 @@ final class AutoModAuditVerifier {
         rows.put(currentFingerprint("phase7Plan",app.file("automod-plan.json"),gate));
         rows.put(currentFingerprint("simpleCatalog",app.file("simple-catalog.json"),gate));
         audit.put("inputFingerprints",rows);
+
+        JSONArray existingOutputs=audit.optJSONArray("outputFingerprints");
+        if(existingOutputs==null)throw new IOException("Phase 7 prepare audit не содержит output fingerprints");
+        JSONArray outputs=new JSONArray();
+        for(int i=0;i<existingOutputs.length();i++){
+            JSONObject row=existingOutputs.optJSONObject(i);if(row==null)continue;
+            if("menuPreflight".equals(row.optString("role","")))continue;
+            outputs.put(row);
+        }
+        outputs.put(currentFingerprint("menuPreflight",app.file("menu-preflight.json"),gate));
+        audit.put("outputFingerprints",outputs);
         audit.put("phase7FreshnessPolicy","EXACT_PLAN_AND_CATALOG_SHA256");
         File destination=app.file("menu-native-recovery.json"),temp=app.file("menu-native-recovery.json.tmp");
         Io.writeUtf8(temp,audit.toString(2));
@@ -84,7 +97,7 @@ final class AutoModAuditVerifier {
 
     static JSONObject verifyCurrent(App app,File sourceApk,CancelGate gate)throws Exception {
         JSONObject audit=read(app);
-        if(!structurallyReady(audit))throw new IOException("Exact recovery audit не содержит обязательную Phase 7 identity + plan/catalog SHA-256 freshness proof");
+        if(!structurallyReady(audit))throw new IOException("Exact recovery audit не содержит обязательную Phase 7 identity + plan/catalog/preflight SHA-256 freshness proof");
         JSONArray rows=audit.getJSONArray("inputFingerprints");
         JSONArray outputs=audit.getJSONArray("outputFingerprints");
         verify(rows,"metadata",app.file("metadata.bin"),gate);
@@ -94,6 +107,7 @@ final class AutoModAuditVerifier {
         verify(rows,"phase7Plan",app.file("automod-plan.json"),gate);
         verify(rows,"simpleCatalog",app.file("simple-catalog.json"),gate);
         verify(outputs,"menuSpec",app.file("menu-spec.json"),gate);
+        verify(outputs,"menuPreflight",app.file("menu-preflight.json"),gate);
         JSONObject phase7=audit.getJSONObject("phase7Gate");
         if(!phase7.optBoolean("validated")||!phase7.optBoolean("methodIdentityRequiredForBoundRva")||phase7.optInt("rejectedControlCount",-1)!=0)
             throw new IOException("AutoMod Phase 7 identity gate stale или содержит rejected executable control");
