@@ -66,6 +66,17 @@ _COMPACT_PREFIXES = (
     "has", "is", "can", "use", "consume", "regen", "increase", "decrease", "modify",
 )
 
+# Semantic gameplay discovery must not bootstrap itself from an upstream label.
+# These tokens identify infrastructure/diagnostic contexts in which words such as
+# level, speed, balance and stack have non-gameplay meanings. They only suppress
+# gameplay classification; the original evidence remains available to the generic
+# RE/security reports.
+_INFRA_CONTEXT = (
+    "/system/", "/proc/", "/sys/", "/vendor/", "goldfish", "ranchu", "qemu",
+    "crashsight", "appsflyer", "opentelemetry", "firebase", "adjust", "networkdiagnosis",
+    "network_diagnosis", "netspeed", "androidx.", "androidx/", "kotlinx.", "kotlinx/",
+)
+
 
 class GameplayScanCancelled(RuntimeError):
     """Explicit cooperative cancellation for semantic correlation."""
@@ -130,15 +141,49 @@ def classify(value: object) -> tuple[str, list[str]]:
 
 
 def _semantic_text(row: dict[str, Any]) -> str:
+    # Only classify semantic payload. Do not feed upstream category/kind/source/
+    # entry labels back into the classifier: doing so can turn a previous broad
+    # category guess into apparently independent gameplay evidence.
     values: list[object] = [
         row.get("title"), row.get("name"), row.get("function"), row.get("method"), row.get("symbol"),
-        row.get("class"), row.get("category"), row.get("kind"), row.get("source"), row.get("entry"),
+        row.get("class"),
     ]
     for key in ("strings", "markers"):
         value = row.get(key)
         if isinstance(value, list):
             values.extend(value[:80])
     return " ".join(str(v) for v in values if v not in (None, ""))
+
+
+def _artifact_context(row: dict[str, Any]) -> str:
+    values = [row.get("entry"), row.get("path"), row.get("file"), row.get("source"), row.get("engineId")]
+    return " ".join(str(v) for v in values if v not in (None, "")).casefold()
+
+
+def _is_semantic_noise(row: dict[str, Any], text: str, domain: str, aliases: list[str]) -> bool:
+    low = str(text or "").casefold()
+    context = _artifact_context(row)
+    combined = low + " " + context
+    if any(marker in combined for marker in _INFRA_CONTEXT):
+        return True
+
+    words, _compact = _words(text)
+    alias_set = {re.sub(r"[^a-z0-9]", "", a.casefold()) for a in aliases}
+    if domain == "level_xp" and ("level" in alias_set or "lvl" in alias_set or "lv" in alias_set):
+        if words & {"log", "logger", "logging", "trace", "crypto", "diagnostic", "severity"}:
+            return True
+    if domain == "speed":
+        if words & {"network", "download", "upload", "bandwidth", "latency", "throughput", "netspeed"}:
+            return True
+    if domain == "inventory" and "stack" in alias_set:
+        if words & {"trace", "stacktrace", "exception", "call", "frame"}:
+            return True
+    if domain == "currency":
+        # Billing/attribution SDK vocabulary is monetization evidence, not proof
+        # of a gameplay currency variable. Keep it in the security/trust surface.
+        if words & {"billing", "purchase", "receipt", "payment", "iap", "price", "checkout", "revenue"}:
+            return True
+    return False
 
 
 def _finding_from_native(lib: dict[str, Any], fn: dict[str, Any]) -> dict[str, Any] | None:
@@ -150,6 +195,8 @@ def _finding_from_native(lib: dict[str, Any], fn: dict[str, Any]) -> dict[str, A
     if not isinstance(rva, int) or rva <= 0:
         return None
     entry = str(lib.get("entry") or "")
+    if _is_semantic_noise({"entry": entry, "engineId": "native.deep-embedded"}, name, domain, aliases):
+        return None
     return {
         "id": "deep-semantic-native:" + _id(entry, rva, name, domain),
         "kind": "NATIVE_SEMANTIC_FUNCTION",
@@ -180,8 +227,9 @@ def _finding_from_native(lib: dict[str, Any], fn: dict[str, Any]) -> dict[str, A
 def _finding_from_artifact(row: dict[str, Any]) -> dict[str, Any] | None:
     if row.get("gameplayDomain"):
         return None
-    domain, aliases = classify(_semantic_text(row))
-    if not domain:
+    semantic_text = _semantic_text(row)
+    domain, aliases = classify(semantic_text)
+    if not domain or _is_semantic_noise(row, semantic_text, domain, aliases):
         return None
     title = str(row.get("title") or row.get("function") or row.get("name") or row.get("entry") or domain)
     entry = str(row.get("entry") or row.get("path") or row.get("file") or "")
