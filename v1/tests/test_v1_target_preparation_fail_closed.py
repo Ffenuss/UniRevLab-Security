@@ -13,7 +13,10 @@ def test_installed_target_is_invalidated_before_package_lookup_can_fail():
 
 def test_failed_or_cancelled_target_cannot_leave_ready_stale_artifacts():
     source = SOURCE.read_text(encoding="utf-8")
-    assert "catch(Exception e){try{cleanupFailedPreparation();}" in source
+    catch = source.index("catch(Exception e){AnalysisJournal.exception")
+    cleanup_call = source.index("try{cleanupFailedPreparation();}", catch)
+    progress = source.index("app.progress(", cleanup_call)
+    assert catch < cleanup_call < progress
     cleanup = source.split("private void cleanupFailedPreparation", 1)[1].split("private void checkCancelled", 1)[0]
     for name in ("installed-target.json", "installed-apks", "game.apk", "game.apk.part"):
         assert name in cleanup
