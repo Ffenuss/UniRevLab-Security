@@ -9,9 +9,13 @@ import json
 from pathlib import Path
 from typing import Any
 
-from modkit.mobile import artifact_families, cocos_deep, deep_gameplay, flutter_deep, hermes_deep, lua_deep, lua_deep_cancellable, native_deep
+from modkit.mobile import (
+    artifact_families, cocos_deep, deep_gameplay, deobfuscator, engine_router,
+    flutter_deep, hermes_deep, lua_deep, lua_deep_cancellable, native_deep,
+    runtime_profiler,
+)
 
-SCHEMA = "modkit-embedded-analysis-1.4"
+SCHEMA = "modkit-embedded-analysis-1.5"
 
 
 class Cancelled(Exception):
@@ -83,8 +87,62 @@ def run_workspace(
 
     runs: list[dict[str, Any]] = []
     static_report: dict[str, Any]
+    profile_report: dict[str, Any] = {}
+    router_report: dict[str, Any] = {}
+    deob_report: dict[str, Any] = {}
 
-    _check(cb, "Embedded 1/7 · artifact families…")
+    _check(cb, "Embedded 1/10 · runtime / engine profiler…")
+    try:
+        profile_report = runtime_profiler.scan_workspace(root, root / "runtime-profiler.json", cb)
+        runs.append({
+            "engineId": "runtime.profiler",
+            "status": "SUCCESS",
+            "profileCount": int(profile_report.get("profileCount") or 0),
+            "detected": profile_report.get("detected") or [],
+            "abis": profile_report.get("abis") or [],
+        })
+    except runtime_profiler.RuntimeProfileCancelled as exc:
+        raise Cancelled(str(exc)) from exc
+    except Cancelled:
+        raise
+    except Exception as exc:
+        runs.append({"engineId": "runtime.profiler", "status": "FAILED", "error": str(exc)})
+    _check(cb)
+
+    _check(cb, "Embedded 2/10 · multi-runtime engine routing…")
+    try:
+        router_report = engine_router.route(profile_report, root / "engine-router.json")
+        runs.append({
+            "engineId": "runtime.engine-router",
+            "status": "SUCCESS",
+            "routeCount": int(router_report.get("routeCount") or 0),
+            "selectedEngineCount": int(router_report.get("selectedEngineCount") or 0),
+            "missingBackendCount": int(router_report.get("missingBackendCount") or 0),
+        })
+    except Cancelled:
+        raise
+    except Exception as exc:
+        runs.append({"engineId": "runtime.engine-router", "status": "FAILED", "error": str(exc)})
+    _check(cb)
+
+    _check(cb, "Embedded 3/10 · deobfuscation / protection profile…")
+    try:
+        deob_report = deobfuscator.scan_workspace(root, root / "deobfuscation.json", cb)
+        runs.append({
+            "engineId": deobfuscator.ENGINE_ID,
+            "status": "SUCCESS",
+            "findingCount": int(deob_report.get("findingCount") or 0),
+            "normalizedIdentifierCount": int(deob_report.get("normalizedIdentifierCount") or 0),
+        })
+    except deobfuscator.DeobfuscationCancelled as exc:
+        raise Cancelled(str(exc)) from exc
+    except Cancelled:
+        raise
+    except Exception as exc:
+        runs.append({"engineId": deobfuscator.ENGINE_ID, "status": "FAILED", "error": str(exc)})
+    _check(cb)
+
+    _check(cb, "Embedded 4/10 · artifact families…")
     try:
         static_report = artifact_families.scan_workspace(root, None, cb)
         runs.append({
@@ -114,7 +172,27 @@ def run_workspace(
         runs.append({"engineId": "artifact-family-suite", "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 2/7 · Lua bytecode…")
+    if deob_report:
+        _merge_findings(static_report, deob_report, summary_key="deobfuscation",
+                        default_engine=deobfuscator.ENGINE_ID,
+                        default_kind="PROTECTION_EVIDENCE",
+                        default_category="Protection/Obfuscation")
+    static_report["runtimeProfiler"] = {
+        "schema": profile_report.get("schema"),
+        "profileCount": int(profile_report.get("profileCount") or 0),
+        "detected": profile_report.get("detected") or [],
+        "abis": profile_report.get("abis") or [],
+        "splitAware": bool(profile_report.get("splitAware")),
+    }
+    static_report["engineRouter"] = {
+        "schema": router_report.get("schema"),
+        "routeCount": int(router_report.get("routeCount") or 0),
+        "coverageCounts": router_report.get("coverageCounts") or {},
+        "selectedEngines": router_report.get("selectedEngines") or [],
+        "missingBackends": router_report.get("missingBackends") or [],
+    }
+
+    _check(cb, "Embedded 5/10 · Lua bytecode…")
     try:
         lua_report = lua_deep_cancellable.scan_workspace(root, root / "lua-deep.json", cb)
         runs.append({
@@ -135,7 +213,7 @@ def run_workspace(
         runs.append({"engineId": lua_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 3/7 · Hermes HBC…")
+    _check(cb, "Embedded 6/10 · Hermes HBC…")
     try:
         deep = hermes_deep.scan_workspace(root, root / "hermes-deep.json", cb)
         runs.append({
@@ -157,7 +235,7 @@ def run_workspace(
     _check(cb)
 
     native_report: dict[str, Any] = {}
-    _check(cb, "Embedded 4/7 · native ELF/ARM64…")
+    _check(cb, "Embedded 7/10 · native ELF/ARM64…")
     try:
         native_report = native_deep.scan_workspace(root, root / "native-deep.json", cb)
         runs.append({
@@ -178,7 +256,7 @@ def run_workspace(
         runs.append({"engineId": native_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 5/7 · Cocos correlation…")
+    _check(cb, "Embedded 8/10 · Cocos correlation…")
     try:
         cocos_report = cocos_deep.scan_workspace(root, static_report, native_report, root / "cocos-deep.json", cb)
         runs.append({
@@ -200,7 +278,7 @@ def run_workspace(
         runs.append({"engineId": cocos_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 6/7 · Flutter/Dart AOT…")
+    _check(cb, "Embedded 9/10 · Flutter/Dart AOT…")
     try:
         flutter_report = flutter_deep.scan_workspace(root, native_report, root / "flutter-deep.json", cb)
         runs.append({
@@ -221,7 +299,7 @@ def run_workspace(
         runs.append({"engineId": flutter_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 7/7 · gameplay semantic correlation…")
+    _check(cb, "Embedded 10/10 · gameplay semantic correlation…")
     try:
         gameplay_report = deep_gameplay.scan_workspace(root, static_report, native_report, root / "deep-gameplay.json", cb)
         runs.append({
@@ -255,6 +333,9 @@ def run_workspace(
         "cancelAware": cb is not None,
         "runs": runs,
         "artifactReport": artifact_path.name,
+        "runtimeProfilerReport": "runtime-profiler.json",
+        "engineRouterReport": "engine-router.json",
+        "deobfuscationReport": "deobfuscation.json",
         "luaReport": "lua-deep.json",
         "nativeReport": "native-deep.json",
         "cocosReport": "cocos-deep.json",
