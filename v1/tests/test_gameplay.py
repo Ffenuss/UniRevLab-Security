@@ -202,8 +202,9 @@ def test_accessor_review_domains_stay_out_of_automatic_binding_seed():
     root = Path(__file__).resolve().parents[1]
     source = (root / "modkit/mobile/gameplay.py").read_text(encoding="utf-8")
     graph_block = source.split("def build_evidence_graph", 1)[1].split("\ndef graph_method", 1)[0]
-    assert 'review_domains = sorted(set(node.get("accessorReviewDomains") or []))' in graph_block
+    assert 'review_domains = sorted(set(node.get("accessorReviewDomains") or []) | set(string_domains))' in graph_block
     assert '"reviewDomains": review_domains' in graph_block
+    assert '"stringReviewDomains": string_domains' in graph_block
     assert 'semantic_domains = sorted(set(node.get("domains") or []) | set(field_domains) | set(bridge_domains.get(mid, [])))' in graph_block
     assert 'and semantic_domains' in graph_block
     assert 'semantic_domains | review_domains' not in graph_block
