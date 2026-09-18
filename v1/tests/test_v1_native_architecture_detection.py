@@ -1022,3 +1022,311 @@ def test_native_deep_source_keeps_pointer_table_non_buildable():
     assert '"patchReady": False' in block
     assert '"automationExcluded": True' in block
     assert '"ownershipKind": "ENGINE"' in block
+
+
+def test_two_level_static_resolver_table_tracks_outer_root_and_inner_offsets():
+    import struct
+    from types import SimpleNamespace
+
+    def adrp(rd, pc, target):
+        delta = (target & ~0xFFF) - (pc & ~0xFFF)
+        imm21 = (delta >> 12) & ((1 << 21) - 1)
+        return 0x90000000 | ((imm21 & 0x3) << 29) | (((imm21 >> 2) & 0x7FFFF) << 5) | rd
+
+    def add(rd, rn, imm):
+        return 0x91000000 | ((imm & 0xFFF) << 10) | (rn << 5) | rd
+
+    def mov(rd, rm):
+        return 0xAA0003E0 | (rm << 16) | rd
+
+    def str_x(rt, rn, imm):
+        return 0xF9000000 | (((imm // 8) & 0xFFF) << 10) | (rn << 5) | rt
+
+    def ldr_x(rt, rn, imm):
+        return 0xF9400000 | (((imm // 8) & 0xFFF) << 10) | (rn << 5) | rt
+
+    def blr(rn):
+        return 0xD63F0000 | (rn << 5)
+
+    BL = 0x94000000
+    resolver = 0x1000
+    consumer = 0x2000
+    rwords = []
+    calls = []
+
+    def remit(word):
+        rwords.append(word)
+        return resolver + (len(rwords) - 1) * 4
+
+    # Store static table address 0x8000 into outer global slot 0x7000.
+    remit(adrp(19, resolver + len(rwords) * 4, 0x8000))
+    remit(add(19, 19, 0))
+    remit(adrp(9, resolver + len(rwords) * 4, 0x7000))
+    remit(str_x(19, 9, 0))
+
+    # table[0] = dlsym("il2cpp_class_from_name")
+    remit(adrp(1, resolver + len(rwords) * 4, 0x3000))
+    remit(add(1, 1, 0x000))
+    pc = remit(BL)
+    calls.append({"sourceRva": resolver, "sourceFunction": "init_api", "callRva": pc,
+                  "targetFunction": "dlsym", "targetRva": 0x5000})
+    remit(str_x(0, 19, 0x00))
+
+    # table[8] = dlsym("il2cpp_class_get_field_from_name")
+    remit(adrp(1, resolver + len(rwords) * 4, 0x3000))
+    remit(add(1, 1, 0x040))
+    pc = remit(BL)
+    calls.append({"sourceRva": resolver, "sourceFunction": "init_api", "callRva": pc,
+                  "targetFunction": "dlsym", "targetRva": 0x5000})
+    remit(str_x(0, 19, 0x08))
+
+    cwords = []
+    def cemit(word):
+        cwords.append(word)
+        return consumer + (len(cwords) - 1) * 4
+
+    cemit(adrp(9, consumer + len(cwords) * 4, 0x7000))
+    cemit(ldr_x(19, 9, 0))       # outer global -> static table ref
+    cemit(ldr_x(22, 19, 0x00))   # table[0]
+    cemit(adrp(2, consumer + len(cwords) * 4, 0x3000))
+    cemit(add(2, 2, 0x080))
+    cemit(blr(22))
+    cemit(mov(21, 0))
+    cemit(ldr_x(23, 19, 0x08))   # table[8]
+    cemit(adrp(1, consumer + len(cwords) * 4, 0x3000))
+    cemit(add(1, 1, 0x0C0))
+    cemit(mov(0, 21))
+    cemit(blr(23))
+
+    rblob = b"".join(struct.pack("<I", word) for word in rwords)
+    cblob = b"".join(struct.pack("<I", word) for word in cwords)
+
+    class FakeElf:
+        def is_arm64(self):
+            return True
+        def read_at_rva(self, rva, size):
+            if rva == resolver:
+                return rblob[:size]
+            if rva == consumer:
+                return cblob[:size]
+            raise ValueError(rva)
+
+    strings = [
+        {"rva": 0x3000, "text": "il2cpp_class_from_name", "domain": "", "lookupRole": None},
+        {"rva": 0x3040, "text": "il2cpp_class_get_field_from_name", "domain": "", "lookupRole": None},
+        {"rva": 0x3080, "text": "PlayerStats", "domain": "", "lookupRole": "type"},
+        {"rva": 0x30C0, "text": "m_Health", "domain": "health", "lookupRole": "field"},
+    ]
+    functions = [
+        SimpleNamespace(value=resolver, size=len(rblob), name="init_api", shndx=1),
+        SimpleNamespace(value=consumer, size=len(cblob), name="use_api", shndx=1),
+    ]
+
+    flows = native_deep._dlsym_il2cpp_pointer_flow(FakeElf(), functions, strings, calls)
+    assert [row["lookupKind"] for row in flows] == ["type", "field"]
+    assert {row["functionPointerTableBaseRva"] for row in flows} == {0x8000}
+    assert {row["functionPointerTableOffset"] for row in flows} == {0, 8}
+    assert {row["functionPointerRootSlotRva"] for row in flows} == {0x7000}
+    assert {row["functionPointerIndirectionDepth"] for row in flows} == {2}
+
+    tables = native_deep._dlsym_pointer_table_summary(flows)
+    assert len(tables) == 1
+    table = tables[0]
+    assert table["storageKind"] == "static-indirect"
+    assert table["baseRva"] == 0x8000
+    assert table["rootSlotRva"] == 0x7000
+    assert table["associationStatus"] == "two-level-static-multi-dlsym-table-confirmed"
+
+
+def test_allocator_backed_resolver_object_survives_outer_global_and_inner_member_loads():
+    import struct
+    from types import SimpleNamespace
+
+    def adrp(rd, pc, target):
+        delta = (target & ~0xFFF) - (pc & ~0xFFF)
+        imm21 = (delta >> 12) & ((1 << 21) - 1)
+        return 0x90000000 | ((imm21 & 0x3) << 29) | (((imm21 >> 2) & 0x7FFFF) << 5) | rd
+
+    def add(rd, rn, imm):
+        return 0x91000000 | ((imm & 0xFFF) << 10) | (rn << 5) | rd
+
+    def mov(rd, rm):
+        return 0xAA0003E0 | (rm << 16) | rd
+
+    def str_x(rt, rn, imm):
+        return 0xF9000000 | (((imm // 8) & 0xFFF) << 10) | (rn << 5) | rt
+
+    def ldr_x(rt, rn, imm):
+        return 0xF9400000 | (((imm // 8) & 0xFFF) << 10) | (rn << 5) | rt
+
+    def blr(rn):
+        return 0xD63F0000 | (rn << 5)
+
+    BL = 0x94000000
+    resolver = 0x1000
+    consumer = 0x2000
+    rwords = []
+    calls = []
+
+    def remit(word):
+        rwords.append(word)
+        return resolver + (len(rwords) - 1) * 4
+
+    pc = remit(BL)
+    calls.append({"sourceRva": resolver, "sourceFunction": "init_api", "callRva": pc,
+                  "targetFunction": "malloc", "targetRva": 0x5100})
+    remit(mov(19, 0))
+    remit(adrp(9, resolver + len(rwords) * 4, 0x7000))
+    remit(str_x(19, 9, 0))  # outer global -> heap resolver object
+
+    remit(adrp(1, resolver + len(rwords) * 4, 0x3000))
+    remit(add(1, 1, 0x000))
+    pc = remit(BL)
+    calls.append({"sourceRva": resolver, "sourceFunction": "init_api", "callRva": pc,
+                  "targetFunction": "dlsym", "targetRva": 0x5000})
+    remit(str_x(0, 19, 0x00))
+
+    remit(adrp(1, resolver + len(rwords) * 4, 0x3000))
+    remit(add(1, 1, 0x040))
+    pc = remit(BL)
+    calls.append({"sourceRva": resolver, "sourceFunction": "init_api", "callRva": pc,
+                  "targetFunction": "dlsym", "targetRva": 0x5000})
+    remit(str_x(0, 19, 0x08))
+
+    cwords = []
+    def cemit(word):
+        cwords.append(word)
+        return consumer + (len(cwords) - 1) * 4
+
+    cemit(adrp(9, consumer + len(cwords) * 4, 0x7000))
+    cemit(ldr_x(19, 9, 0))
+    cemit(ldr_x(22, 19, 0x00))
+    cemit(adrp(2, consumer + len(cwords) * 4, 0x3000))
+    cemit(add(2, 2, 0x080))
+    cemit(blr(22))
+    cemit(mov(21, 0))
+    cemit(ldr_x(23, 19, 0x08))
+    cemit(adrp(1, consumer + len(cwords) * 4, 0x3000))
+    cemit(add(1, 1, 0x0C0))
+    cemit(mov(0, 21))
+    cemit(blr(23))
+
+    rblob = b"".join(struct.pack("<I", word) for word in rwords)
+    cblob = b"".join(struct.pack("<I", word) for word in cwords)
+
+    class FakeElf:
+        def is_arm64(self):
+            return True
+        def read_at_rva(self, rva, size):
+            if rva == resolver:
+                return rblob[:size]
+            if rva == consumer:
+                return cblob[:size]
+            raise ValueError(rva)
+
+    strings = [
+        {"rva": 0x3000, "text": "il2cpp_class_from_name", "domain": "", "lookupRole": None},
+        {"rva": 0x3040, "text": "il2cpp_class_get_field_from_name", "domain": "", "lookupRole": None},
+        {"rva": 0x3080, "text": "PlayerStats", "domain": "", "lookupRole": "type"},
+        {"rva": 0x30C0, "text": "m_Health", "domain": "health", "lookupRole": "field"},
+    ]
+    functions = [
+        SimpleNamespace(value=resolver, size=len(rblob), name="init_api", shndx=1),
+        SimpleNamespace(value=consumer, size=len(cblob), name="use_api", shndx=1),
+    ]
+
+    flows = native_deep._dlsym_il2cpp_pointer_flow(FakeElf(), functions, strings, calls)
+    assert [row["lookupKind"] for row in flows] == ["type", "field"]
+    object_ids = {row["functionPointerTableObjectId"] for row in flows}
+    assert len(object_ids) == 1
+    assert None not in object_ids
+    assert {row["functionPointerTableOffset"] for row in flows} == {0, 8}
+    assert {row["functionPointerRootSlotRva"] for row in flows} == {0x7000}
+    assert {row["functionPointerIndirectionDepth"] for row in flows} == {2}
+    assert {row["functionPointerAllocator"] for row in flows} == {"malloc"}
+
+    tables = native_deep._dlsym_pointer_table_summary(flows)
+    assert len(tables) == 1
+    table = tables[0]
+    assert table["storageKind"] == "allocator-object"
+    assert table["baseRva"] is None
+    assert table["objectId"] in object_ids
+    assert table["rootSlotRva"] == 0x7000
+    assert table["allocator"] == "malloc"
+    assert table["associationStatus"] == "allocator-object-multi-dlsym-table-confirmed"
+
+
+def test_overwritten_outer_resolver_reference_blocks_nested_table_recovery():
+    import struct
+    from types import SimpleNamespace
+
+    def adrp(rd, pc, target):
+        delta = (target & ~0xFFF) - (pc & ~0xFFF)
+        imm21 = (delta >> 12) & ((1 << 21) - 1)
+        return 0x90000000 | ((imm21 & 0x3) << 29) | (((imm21 >> 2) & 0x7FFFF) << 5) | rd
+
+    def add(rd, rn, imm):
+        return 0x91000000 | ((imm & 0xFFF) << 10) | (rn << 5) | rd
+
+    def mov(rd, rm):
+        return 0xAA0003E0 | (rm << 16) | rd
+
+    def str_x(rt, rn, imm):
+        return 0xF9000000 | (((imm // 8) & 0xFFF) << 10) | (rn << 5) | rt
+
+    def ldr_x(rt, rn, imm):
+        return 0xF9400000 | (((imm // 8) & 0xFFF) << 10) | (rn << 5) | rt
+
+    def blr(rn):
+        return 0xD63F0000 | (rn << 5)
+
+    BL = 0x94000000
+    resolver = 0x1000
+    consumer = 0x2000
+    rwords = []
+    calls = []
+
+    def remit(word):
+        rwords.append(word)
+        return resolver + (len(rwords) - 1) * 4
+
+    pc = remit(BL)
+    calls.append({"sourceRva": resolver, "sourceFunction": "init_api", "callRva": pc,
+                  "targetFunction": "malloc", "targetRva": 0x5100})
+    remit(mov(19, 0))
+    remit(adrp(9, resolver + len(rwords) * 4, 0x7000))
+    remit(str_x(19, 9, 0))
+    remit(adrp(1, resolver + len(rwords) * 4, 0x3000))
+    remit(add(1, 1, 0))
+    pc = remit(BL)
+    calls.append({"sourceRva": resolver, "sourceFunction": "init_api", "callRva": pc,
+                  "targetFunction": "dlsym", "targetRva": 0x5000})
+    remit(str_x(0, 19, 0))
+
+    cwords = [
+        adrp(9, consumer, 0x7000),
+        str_x(5, 9, 0),       # invalidate outer resolver reference
+        ldr_x(19, 9, 0),
+        ldr_x(22, 19, 0),
+        adrp(2, consumer + 16, 0x3000),
+        add(2, 2, 0x080),
+        blr(22),
+    ]
+    rblob = b"".join(struct.pack("<I", word) for word in rwords)
+    cblob = b"".join(struct.pack("<I", word) for word in cwords)
+
+    class FakeElf:
+        def is_arm64(self):
+            return True
+        def read_at_rva(self, rva, size):
+            return (rblob if rva == resolver else cblob)[:size]
+
+    strings = [
+        {"rva": 0x3000, "text": "il2cpp_class_from_name", "domain": "", "lookupRole": None},
+        {"rva": 0x3080, "text": "PlayerStats", "domain": "", "lookupRole": "type"},
+    ]
+    functions = [
+        SimpleNamespace(value=resolver, size=len(rblob), name="init_api", shndx=1),
+        SimpleNamespace(value=consumer, size=len(cblob), name="use_api", shndx=1),
+    ]
+    assert native_deep._dlsym_il2cpp_pointer_flow(FakeElf(), functions, strings, calls) == []
