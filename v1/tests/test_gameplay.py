@@ -201,3 +201,46 @@ def test_accessor_review_domains_stay_out_of_automatic_binding_seed():
     assert 'semantic_domains = sorted(set(node.get("domains") or []) | set(field_domains) | set(bridge_domains.get(mid, [])))' in graph_block
     assert 'and semantic_domains' in graph_block
     assert 'semantic_domains | review_domains' not in graph_block
+
+
+def test_compound_gameplay_terms_use_token_order_not_set_iteration():
+    from modkit.mobile.gameplay import _method_domain_relevant, _package_domains, domains_for
+
+    assert "movement" in _package_domains("PlayerMoveSpeed")
+    assert "movement" in _package_domains("TimeScale")
+    assert "progression" in _package_domains("LevelUp")
+    assert "progression" in _package_domains("SkillPoints")
+    assert "world" in _package_domains("GameTime")
+
+    assert "health" in domains_for("GetHitPoints", owner="a.b.C")
+    assert _method_domain_relevant({
+        "class": "a.b.C", "name": "GetHitPoints", "applicationOwned": True,
+        "typedFieldAccesses": [], "bridgeDomains": [], "accessorReviewDomains": [],
+    }, "health")
+    assert _method_domain_relevant({
+        "class": "a.b.C", "name": "GetSkillPoints", "applicationOwned": True,
+        "typedFieldAccesses": [], "bridgeDomains": [], "accessorReviewDomains": [],
+    }, "progression")
+    assert _method_domain_relevant({
+        "class": "a.b.C", "name": "SetTimeScale", "applicationOwned": True,
+        "typedFieldAccesses": [], "bridgeDomains": [], "accessorReviewDomains": [],
+    }, "movement")
+
+    # Curated compound matching must not turn arbitrary substrings into domains.
+    assert not _method_domain_relevant({
+        "class": "a.b.C", "name": "StorageManager", "applicationOwned": True,
+        "typedFieldAccesses": [], "bridgeDomains": [], "accessorReviewDomains": [],
+    }, "resource")
+
+
+def test_compound_matching_does_not_build_compact_text_from_a_set():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "modkit/mobile/gameplay.py").read_text(encoding="utf-8")
+    package = source.split("def _package_domains", 1)[1].split("\ndef ", 1)[0]
+    relevant = source.split("def _method_domain_relevant", 1)[1].split("\ndef ", 1)[0]
+    assert 'compact="".join(token_list)' in package
+    assert 'compact = "".join(token_list)' in relevant
+    assert '"".join(tokens)' not in package
+    assert '"".join(tokens)' not in relevant
