@@ -486,3 +486,126 @@ def test_dlsym_pointer_in_caller_saved_register_is_not_trusted_after_unknown_cal
     ]
     strings = [{"rva": 0x3000, "text": "il2cpp_class_from_name", "domain": "", "lookupRole": None}]
     assert native_deep._dlsym_il2cpp_pointer_flow(FakeElf(), functions, strings, calls) == []
+
+
+def test_elf64_relocation_and_plt_parser_recovers_dlsym_target():
+    import struct
+    from types import SimpleNamespace
+
+    blob = bytearray(0x600)
+    dynstr = b"\x00dlsym\x00"
+    blob[0x100:0x100 + len(dynstr)] = dynstr
+
+    # ELF64_Sym[1] -> "dlsym"
+    struct.pack_into("<IBBHQQ", blob, 0x200 + 24, 1, 0x12, 0, 0, 0, 0)
+    # ELF64_Rela: GOT slot 0x7000, symbol index 1.
+    struct.pack_into("<QQq", blob, 0x300, 0x7000, (1 << 32) | 1026, 0)
+
+    def adrp(rd, pc, target):
+        delta = (target & ~0xFFF) - (pc & ~0xFFF)
+        imm21 = (delta >> 12) & ((1 << 21) - 1)
+        return 0x90000000 | ((imm21 & 0x3) << 29) | (((imm21 >> 2) & 0x7FFFF) << 5) | rd
+
+    plt_pc = 0x5000
+    words = [
+        adrp(16, plt_pc, 0x7000),
+        0xF9400000 | (16 << 5) | 17,       # ldr x17,[x16]
+        0x91000000 | (16 << 5) | 16,       # add x16,x16,#0
+        0xD61F0000 | (17 << 5),             # br x17
+    ]
+    for i, word in enumerate(words):
+        struct.pack_into("<I", blob, 0x400 + i * 4, word)
+
+    sections = [
+        SimpleNamespace(name="", offset=0, size=0, link=0, entsize=0),
+        SimpleNamespace(name=".dynstr", offset=0x100, size=len(dynstr), link=0, entsize=1),
+        SimpleNamespace(name=".dynsym", offset=0x200, size=48, link=1, entsize=24),
+        SimpleNamespace(name=".rela.plt", offset=0x300, size=24, link=2, entsize=24),
+        SimpleNamespace(name=".plt", offset=0x400, size=16, addr=plt_pc, link=0, entsize=16),
+    ]
+
+    class FakeElf:
+        def __init__(self):
+            self.blob = bytes(blob)
+            self.sections = sections
+            self._map = {row.name: row for row in sections}
+        def section(self, name):
+            return self._map.get(name)
+        def is_arm64(self):
+            return True
+
+    elf = FakeElf()
+    assert native_deep._elf64_relocation_imports(elf) == {0x7000: "dlsym"}
+    assert native_deep._arm64_plt_import_targets(elf) == {0x5000: "dlsym"}
+
+
+def test_direct_bl_scanner_keeps_named_plt_target_without_static_symbol():
+    import struct
+    from types import SimpleNamespace
+
+    start = 0x1000
+    target = 0x5000
+    delta = target - start
+    word = 0x94000000 | ((delta >> 2) & 0x03FFFFFF)
+    blob = struct.pack("<I", word)
+
+    class FakeElf:
+        def __init__(self):
+            self.blob = blob
+            self.sections = [SimpleNamespace(type=1, is_exec=True, size=4, addr=start, offset=0)]
+            self.segments = []
+        def is_arm64(self):
+            return True
+        def all_symbols(self, functions_only=False):
+            return []
+
+    rows = native_deep.direct_bl_calls(
+        FakeElf(), max_scan_bytes=4,
+        extra_target_names={target: "dlsym"},
+    )
+    assert len(rows) == 1
+    assert rows[0]["targetFunction"] == "dlsym"
+    assert rows[0]["targetRva"] == target
+    assert rows[0]["targetResolution"] == "ELF64_RELA_PLT"
+    assert rows[0]["imported"] is True
+
+
+def test_deep_gameplay_accepts_dlsym_argument_flow_as_non_buildable_evidence():
+    row = {
+        "id": "dlsym-flow-1",
+        "kind": "IL2CPP_DLSYM_ARGUMENT_FLOW",
+        "title": "IL2CPP dlsym→BLR flow: PlayerStats :: m_Health",
+        "engineId": native_deep.ENGINE_ID,
+        "entry": "assets/libCEZ.so",
+        "library": "assets/libCEZ.so",
+        "abi": "arm64-v8a",
+        "sourceRva": 0x1200,
+        "sourceFunction": "resolve",
+        "callRva": 0x1280,
+        "gameplayDomain": "health",
+        "runtimeArgumentFlow": {
+            "lookupKind": "field",
+            "identifier": "m_Health",
+            "identifierRegister": "X1",
+            "type": "PlayerStats",
+            "classObjectFlowConfirmed": True,
+            "argumentFlowConfirmed": True,
+            "functionPointerFlowConfirmed": True,
+            "dlsymResolvedName": "il2cpp_class_get_field_from_name",
+            "exactManagedIdentityConfirmed": False,
+            "automationExcluded": True,
+        },
+        "ownershipKind": "APP_OR_GAME",
+        "trustBoundary": "local",
+    }
+    findings = deep_gameplay._findings_from_runtime_argument_flow(row)
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding["kind"] == "IL2CPP_DLSYM_ARGUMENT_FLOW_EVIDENCE"
+    assert finding["gameplayDomain"] == "health"
+    assert finding["status"] == "CORRELATED_EVIDENCE"
+    assert finding["semanticConfidence"] == "HIGH"
+    assert finding["automationExcluded"] is True
+    assert finding["patchReady"] is False
+    assert finding.get("rva") is None
+    assert finding["evidenceRole"] == "deep-gameplay-il2cpp-dlsym-pointer-argument-flow"
