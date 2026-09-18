@@ -459,6 +459,107 @@ def _scan_control_flow(elf: ElfFile, functions: list[Any], *, limit: int = MAX_C
     return out
 
 
+def _elf64_relocation_imports(elf: ElfFile) -> dict[int, str]:
+    """Map imported GOT relocation RVAs to dynamic symbol names.
+
+    Android arm64 binaries normally resolve external calls through .rela.plt.
+    Parsing only the standard ELF64 RELA/DYNSYM records lets the deep scanner
+    recover import names without executing the target or depending on objdump.
+    """
+    out: dict[int, str] = {}
+    dynsym = elf.section(".dynsym")
+    if dynsym is None or dynsym.link >= len(elf.sections):
+        return out
+    dynstr = elf.sections[dynsym.link]
+    sym_entsize = dynsym.entsize or 24
+    if sym_entsize < 24:
+        return out
+    strings = bytes(elf.blob[dynstr.offset:dynstr.offset + dynstr.size])
+
+    def cstr(index: int) -> str:
+        if index < 0 or index >= len(strings):
+            return ""
+        end = strings.find(b"\0", index)
+        if end < 0:
+            end = len(strings)
+        return strings[index:end].decode("utf-8", "replace")
+
+    def symbol_name(index: int) -> str:
+        off = dynsym.offset + index * sym_entsize
+        if off < dynsym.offset or off + 24 > dynsym.offset + dynsym.size:
+            return ""
+        st_name = struct.unpack_from("<I", elf.blob, off)[0]
+        return cstr(st_name)
+
+    for sec_name in (".rela.plt", ".rela.dyn"):
+        sec = elf.section(sec_name)
+        if sec is None:
+            continue
+        entsize = sec.entsize or 24
+        if entsize < 24:
+            continue
+        for off in range(sec.offset, sec.offset + sec.size - 23, entsize):
+            r_offset, r_info, _addend = struct.unpack_from("<QQq", elf.blob, off)
+            sym_index = int(r_info >> 32)
+            name = symbol_name(sym_index)
+            if name:
+                out[int(r_offset)] = name
+    return out
+
+
+def _arm64_plt_import_targets(elf: ElfFile) -> dict[int, str]:
+    """Map AArch64 PLT stub RVAs to imported symbol names."""
+    if not elf.is_arm64():
+        return {}
+    relocations = _elf64_relocation_imports(elf)
+    plt = elf.section(".plt")
+    if not relocations or plt is None or not plt.size:
+        return {}
+
+    out: dict[int, str] = {}
+    raw = bytes(elf.blob[plt.offset:plt.offset + plt.size])
+    # Android/lld uses a 32-byte PLT0 followed by 16-byte entries, but scanning
+    # every instruction boundary also handles small layout variations.
+    for rel in range(0, max(0, len(raw) - 15), 4):
+        w0, w1, w2, w3 = struct.unpack_from("<IIII", raw, rel)
+        adrp = _decode_adrp(w0, plt.addr + rel)
+        ldr = _decode_ldr_x_unsigned(w1)
+        add = _decode_add_imm(w2)
+        if not adrp or not ldr or not add:
+            continue
+        # Canonical PLT: ADRP X16,page; LDR X17,[X16,#off];
+        #                ADD X16,X16,#off; BR X17
+        br_reg = ((w3 >> 5) & 0x1F) if (w3 & 0xFFFFFC1F) == 0xD61F0000 else None
+        if br_reg is None:
+            continue
+        page_reg, page = adrp
+        load_reg, load_base, load_off = ldr
+        add_rd, add_rn, add_off = add
+        if load_base != page_reg or add_rd != page_reg or add_rn != page_reg or br_reg != load_reg:
+            continue
+        got_rva = page + load_off
+        name = relocations.get(got_rva)
+        if name:
+            out[plt.addr + rel] = name
+    return out
+
+
+def _annotate_import_calls(elf: ElfFile, calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    targets = _arm64_plt_import_targets(elf)
+    if not targets:
+        return calls
+    out = []
+    for row in calls:
+        item = dict(row)
+        target = item.get("targetRva")
+        if isinstance(target, int) and target in targets:
+            item["targetFunction"] = targets[target]
+            item["targetResolution"] = "ELF64_RELA_PLT"
+            item["imported"] = True
+        out.append(item)
+    return out
+
+
 def _il2cpp_argument_register_flow(elf: ElfFile, functions: list[Any],
                                    strings: list[dict[str, Any]],
                                    calls: list[dict[str, Any]],
@@ -875,6 +976,7 @@ def _scan_library(apk: Path, entry: str, extracted: Path, cb: Any | None = None)
         ]
         _check(cb)
         calls = direct_bl_calls(elf, limit=4000, max_scan_bytes=96 * 1024 * 1024, cb=cb)
+        calls = _annotate_import_calls(elf, calls)
         _check(cb)
         control_flow = _scan_control_flow(elf, functions, cb=cb)
         exact_extra = [row for row in control_flow if isinstance(row.get("targetRva"), int)]
