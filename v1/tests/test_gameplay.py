@@ -250,3 +250,114 @@ def test_compound_matching_does_not_build_compact_text_from_a_set():
     assert 'compact = "".join(token_list)' in relevant
     assert '"".join(tokens)' not in package
     assert '"".join(tokens)' not in relevant
+
+
+def test_native_method_string_xref_recovers_gameplay_review_domain():
+    import struct
+    from modkit.mobile.gameplay import _method_string_refs, _string_review_domains
+
+    class FakeElf:
+        def __init__(self):
+            self.b = bytearray(0x1200)
+            self.segments = [
+                (0x1000, 0x0000, 0x0100, 5),  # RX code
+                (0x3000, 0x1000, 0x0200, 4),  # R-- data
+            ]
+            # adrp x0, 0x3000 from pc 0x1000; add x0, x0, #0
+            adrp = 0x90000000 | (2 << 29)
+            add = 0x91000000
+            struct.pack_into("<I", self.b, 0, adrp)
+            struct.pack_into("<I", self.b, 4, add)
+            self.b[0x1000:0x1000 + len(b"Player Health\0")] = b"Player Health\0"
+
+        def offset(self, va, size, executable):
+            for seg_va, seg_off, seg_size, flags in self.segments:
+                if seg_va <= va and va + size <= seg_va + seg_size:
+                    if executable and not (flags & 1):
+                        raise ValueError("not executable")
+                    return seg_off + (va - seg_va)
+            raise ValueError("out of range")
+
+    refs, scanned = _method_string_refs(FakeElf(), 0x1000, 0x1010)
+    assert scanned == 0x10
+    assert len(refs) == 1
+    assert refs[0]["value"] == "Player Health"
+    assert refs[0]["domains"] == ["health"]
+    assert refs[0]["kind"] == "arm64-adrp-add-string"
+
+    assert "progression" in _string_review_domains("Player Level")
+    assert "progression" in _string_review_domains("XP")
+    assert "resource" in _string_review_domains("Max Mana")
+    assert "inventory" in _string_review_domains("Ammo")
+    assert "movement" in _string_review_domains("Move Speed")
+    assert "progression" not in _string_review_domains("log level")
+    assert "movement" not in _string_review_domains("network download speed")
+
+
+def test_string_only_gameplay_method_is_visible_but_automation_excluded(tmp_path):
+    import json
+    from modkit.mobile.gameplay import build_gameplay_coverage
+
+    graph = tmp_path / "analysis.evidence-graph.jsonl"
+    fields = tmp_path / "analysis.fields.jsonl"
+    fields.write_text("", encoding="utf-8")
+    graph.write_text(json.dumps({
+        "metadataMethodId": 51,
+        "label": "a.b.C::a",
+        "class": "a.b.C",
+        "name": "a",
+        "rva": 0x5100,
+        "isStatic": False,
+        "typedFieldAccesses": [],
+        "callers": [],
+        "callees": [],
+        "applicationOwned": True,
+        "domains": [],
+        "bridgeDomains": [],
+        "semanticDomains": [],
+        "accessorReviewDomains": [],
+        "stringRefs": [{
+            "xrefRva": 0x5104,
+            "targetRva": 0x9000,
+            "value": "Current HP",
+            "kind": "arm64-adrp-add-string",
+            "domains": ["health"],
+        }],
+        "stringReviewDomains": ["health"],
+        "reviewDomains": ["health"],
+        "methodRole": "unknown",
+    }) + "\n", encoding="utf-8")
+
+    report = build_gameplay_coverage(graph, fields)
+    health = next(card for card in report["cards"] if card["domain"] == "health")
+    assert health["status"] == "REVIEW"
+    assert [row["metadataMethodId"] for row in health["methods"]] == [51]
+    row = health["methods"][0]
+    assert row["stringRefs"][0]["value"] == "Current HP"
+    assert row["stringReviewDomains"] == ["health"]
+    assert row["reviewOnlySemantic"] is True
+    assert row["automationExcluded"] is True
+    assert row["semanticEvidenceRole"] == "string-xref"
+
+
+def test_evidence_graph_string_scan_is_bounded_and_not_an_autopilot_seed():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "modkit/mobile/gameplay.py").read_text(encoding="utf-8")
+    graph = source.split("def build_evidence_graph", 1)[1].split("\ndef graph_method", 1)[0]
+
+    assert "max_string_methods=4096" in graph
+    assert "max_string_total_bytes=16 * 1024 * 1024" in graph
+    assert "max_string_method_bytes=12 * 1024" in graph
+    assert 'check(cb, f"Evidence Graph: gameplay string xrefs' in graph
+    assert "if n % 128 == 0:" in graph
+    assert '"stringRefs": string_refs[:12]' in graph
+    assert '"stringReviewDomains": string_domains' in graph
+    assert '"gameplayStringRefs": sum(len(v) for v in string_refs_by_mid.values())' in graph
+
+    # String-only review domains are intentionally not merged into semantic_domains,
+    # which is the only domain set allowed to seed the Autopilot index.
+    assert 'semantic_domains = sorted(set(node.get("domains") or []) | set(field_domains) | set(bridge_domains.get(mid, [])))' in graph
+    assert 'review_domains = sorted(set(node.get("accessorReviewDomains") or []) | set(string_domains))' in graph
+    assert "semantic_domains | review_domains" not in graph
