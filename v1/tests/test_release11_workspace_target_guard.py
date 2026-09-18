@@ -208,3 +208,35 @@ def test_workspace_worker_reverifies_exact_guard_handoff_before_apply_and_export
     assert "ownerIndex!=guardedSource.index" in signed
     assert "guardedSource.name.equals" in signed
     assert signed.count("verifyWorkspaceHandoff(guardRequest,sourceApk") >= 3
+
+
+def test_workspace_apkset_export_uses_canonical_members_and_emits_signed_manifest():
+    worker = read("WorkerService.java")
+    signed = worker.split("private void exportSignedTargetForSource", 1)[1].split("private void splitDiscovery", 1)[0]
+
+    assert "TargetResolver.resolve(app)" in signed
+    assert "TargetResolver.requireVerified(canonical,app.cancelled)" in signed
+    assert "canonical.members.size()<2" in signed
+    assert "for(int i=0;i<canonical.members.size();i++)" in signed
+    assert "member.index==guardedSource.index" in signed
+    assert "patchedCount!=1" in signed
+    assert "signedFiles.size()!=canonical.members.size()" in signed
+
+    # File Workspace must not fall back to the package-target-only verifier here:
+    # prepared selection manifests are already canonical and are verified by TargetResolver.
+    assert "verifyInstalledTarget()" not in signed
+
+    # The exported .apks contains every canonical member plus a manifest which
+    # fingerprints the exact signed APK bytes written into the archive.
+    assert 'new ZipEntry(member.name)' in signed
+    assert 'MessageDigest.getInstance("SHA-256")' in signed
+    assert 'digest.update(buf,0,n);z.write(buf,0,n)' in signed
+    assert '"modkit-workspace-export-target-1.0"' in signed
+    assert '"sourceTargetDigest"' in signed
+    assert '"patchedSplitIndex"' in signed
+    assert '"signedSha256"' in signed
+    assert '"certificateSha256"' in signed
+    assert 'new ZipEntry("modkit-target.json")' in signed
+
+    # Guard freshness is checked again both before publishing and after copying.
+    assert signed.count("verifyWorkspaceHandoff(guardRequest,sourceApk") >= 3
