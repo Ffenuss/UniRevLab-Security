@@ -279,3 +279,44 @@ def test_il2cpp_argument_flow_drops_caller_saved_state_across_unknown_call():
     }]
     strings = [{"rva": 0x3000, "text": "m_Health", "domain": "health", "lookupRole": "field"}]
     assert native_deep._il2cpp_argument_register_flow(FakeElf(), functions, strings, calls) == []
+
+
+def test_deep_gameplay_promotes_argument_flow_strength_without_buildability():
+    row = {
+        "id": "arg-flow-1",
+        "kind": "IL2CPP_RUNTIME_ARGUMENT_FLOW",
+        "title": "IL2CPP argument flow: Assembly-CSharp.dll :: Game :: PlayerStats :: m_Health",
+        "engineId": native_deep.ENGINE_ID,
+        "entry": "assets/libCEZ.so",
+        "library": "assets/libCEZ.so",
+        "abi": "arm64-v8a",
+        "sourceRva": 0x1110,
+        "sourceFunction": "resolve",
+        "callRva": 0x1190,
+        "gameplayDomain": "health",
+        "runtimeArgumentFlow": {
+            "lookupKind": "field",
+            "identifier": "m_Health",
+            "identifierRegister": "X1",
+            "assembly": "Assembly-CSharp.dll",
+            "namespace": "Game",
+            "type": "PlayerStats",
+            "classObjectFlowConfirmed": True,
+            "argumentFlowConfirmed": True,
+            "exactManagedIdentityConfirmed": True,
+            "automationExcluded": True,
+        },
+        "ownershipKind": "APP_OR_GAME",
+        "trustBoundary": "local",
+    }
+    findings = deep_gameplay._findings_from_runtime_argument_flow(row)
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding["gameplayDomain"] == "health"
+    assert finding["status"] == "CORRELATED_EVIDENCE"
+    assert finding["semanticConfidence"] == "VERY_HIGH"
+    assert finding["argumentFlowConfirmed"] is True
+    assert finding["exactManagedIdentityConfirmed"] is True
+    assert finding["automationExcluded"] is True
+    assert finding["patchReady"] is False
+    assert finding.get("rva") is None
