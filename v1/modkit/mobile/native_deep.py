@@ -1239,8 +1239,11 @@ def _scan_library(apk: Path, entry: str, extracted: Path, cb: Any | None = None)
             for s in functions[:MAX_FUNCTION_ROWS]
         ]
         _check(cb)
-        calls = direct_bl_calls(elf, limit=4000, max_scan_bytes=96 * 1024 * 1024, cb=cb)
-        calls = _annotate_import_calls(elf, calls)
+        plt_import_targets = _arm64_plt_import_targets(elf)
+        calls = direct_bl_calls(
+            elf, limit=4000, max_scan_bytes=96 * 1024 * 1024, cb=cb,
+            extra_target_names=plt_import_targets,
+        )
         _check(cb)
         control_flow = _scan_control_flow(elf, functions, cb=cb)
         exact_extra = [row for row in control_flow if isinstance(row.get("targetRva"), int)]
@@ -1458,6 +1461,8 @@ def _scan_library(apk: Path, entry: str, extracted: Path, cb: Any | None = None)
             "functionSymbolCount": len(functions),
             "functions": function_rows,
             "directCallCount": len(calls),
+            "pltImportTargetCount": len(plt_import_targets),
+            "pltImportTargets": [{"rva": rva, "name": name} for rva, name in sorted(plt_import_targets.items())[:512]],
             "directCalls": calls,
             "controlFlowCount": len(control_flow),
             "controlFlow": control_flow,
