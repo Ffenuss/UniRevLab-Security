@@ -210,6 +210,115 @@ def _accessor_review_domains(name, role, *, owner="", application_owned=False):
     return sorted(out)
 
 
+def _string_review_domains(value):
+    """Classify gameplay-looking native string xrefs as review-only evidence."""
+    text = str(value or "").strip()
+    if not text or _noise(text):
+        return []
+    out = set(_package_domains(text)) | set(domains_for(text))
+    tokens = set(_tokens(text))
+    compact = "".join(_tokens(text))
+    low = " ".join(_tokens(text))
+    if tokens & {"hp"} or compact in {"hp", "maxhp", "currenthp", "playerhp"}:
+        out.add("health")
+    if tokens & {"xp", "experience"} or compact in {"xp", "playerxp", "currentxp"}:
+        out.add("progression")
+    if tokens & {"level", "lvl"} and not tokens & {"log", "logger", "quality", "mip", "grid", "patch", "severity"}:
+        out.add("progression")
+    if tokens & {"ammo", "ammunition"}:
+        out.add("inventory")
+    if tokens & {"mana", "stamina", "energy"} or compact in {"mp", "maxmp"}:
+        out.add("resource")
+    if tokens & {"cooldown"} or compact in {"cd", "skillcd", "abilitycd"}:
+        out.add("cooldown")
+    if tokens & {"speed"} and not tokens & {"network", "download", "upload", "bandwidth", "throughput"}:
+        out.add("movement")
+    if "balance" in tokens and tokens & {"wallet", "currency", "gold", "coin", "coins", "money", "cash"}:
+        out.add("currency")
+    if any(x in low for x in ("log level", "quality level", "mip level", "grid level", "patch level")):
+        out.discard("progression")
+    return sorted(out)
+
+
+def _method_string_refs(elf, method_rva, next_rva, *, max_method_bytes=12 * 1024, max_refs=12):
+    """Bounded ARM64 ADRP+ADD string-xref scan using the already-loaded ELF."""
+    if not isinstance(method_rva, int) or not isinstance(next_rva, int):
+        return [], 0
+    span = next_rva - method_rva
+    if span < 8 or span > int(max_method_bytes):
+        return [], 0
+    try:
+        off = elf.offset(method_rva, span, True)
+    except ValueError:
+        return [], 0
+
+    def printable_data_string(target_rva):
+        segment = None
+        for va, seg_off, size, flags in elf.segments:
+            if va <= target_rva < va + size:
+                segment = (va, seg_off, size, flags)
+                break
+        if segment is None or (segment[3] & 1):
+            return None
+        try:
+            data_off = elf.offset(target_rva, 1, False)
+        except ValueError:
+            return None
+        end_limit = min(len(elf.b), data_off + 240)
+        end = elf.b.find(b"\0", data_off, end_limit)
+        if end < 0 or not 2 <= end - data_off <= 200:
+            return None
+        raw = bytes(elf.b[data_off:end])
+        if any(byte < 0x20 or byte > 0x7e for byte in raw):
+            return None
+        try:
+            return raw.decode("utf-8", "strict")
+        except UnicodeDecodeError:
+            return None
+
+    raw = elf.b[off:off + span]
+    words_count = len(raw) // 4
+    refs = []
+    seen = set()
+    for wi in range(words_count):
+        word = struct.unpack_from("<I", raw, wi * 4)[0]
+        if word & 0x9F000000 != 0x90000000:
+            continue
+        pc = method_rva + wi * 4
+        rd = word & 0x1F
+        immlo = (word >> 29) & 0x3
+        immhi = (word >> 5) & 0x7FFFF
+        imm21 = (immhi << 2) | immlo
+        if imm21 & (1 << 20):
+            imm21 -= 1 << 21
+        page = (pc & ~0xFFF) + (imm21 << 12)
+        for wj in range(wi + 1, min(wi + 5, words_count)):
+            add = struct.unpack_from("<I", raw, wj * 4)[0]
+            if add & 0x7F000000 != 0x11000000:
+                continue
+            rn = (add >> 5) & 0x1F
+            rd2 = add & 0x1F
+            if rn != rd or rd2 != rd:
+                continue
+            imm12 = (add >> 10) & 0xFFF
+            shift = 12 if ((add >> 22) & 1) else 0
+            target = page + (imm12 << shift)
+            value = printable_data_string(target)
+            if value:
+                domains = _string_review_domains(value)
+                key = (target, value)
+                if domains and key not in seen:
+                    seen.add(key)
+                    refs.append({
+                        "xrefRva": pc, "targetRva": target, "value": value[:200],
+                        "kind": "arm64-adrp-add-string", "domains": domains,
+                    })
+                    if len(refs) >= int(max_refs):
+                        return refs, span
+            break
+    return refs, span
+
+
 def domains_for(text, *, owner=None, field=False, application_owned=False):
     token_list = _tokens(text)
     tokens = set(token_list)
@@ -299,6 +408,8 @@ def _method_domain_relevant(row, domain):
     if bool(row.get("applicationOwned")) and domain in (row.get("bridgeDomains") or []):
         return True
     if bool(row.get("applicationOwned")) and domain in (row.get("accessorReviewDomains") or []):
+        return True
+    if bool(row.get("applicationOwned")) and domain in (row.get("stringReviewDomains") or []):
         return True
     owner_tokens = set(_tokens(row.get("class") or ""))
     gameplay_owner = _owner_gameplay(row.get("class") or "")
@@ -631,7 +742,9 @@ def typed_field_accesses(elf, method, next_rva, field_by_type, *, max_bytes=1638
 
 
 def build_evidence_graph(metadata_path, library_path, catalog_path, graph_path, cb=None,
-                         *, max_field_methods=12000, max_edges=1_500_000):
+                         *, max_field_methods=12000, max_edges=1_500_000,
+                         max_string_methods=4096, max_string_total_bytes=16 * 1024 * 1024,
+                         max_string_method_bytes=12 * 1024):
     """Build one reusable native evidence graph for the whole IL2CPP target."""
     from modkit.mobile.engine import Metadata, Elf, check
     metadata_path, library_path, catalog_path = map(str, (metadata_path, library_path, catalog_path))
@@ -810,6 +923,46 @@ def build_evidence_graph(metadata_path, library_path, catalog_path, graph_path, 
             if access:
                 field_access_by_mid[mid] = access
 
+        # Bounded string-xref discovery reuses the same loaded ELF.  Reserve
+        # half the method budget for existing semantic/accessor seeds and half
+        # for otherwise-unclassified app-owned methods so obfuscation can still
+        # be pierced by native strings without scanning the entire binary again.
+        string_refs_by_mid = {}
+        string_scan_bytes = 0
+        app_string_candidates = []
+        for mid, node in nodes.items():
+            rva = node.get("rva")
+            next_rva = next_by_rva.get(rva) if isinstance(rva, int) else None
+            if (not node.get("applicationOwned") or not isinstance(rva, int)
+                    or not isinstance(next_rva, int) or _noise((node.get("class") or "") + " " + (node.get("label") or ""))):
+                continue
+            span = next_rva - rva
+            if span < 8 or span > int(max_string_method_bytes):
+                continue
+            seeded = bool(mid in field_candidates or node.get("accessorReviewDomains") or node.get("domains"))
+            app_string_candidates.append((not seeded, span, mid))
+        app_string_candidates.sort()
+        seeded = [row for row in app_string_candidates if not row[0]]
+        unseeded = [row for row in app_string_candidates if row[0]]
+        half = max(1, int(max_string_methods) // 2)
+        selected_string_methods = seeded[:half] + unseeded[:max(0, int(max_string_methods) - min(half, len(seeded)))]
+        check(cb, f"Evidence Graph: gameplay string xrefs ({len(selected_string_methods)} методов)")
+        for n, (_unseeded, _span, mid) in enumerate(selected_string_methods):
+            if n % 128 == 0:
+                check(cb)
+            if string_scan_bytes >= int(max_string_total_bytes):
+                break
+            node = nodes[mid]
+            remaining = int(max_string_total_bytes) - string_scan_bytes
+            method_cap = min(int(max_string_method_bytes), remaining)
+            refs, scanned_bytes = _method_string_refs(
+                elf, int(node["rva"]), next_by_rva.get(int(node["rva"])),
+                max_method_bytes=method_cap, max_refs=12,
+            )
+            string_scan_bytes += int(scanned_bytes)
+            if refs:
+                string_refs_by_mid[mid] = refs
+
         # Semantic bridge: an otherwise unnamed node between same-domain native
         # neighbors may participate in discovery, but never auto-binding by itself.
         bridge_domains = {}
@@ -839,7 +992,9 @@ def build_evidence_graph(metadata_path, library_path, catalog_path, graph_path, 
                 exact_fields = field_access_by_mid.get(mid) or []
                 field_domains = sorted({d for x in exact_fields for d in (x.get("domains") or [])})
                 semantic_domains = sorted(set(node.get("domains") or []) | set(field_domains) | set(bridge_domains.get(mid, [])))
-                review_domains = sorted(set(node.get("accessorReviewDomains") or []))
+                string_refs = string_refs_by_mid.get(mid) or []
+                string_domains = sorted({d for ref in string_refs for d in (ref.get("domains") or [])})
+                review_domains = sorted(set(node.get("accessorReviewDomains") or []) | set(string_domains))
                 row = {
                     **node,
                     "callers": callers.get(mid, [])[:48],
@@ -847,6 +1002,8 @@ def build_evidence_graph(metadata_path, library_path, catalog_path, graph_path, 
                     "typedFieldAccesses": exact_fields[:48],
                     "fieldDomains": field_domains,
                     "bridgeDomains": bridge_domains.get(mid, []),
+                    "stringRefs": string_refs[:12],
+                    "stringReviewDomains": string_domains,
                     "semanticDomains": semantic_domains,
                     "reviewDomains": review_domains,
                     "runtimeStatus": "not-observed",
@@ -908,6 +1065,10 @@ def build_evidence_graph(metadata_path, library_path, catalog_path, graph_path, 
             ),
             "bridgeMethods": len(bridge_domains),
             "accessorReviewMethods": sum(1 for x in nodes.values() if x.get("accessorReviewDomains")),
+            "stringScanCandidateMethods": len(selected_string_methods),
+            "stringScanBytes": string_scan_bytes,
+            "stringRefMethods": len(string_refs_by_mid),
+            "gameplayStringRefs": sum(len(v) for v in string_refs_by_mid.values()),
             "fieldScanMethods": len(ranked),
             "resolverTargetTypes": len(resolver_by_type),
             "resolverCandidates": sum(len(v) for v in resolver_by_type.values()),
@@ -1097,9 +1258,10 @@ def build_gameplay_coverage(graph_path, fields_path=None, package_evidence=None,
                     continue
                 exact_accesses = [x for x in (row.get("typedFieldAccesses") or []) if d in (x.get("domains") or [])][:8]
                 bucket = "bridges" if d in (row.get("bridgeDomains") or []) and d not in (row.get("domains") or []) else "methods"
-                accessor_only = d in (row.get("reviewDomains") or []) and d not in (row.get("semanticDomains") or [])
+                accessor_only = d in (row.get("accessorReviewDomains") or []) and d not in (row.get("semanticDomains") or [])
+                string_only = d in (row.get("stringReviewDomains") or []) and d not in (row.get("semanticDomains") or [])
                 bridge_only = bucket == "bridges" and not exact_accesses
-                review_only_semantic = bool(accessor_only or bridge_only)
+                review_only_semantic = bool(accessor_only or string_only or bridge_only)
                 evidence = {
                     "metadataMethodId": row.get("metadataMethodId"), "label": row.get("label"),
                     "rva": row.get("rva"), "isStatic": row.get("isStatic"),
@@ -1109,10 +1271,15 @@ def build_gameplay_coverage(graph_path, fields_path=None, package_evidence=None,
                     "methodRole": row.get("methodRole"),
                     "bridgeDomains": row.get("bridgeDomains") or [],
                     "accessorReviewDomains": row.get("accessorReviewDomains") or [],
+                    "stringRefs": [x for x in (row.get("stringRefs") or []) if d in (x.get("domains") or [])][:8],
+                    "stringReviewDomains": row.get("stringReviewDomains") or [],
                     "reviewDomains": row.get("reviewDomains") or [],
                     "reviewOnlySemantic": review_only_semantic,
                     "automationExcluded": review_only_semantic,
-                    "semanticEvidenceRole": "ambiguous-accessor" if accessor_only else ("xref-bridge" if bridge_only else "direct-or-field"),
+                    "semanticEvidenceRole": ("ambiguous-accessor" if accessor_only else
+                                             "xref-bridge" if bridge_only else
+                                             "string-xref" if d in (row.get("stringReviewDomains") or []) and d not in (row.get("semanticDomains") or [])
+                                             else "direct-or-field"),
                 }
                 if len(domains[d][bucket]) < 512:
                     domains[d][bucket].append(evidence)
