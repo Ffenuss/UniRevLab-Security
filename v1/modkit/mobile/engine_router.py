@@ -31,9 +31,9 @@ _ROUTES: dict[str, dict[str, Any]] = {
         "missing": ["managed CIL/assembly reconstruction for Unity Mono"],
     },
     "unreal": {
-        "engines": ["unreal.static", "elf.static", "native.deep-embedded", "security.passive"],
+        "engines": ["unreal.static", "unreal.deep-embedded", "elf.static", "native.deep-embedded", "security.passive"],
         "coverage": "PARTIAL_BUNDLED",
-        "missing": ["Unreal UObject/UClass/FName reflection", "PAK/IoStore semantic/cooked-object backend"],
+        "missing": ["version-specific PAK/IoStore index deserialization", "full UObject/Blueprint semantic reconstruction"],
     },
     "flutter": {
         "engines": ["flutter.static", "flutter.aot-embedded", "native.deep-embedded", "security.passive"],
@@ -66,9 +66,9 @@ _ROUTES: dict[str, dict[str, Any]] = {
         "coverage": "FULL_BUNDLED",
     },
     "godot": {
-        "engines": ["godot.static", "elf.static", "native.deep-embedded", "security.passive"],
+        "engines": ["godot.static", "godot.deep-embedded", "elf.static", "native.deep-embedded", "security.passive"],
         "coverage": "PARTIAL_BUNDLED",
-        "missing": ["Godot PCK binary/resource semantic backend"],
+        "missing": ["binary/encrypted PCK file-table and binary resource semantic decoder"],
     },
     "defold": {
         "engines": ["defold.static", "elf.static", "native.deep-embedded", "lua.static", "lua.bytecode-embedded"],
