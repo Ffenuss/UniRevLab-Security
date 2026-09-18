@@ -609,3 +609,213 @@ def test_deep_gameplay_accepts_dlsym_argument_flow_as_non_buildable_evidence():
     assert finding["patchReady"] is False
     assert finding.get("rva") is None
     assert finding["evidenceRole"] == "deep-gameplay-il2cpp-dlsym-pointer-argument-flow"
+
+
+def test_dlsym_pointer_survives_stack_store_load_and_unknown_call():
+    import struct
+    from types import SimpleNamespace
+
+    def adrp(rd, pc, target):
+        delta = (target & ~0xFFF) - (pc & ~0xFFF)
+        imm21 = (delta >> 12) & ((1 << 21) - 1)
+        return 0x90000000 | ((imm21 & 0x3) << 29) | (((imm21 >> 2) & 0x7FFFF) << 5) | rd
+
+    def add(rd, rn, imm):
+        return 0x91000000 | ((imm & 0xFFF) << 10) | (rn << 5) | rd
+
+    def sub_sp(imm):
+        return 0xD1000000 | ((imm & 0xFFF) << 10) | (31 << 5) | 31
+
+    def str_x(rt, rn, imm):
+        return 0xF9000000 | (((imm // 8) & 0xFFF) << 10) | (rn << 5) | rt
+
+    def ldr_x(rt, rn, imm):
+        return 0xF9400000 | (((imm // 8) & 0xFFF) << 10) | (rn << 5) | rt
+
+    def blr(rn):
+        return 0xD63F0000 | (rn << 5)
+
+    BL = 0x94000000
+    start = 0x1000
+    words = []
+    calls = []
+
+    def emit(word):
+        words.append(word)
+        return start + (len(words) - 1) * 4
+
+    emit(sub_sp(0x40))
+    emit(adrp(1, start + len(words) * 4, 0x3000))
+    emit(add(1, 1, 0))
+    pc = emit(BL)
+    calls.append({"sourceRva": start, "sourceFunction": "resolve", "callRva": pc,
+                  "targetFunction": "dlsym", "targetRva": 0x5000})
+    emit(str_x(0, 31, 0x20))
+    pc = emit(BL)
+    calls.append({"sourceRva": start, "sourceFunction": "resolve", "callRva": pc,
+                  "targetFunction": "other_function", "targetRva": 0x6000})
+    emit(ldr_x(22, 31, 0x20))
+    emit(adrp(2, start + len(words) * 4, 0x3000))
+    emit(add(2, 2, 0x040))
+    emit(blr(22))
+
+    blob = b"".join(struct.pack("<I", word) for word in words)
+
+    class FakeElf:
+        def is_arm64(self):
+            return True
+        def read_at_rva(self, rva, size):
+            assert rva == start
+            return blob[:size]
+
+    strings = [
+        {"rva": 0x3000, "text": "il2cpp_class_from_name", "domain": "", "lookupRole": None},
+        {"rva": 0x3040, "text": "PlayerStats", "domain": "", "lookupRole": "type"},
+    ]
+    functions = [SimpleNamespace(value=start, size=len(blob), name="resolve", shndx=1)]
+    flows = native_deep._dlsym_il2cpp_pointer_flow(FakeElf(), functions, strings, calls)
+
+    assert len(flows) == 1
+    flow = flows[0]
+    assert flow["lookupKind"] == "type"
+    assert flow["identifier"] == "PlayerStats"
+    assert flow["pointerRegister"] == "X22"
+    assert flow["functionPointerStorage"] == "stack"
+    assert flow["functionPointerStackOffset"] == -0x20
+    assert flow["functionPointerFlowConfirmed"] is True
+    assert flow["associationStatus"] == "dlsym-memory-pointer-to-blr-argument-confirmed"
+    assert "str-ldr" in flow["flowModel"]
+
+
+def test_dlsym_pointer_global_slot_is_recovered_in_another_function():
+    import struct
+    from types import SimpleNamespace
+
+    def adrp(rd, pc, target):
+        delta = (target & ~0xFFF) - (pc & ~0xFFF)
+        imm21 = (delta >> 12) & ((1 << 21) - 1)
+        return 0x90000000 | ((imm21 & 0x3) << 29) | (((imm21 >> 2) & 0x7FFFF) << 5) | rd
+
+    def add(rd, rn, imm):
+        return 0x91000000 | ((imm & 0xFFF) << 10) | (rn << 5) | rd
+
+    def str_x(rt, rn, imm):
+        return 0xF9000000 | (((imm // 8) & 0xFFF) << 10) | (rn << 5) | rt
+
+    def ldr_x(rt, rn, imm):
+        return 0xF9400000 | (((imm // 8) & 0xFFF) << 10) | (rn << 5) | rt
+
+    def blr(rn):
+        return 0xD63F0000 | (rn << 5)
+
+    BL = 0x94000000
+    resolver = 0x1000
+    caller = 0x2000
+    rwords = [
+        adrp(1, resolver, 0x3000),
+        add(1, 1, 0),
+        BL,
+        adrp(9, resolver + 12, 0x7000),
+        str_x(0, 9, 0),
+    ]
+    cwords = [
+        adrp(9, caller, 0x7000),
+        ldr_x(22, 9, 0),
+        adrp(2, caller + 8, 0x3000),
+        add(2, 2, 0x040),
+        blr(22),
+    ]
+    rblob = b"".join(struct.pack("<I", word) for word in rwords)
+    cblob = b"".join(struct.pack("<I", word) for word in cwords)
+
+    class FakeElf:
+        def is_arm64(self):
+            return True
+        def read_at_rva(self, rva, size):
+            if rva == resolver:
+                return rblob[:size]
+            if rva == caller:
+                return cblob[:size]
+            raise ValueError(rva)
+
+    strings = [
+        {"rva": 0x3000, "text": "il2cpp_class_from_name", "domain": "", "lookupRole": None},
+        {"rva": 0x3040, "text": "PlayerStats", "domain": "", "lookupRole": "type"},
+    ]
+    functions = [
+        SimpleNamespace(value=resolver, size=len(rblob), name="init_api", shndx=1),
+        SimpleNamespace(value=caller, size=len(cblob), name="use_api", shndx=1),
+    ]
+    calls = [{
+        "sourceRva": resolver, "sourceFunction": "init_api", "callRva": resolver + 8,
+        "targetFunction": "dlsym", "targetRva": 0x5000,
+    }]
+
+    flows = native_deep._dlsym_il2cpp_pointer_flow(FakeElf(), functions, strings, calls)
+    assert len(flows) == 1
+    flow = flows[0]
+    assert flow["sourceRva"] == caller
+    assert flow["sourceFunction"] == "use_api"
+    assert flow["lookupKind"] == "type"
+    assert flow["identifier"] == "PlayerStats"
+    assert flow["functionPointerStorage"] == "global"
+    assert flow["functionPointerSlotRva"] == 0x7000
+    assert flow["pointerRegister"] == "X22"
+    assert flow["functionPointerFlowConfirmed"] is True
+
+
+def test_global_pointer_slot_is_invalidated_by_unknown_store():
+    import struct
+    from types import SimpleNamespace
+
+    def adrp(rd, pc, target):
+        delta = (target & ~0xFFF) - (pc & ~0xFFF)
+        imm21 = (delta >> 12) & ((1 << 21) - 1)
+        return 0x90000000 | ((imm21 & 0x3) << 29) | (((imm21 >> 2) & 0x7FFFF) << 5) | rd
+
+    def add(rd, rn, imm):
+        return 0x91000000 | ((imm & 0xFFF) << 10) | (rn << 5) | rd
+
+    def str_x(rt, rn, imm):
+        return 0xF9000000 | (((imm // 8) & 0xFFF) << 10) | (rn << 5) | rt
+
+    def ldr_x(rt, rn, imm):
+        return 0xF9400000 | (((imm // 8) & 0xFFF) << 10) | (rn << 5) | rt
+
+    def blr(rn):
+        return 0xD63F0000 | (rn << 5)
+
+    BL = 0x94000000
+    resolver = 0x1000
+    caller = 0x2000
+    rwords = [
+        adrp(1, resolver, 0x3000), add(1, 1, 0), BL,
+        adrp(9, resolver + 12, 0x7000), str_x(0, 9, 0),
+        str_x(5, 9, 0),  # X5 has no proven value: invalidate slot.
+    ]
+    cwords = [
+        adrp(9, caller, 0x7000), ldr_x(22, 9, 0),
+        adrp(2, caller + 8, 0x3000), add(2, 2, 0x040), blr(22),
+    ]
+    rblob = b"".join(struct.pack("<I", word) for word in rwords)
+    cblob = b"".join(struct.pack("<I", word) for word in cwords)
+
+    class FakeElf:
+        def is_arm64(self):
+            return True
+        def read_at_rva(self, rva, size):
+            return (rblob if rva == resolver else cblob)[:size]
+
+    functions = [
+        SimpleNamespace(value=resolver, size=len(rblob), name="init_api", shndx=1),
+        SimpleNamespace(value=caller, size=len(cblob), name="use_api", shndx=1),
+    ]
+    strings = [
+        {"rva": 0x3000, "text": "il2cpp_class_from_name", "domain": "", "lookupRole": None},
+        {"rva": 0x3040, "text": "PlayerStats", "domain": "", "lookupRole": "type"},
+    ]
+    calls = [{
+        "sourceRva": resolver, "sourceFunction": "init_api", "callRva": resolver + 8,
+        "targetFunction": "dlsym", "targetRva": 0x5000,
+    }]
+    assert native_deep._dlsym_il2cpp_pointer_flow(FakeElf(), functions, strings, calls) == []
