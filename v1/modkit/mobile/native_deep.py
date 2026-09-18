@@ -56,6 +56,11 @@ _IL2CPP_LOOKUP_APIS = {
     "il2cpp_class_get_method_from_name", "il2cpp_class_get_methods", "il2cpp_method_get_name",
     "il2cpp_runtime_invoke", "il2cpp_object_new", "il2cpp_thread_attach",
 }
+_RESOLVER_OBJECT_ALLOCATORS = {
+    "malloc", "calloc", "realloc", "aligned_alloc",
+    "_Znwm", "_Znam", "_Znwj", "_Znaj",
+    "operator new", "operator new[]",
+}
 _NATIVE_MARKERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("ptrace-injector", ("ptrace", "ptrace_attach", "ptrace_pokedata", "process_vm_writev",
                          "/proc/%d/maps", "/proc/%d/cmdline", "/proc/self/maps", "remote_dlopen")),
@@ -851,6 +856,7 @@ def _dlsym_il2cpp_pointer_flow(elf: ElfFile, functions: list[Any],
     by_start = {int(fn.value): (idx, fn) for idx, fn in enumerate(funcs)}
     dlsym_sources = sorted({int(row["sourceRva"]) for row in dlsym_calls})
     global_slots: dict[int, dict[str, Any]] = {}
+    object_slots: dict[str, dict[int, dict[str, Any]]] = {}
     out: list[dict[str, Any]] = []
     seen: set[tuple[Any, ...]] = set()
     total = 0
@@ -947,9 +953,14 @@ def _dlsym_il2cpp_pointer_flow(elf: ElfFile, functions: list[Any],
                 "functionPointerStackOffset": pointer.get("stackOffset"),
                 "functionPointerStorageBaseRva": pointer.get("storageBaseRva"),
                 "functionPointerStorageMemberOffset": pointer.get("storageMemberOffset"),
+                "functionPointerStorageObjectId": pointer.get("storageObjectId"),
                 "functionPointerTableBaseRva": pointer.get("tableBaseRva"),
+                "functionPointerTableObjectId": pointer.get("tableObjectId"),
                 "functionPointerTableOffset": pointer.get("tableOffset"),
                 "functionPointerTableEntryCount": pointer.get("tableEntryCount"),
+                "functionPointerIndirectionDepth": pointer.get("indirectionDepth", 1),
+                "functionPointerRootSlotRva": pointer.get("rootSlotRva"),
+                "functionPointerAllocator": pointer.get("allocator"),
                 "gameplayDomain": "" if domain == "security" else domain,
                 "argumentFlowConfirmed": True,
                 "functionPointerFlowConfirmed": True,
@@ -998,36 +1009,55 @@ def _dlsym_il2cpp_pointer_flow(elf: ElfFile, functions: list[Any],
         stack_slots: dict[int, dict[str, Any]] = {}
         local_global_slots: dict[int, dict[str, Any]] = {}
         invalid_global_slots: set[int] = set()
+        local_object_slots: dict[str, dict[int, dict[str, Any]]] = {}
+        invalid_object_slots: set[tuple[str, int]] = set()
         sp_delta = 0
         function_calls = calls_by_source.get(source_rva, {})
 
-        def memory_key(rn: int, offset: int) -> tuple[str, int, int | None, int] | None:
+        def memory_key(rn: int, offset: int) -> tuple[str, Any, int | None, int, int | None] | None:
             if rn == 31:
-                return "stack", sp_delta + offset, None, offset
+                return "stack", sp_delta + offset, None, offset, None
             base = state.get(rn)
             if base and base.get("kind") == "address" and isinstance(base.get("targetRva"), int):
                 base_rva = int(base["targetRva"])
-                return "global", base_rva + offset, base_rva, offset
+                root_slot = base.get("rootSlotRva") if isinstance(base.get("rootSlotRva"), int) else None
+                return "global", base_rva + offset, base_rva, offset, root_slot
+            if base and base.get("kind") == "resolver-object" and base.get("objectId"):
+                root_slot = base.get("rootSlotRva") if isinstance(base.get("rootSlotRva"), int) else None
+                return "object", str(base["objectId"]), None, offset, root_slot
             if rn in page_state:
                 base_rva = int(page_state[rn])
-                return "global", base_rva + offset, base_rva, offset
+                return "global", base_rva + offset, base_rva, offset, None
             return None
 
-        def load_slot(rt: int, key: tuple[str, int, int | None, int]) -> None:
-            kind, slot, _base_rva, _member_offset = key
+        def load_slot(rt: int, key: tuple[str, Any, int | None, int, int | None]) -> None:
+            kind, slot, _base_rva, member_offset, root_slot = key
             if kind == "stack":
-                value = stack_slots.get(slot)
-            elif slot in invalid_global_slots:
+                value = stack_slots.get(int(slot))
+            elif kind == "object":
+                object_id = str(slot)
+                if (object_id, member_offset) in invalid_object_slots:
+                    value = None
+                else:
+                    value = (local_object_slots.get(object_id, {}).get(member_offset)
+                             or object_slots.get(object_id, {}).get(member_offset))
+            elif int(slot) in invalid_global_slots:
                 value = None
             else:
-                value = local_global_slots.get(slot) or global_slots.get(slot)
+                value = local_global_slots.get(int(slot)) or global_slots.get(int(slot))
             if value:
                 loaded = dict(value)
                 loaded["storage"] = kind
                 if kind == "global":
-                    loaded["slotRva"] = slot
+                    loaded["slotRva"] = int(slot)
+                elif kind == "object":
+                    loaded["storageObjectId"] = str(slot)
+                    loaded["storageMemberOffset"] = member_offset
                 else:
-                    loaded["stackOffset"] = slot
+                    loaded["stackOffset"] = int(slot)
+                if root_slot is not None:
+                    loaded["rootSlotRva"] = root_slot
+                    loaded["indirectionDepth"] = max(2, int(loaded.get("indirectionDepth") or 1))
                 state[rt] = loaded
             else:
                 state.pop(rt, None)
@@ -1056,6 +1086,19 @@ def _dlsym_il2cpp_pointer_flow(elf: ElfFile, functions: list[Any],
                     page_state = {r: v for r, v in page_state.items() if r >= 19}
                     if result:
                         state[0] = result
+                    continue
+                if allow_dlsym and target_name in _RESOLVER_OBJECT_ALLOCATORS:
+                    object_id = f"{source_rva:x}:{pc:x}"
+                    result = {
+                        "kind": "resolver-object",
+                        "objectId": object_id,
+                        "allocator": target_name,
+                        "allocationCallRva": pc,
+                    }
+                    clear_caller_saved(state)
+                    page_state = {r: v for r, v in page_state.items() if r >= 19}
+                    state[0] = result
+                    object_slots.setdefault(object_id, {})
                     continue
                 clear_caller_saved(state)
                 page_state = {r: v for r, v in page_state.items() if r >= 19}
@@ -1094,39 +1137,65 @@ def _dlsym_il2cpp_pointer_flow(elf: ElfFile, functions: list[Any],
                 rt, rn, off = store
                 key = memory_key(rn, off)
                 if key:
-                    kind, slot, storage_base_rva, storage_member_offset = key
+                    kind, slot, storage_base_rva, storage_member_offset, root_slot = key
                     value = state.get(rt)
                     if kind == "stack":
                         if value:
-                            stack_slots[slot] = dict(value)
+                            stack_slots[int(slot)] = dict(value)
                         else:
-                            stack_slots.pop(slot, None)
-                    elif allow_dlsym:
+                            stack_slots.pop(int(slot), None)
+                    elif kind == "object":
+                        object_id = str(slot)
                         if value and value.get("kind") == "il2cpp-api-pointer":
                             stored = dict(value)
+                            stored["storage"] = "object"
+                            stored["storageObjectId"] = object_id
+                            stored["storageMemberOffset"] = storage_member_offset
+                            stored["allocator"] = state.get(rn, {}).get("allocator")
+                            if root_slot is not None:
+                                stored["rootSlotRva"] = root_slot
+                                stored["indirectionDepth"] = 2
+                            if allow_dlsym:
+                                object_slots.setdefault(object_id, {})[storage_member_offset] = stored
+                            else:
+                                local_object_slots.setdefault(object_id, {})[storage_member_offset] = stored
+                                invalid_object_slots.discard((object_id, storage_member_offset))
+                        else:
+                            if allow_dlsym:
+                                object_slots.setdefault(object_id, {}).pop(storage_member_offset, None)
+                            else:
+                                local_object_slots.setdefault(object_id, {}).pop(storage_member_offset, None)
+                                invalid_object_slots.add((object_id, storage_member_offset))
+                    elif allow_dlsym:
+                        if value and value.get("kind") in {"il2cpp-api-pointer", "address", "resolver-object"}:
+                            stored = dict(value)
                             stored["storage"] = "global"
-                            stored["slotRva"] = slot
+                            stored["slotRva"] = int(slot)
                             stored["storageBaseRva"] = storage_base_rva
                             stored["storageMemberOffset"] = storage_member_offset
-                            global_slots[slot] = stored
+                            if value.get("kind") in {"address", "resolver-object"}:
+                                stored["rootSlotRva"] = int(slot)
+                            global_slots[int(slot)] = stored
                         else:
-                            global_slots.pop(slot, None)
+                            global_slots.pop(int(slot), None)
                     else:
                         # Phase-two consumer functions may overwrite a cached
-                        # pointer before loading it. Keep that effect local to
-                        # this function instead of mutating initializer truth
-                        # for unrelated functions.
-                        if value and value.get("kind") == "il2cpp-api-pointer":
+                        # pointer/reference before loading it. Keep that effect
+                        # local to this function so unrelated consumers retain
+                        # initializer truth.
+                        if value and value.get("kind") in {"il2cpp-api-pointer", "address", "resolver-object"}:
                             stored = dict(value)
                             stored["storage"] = "global"
-                            stored["slotRva"] = slot
+                            stored["slotRva"] = int(slot)
                             stored["storageBaseRva"] = storage_base_rva
                             stored["storageMemberOffset"] = storage_member_offset
-                            local_global_slots[slot] = stored
-                            invalid_global_slots.discard(slot)
+                            if value.get("kind") in {"address", "resolver-object"}:
+                                stored["rootSlotRva"] = int(slot)
+                            local_global_slots[int(slot)] = stored
+                            invalid_global_slots.discard(int(slot))
                         else:
-                            local_global_slots.pop(slot, None)
-                            invalid_global_slots.add(slot)
+                            local_global_slots.pop(int(slot), None)
+                            invalid_global_slots.add(int(slot))
                 continue
 
             load = _decode_ldr_x_unsigned(word)
@@ -1223,6 +1292,23 @@ def _dlsym_il2cpp_pointer_flow(elf: ElfFile, functions: list[Any],
             value["tableOffset"] = value.get("storageMemberOffset")
             value["tableEntryCount"] = count
 
+    # Allocator-backed resolver objects are table-like only when at least
+    # two different proven IL2CPP APIs occupy distinct member offsets.
+    grouped_object_tables: dict[str, list[tuple[int, dict[str, Any]]]] = {}
+    for object_id, members in object_slots.items():
+        entries = [(offset, value) for offset, value in members.items()
+                   if value.get("kind") == "il2cpp-api-pointer"]
+        api_names = {str(value.get("apiName") or "") for _offset, value in entries if value.get("apiName")}
+        offsets = {int(offset) for offset, _value in entries}
+        if len(api_names) < 2 or len(offsets) < 2:
+            continue
+        grouped_object_tables[object_id] = entries
+        count = len(entries)
+        for offset, value in entries:
+            value["tableObjectId"] = object_id
+            value["tableOffset"] = offset
+            value["tableEntryCount"] = count
+
     # Once a global slot has a proven dlsym origin, scan other known functions
     # for exact LDR(slot) -> BLR flow. Functions already scanned above are skipped.
     if global_slots and total < int(max_total_bytes) and len(out) < 320:
@@ -1244,6 +1330,14 @@ def _dlsym_il2cpp_pointer_flow(elf: ElfFile, functions: list[Any],
             row["functionPointerTableBaseRva"] = value.get("tableBaseRva")
             row["functionPointerTableOffset"] = value.get("tableOffset")
             row["functionPointerTableEntryCount"] = value.get("tableEntryCount")
+        object_id = row.get("functionPointerStorageObjectId")
+        member_offset = row.get("functionPointerStorageMemberOffset")
+        object_value = (object_slots.get(str(object_id), {}).get(int(member_offset))
+                        if object_id and isinstance(member_offset, int) else None)
+        if object_value and object_value.get("tableObjectId"):
+            row["functionPointerTableObjectId"] = object_value.get("tableObjectId")
+            row["functionPointerTableOffset"] = object_value.get("tableOffset")
+            row["functionPointerTableEntryCount"] = object_value.get("tableEntryCount")
     return out
 
 def _dlsym_pointer_table_summary(flows: list[dict[str, Any]]) -> list[dict[str, Any]]:
