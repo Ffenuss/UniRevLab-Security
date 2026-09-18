@@ -296,6 +296,10 @@ def _quality(card: dict) -> dict:
         priority = 92
     elif source == "SecuritySummary":
         priority = 88
+    elif source == "NativeDeep" and str(card.get("category") or "").startswith("Runtime/Architecture"):
+        priority = 82
+    elif source == "NativeDeep" and "IL2CPP Runtime Lookup" in str(card.get("category") or ""):
+        priority = 78
     elif card.get("serverAudit") and ownership not in {"FRAMEWORK"}:
         priority = 80
     elif status in {"CONFIRMED", "VERIFIED", "FIELD_OBSERVED"} and ownership in {"APP", "APP_OR_GAME"}:
@@ -559,6 +563,8 @@ def build_catalog(workdir: str | Path, output_path: str | Path | None = None) ->
         ("re-analysis.menu.json", "RE"),
         ("installed-scan.json", "InstalledScan"),
         ("security-surfaces.json", "SecuritySurface"),
+        ("native-deep.json", "NativeDeep"),
+        ("deep-gameplay.json", "Gameplay"),
     ]
     wanted = {"candidates", "discoveries", "cards", "findings", "controlCandidates", "controls", "methods", "surfaces"}
     for name, source in sources:
