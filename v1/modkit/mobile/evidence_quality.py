@@ -157,6 +157,15 @@ def _runtime(card: dict[str, Any]) -> bool:
     return "runtime" in status or bool(ev.get("runtimeConfirmed") or ev.get("runtimeObserved"))
 
 
+def _automation_excluded(card: dict[str, Any]) -> bool:
+    ev = _evidence(card)
+    return bool(
+        card.get("automationExcluded")
+        or ev.get("automationExcluded")
+        or ev.get("reviewOnlySemantic")
+    )
+
+
 def evidence_tier(card: dict[str, Any]) -> str:
     if _explicit_issue(card):
         return "CONFIRMED_ISSUE"
@@ -185,10 +194,20 @@ def _framework_endpoint(card: dict[str, Any]) -> bool:
 def _refine_card(card: dict[str, Any]) -> dict[str, Any]:
     out = deepcopy(card)
     tier = evidence_tier(out)
+    automation_excluded = _automation_excluded(out)
     out["evidenceTier"] = tier
     out["methodBoundEvidence"] = _has_method_context(out)
     out["flowCorrelated"] = _has_flow(out)
-    out["controlCandidate"] = bool(out.get("buildable") or out.get("selectable") or out["methodBoundEvidence"]) and tier == "CORRELATED_EVIDENCE"
+    out["automationExcluded"] = automation_excluded
+    out["controlCandidate"] = (
+        not automation_excluded
+        and bool(out.get("buildable") or out.get("selectable") or out["methodBoundEvidence"])
+        and tier == "CORRELATED_EVIDENCE"
+    )
+    if automation_excluded:
+        out["buildable"] = False
+        out["selectable"] = False
+        out["actionable"] = False
     if tier == "DISCOVERED_SURFACE":
         out["buildable"] = False
         out["selectable"] = False
@@ -278,6 +297,7 @@ def refine_catalog(report: dict[str, Any]) -> dict[str, Any]:
         "rawStringsBecomeControls": False,
         "methodBoundEvidenceSeparated": True,
         "methodBoundCorrelatedMayEnterPreflight": True,
+        "reviewOnlySemanticAutomationExcluded": True,
         "normalizedDedup": True,
         "frameworkCdnNoiseNormalized": True,
         "tiers": ["DISCOVERED_SURFACE", "POTENTIAL_TRUST_BOUNDARY", "CORRELATED_EVIDENCE", "CONFIRMED_ISSUE"],
