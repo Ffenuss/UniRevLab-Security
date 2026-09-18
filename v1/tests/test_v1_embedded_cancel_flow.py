@@ -22,22 +22,27 @@ class CancelAfterArtifactFamilies:
 
 
 def test_embedded_pipeline_stops_before_next_backend_on_cancel(tmp_path, monkeypatch):
-    calls = {"artifact": 0, "lua": 0}
+    calls = {"profiler": 0, "artifact": 0, "lua": 0}
+
+    def profiler_scan(*_args, **_kwargs):
+        calls["profiler"] += 1
+        return {
+            "schema": "test-runtime-profiler",
+            "profileCount": 0,
+            "detected": [],
+            "profiles": [],
+            "abis": [],
+        }
 
     def artifact_scan(*_args, **_kwargs):
         calls["artifact"] += 1
-        return {
-            "schema": "test-artifacts",
-            "artifactCount": 0,
-            "symbolCount": 0,
-            "artifacts": [],
-            "total": 0,
-        }
+        raise AssertionError("Artifact backend must not run after cancellation")
 
     def lua_scan(*_args, **_kwargs):
         calls["lua"] += 1
         raise AssertionError("Lua backend must not run after cancellation")
 
+    monkeypatch.setattr(embedded_pipeline.runtime_profiler, "scan_workspace", profiler_scan)
     monkeypatch.setattr(embedded_pipeline.artifact_families, "scan_workspace", artifact_scan)
     monkeypatch.setattr(embedded_pipeline.lua_deep_cancellable, "scan_workspace", lua_scan)
 
@@ -50,8 +55,8 @@ def test_embedded_pipeline_stops_before_next_backend_on_cancel(tmp_path, monkeyp
             callback,
         )
 
-    assert calls == {"artifact": 1, "lua": 0}
-    assert callback.progress_rows == ["Embedded 1/7 · artifact families…"]
+    assert calls == {"profiler": 1, "artifact": 0, "lua": 0}
+    assert callback.progress_rows == ["Embedded 1/11 · runtime / engine profiler…"]
     assert not (tmp_path / "embedded-analysis.json").exists()
 
 
