@@ -142,3 +142,81 @@ def test_phase7_plan_separates_controls_runtime_and_review():
     assert plan["nonControlEvidenceCount"] == 2
     assert plan["phase7Policy"]["refinedCatalogRequiresControlCandidate"] is True
     assert plan["phase7Policy"]["reviewEvidencePromotesBuildability"] is False
+
+
+def test_review_only_semantic_native_recovery_never_enters_preflight():
+    card = _card(
+        "weak-accessor",
+        "APP_OWNED",
+        tier="CORRELATED_EVIDENCE",
+        control=False,
+        locator={"methodId": 88, "class": "a.b.C", "method": "GetLevel", "rva": None},
+    )
+    card["automationExcluded"] = True
+    card["evidence"] = {"reviewOnlySemantic": True, "automationExcluded": True}
+    recovery = [{
+        "id": 88,
+        "metadataMethodId": 88,
+        "metadataToken": "0x06000058",
+        "image": "Assembly-CSharp.dll",
+        "class": "a.b.C",
+        "methodName": "GetLevel",
+        "status": "NATIVE_RVA_RECOVERED_EXACT_CODEGENMODULE",
+        "rva": 0x456780,
+        "rvaHex": "0x456780",
+        "addressConfirmed": True,
+        "associationConfirmed": True,
+        "uniqueExecutablePointer": True,
+        "moduleResolution": "EXACT_EXPECTED_METHOD_COUNT",
+        "identityProof": "metadataMethodId+token+image+declaringType+methodName",
+        "actionable": False,
+        "buildable": False,
+        "promotesBuildability": False,
+    }]
+    plan = build_plan({"cards": [card]}, None, None, None, recovery)
+    row = plan["candidates"][0]
+    assert row["nativeRvaRecovered"] is True
+    assert row["automationExcluded"] is True
+    assert row["stage"] == "REVIEW"
+    assert row["executableControl"] is False
+    assert row["reviewOnly"] is True
+    assert plan["readyForPreflightCount"] == 0
+    assert plan["executableControlCount"] == 0
+
+
+def test_review_only_xref_bridge_can_request_runtime_but_not_preflight():
+    card = _card(
+        "xref-bridge",
+        "FLOW_CONFIRMED",
+        tier="CORRELATED_EVIDENCE",
+        control=False,
+        locator={"methodId": 99, "class": "a.b.C", "method": "a", "rva": None},
+    )
+    card["automationExcluded"] = True
+    card["evidence"] = {"reviewOnlySemantic": True, "automationExcluded": True}
+    recovery = [{
+        "id": 99,
+        "metadataMethodId": 99,
+        "metadataToken": "0x06000063",
+        "image": "Assembly-CSharp.dll",
+        "class": "a.b.C",
+        "methodName": "a",
+        "status": "NATIVE_RVA_RECOVERED_EXACT_CODEGENMODULE",
+        "rva": 0x567890,
+        "rvaHex": "0x567890",
+        "addressConfirmed": True,
+        "associationConfirmed": True,
+        "uniqueExecutablePointer": True,
+        "moduleResolution": "EXACT_EXPECTED_METHOD_COUNT",
+        "identityProof": "metadataMethodId+token+image+declaringType+methodName",
+        "actionable": False,
+        "buildable": False,
+        "promotesBuildability": False,
+    }]
+    plan = build_plan({"cards": [card]}, None, None, None, recovery)
+    row = plan["candidates"][0]
+    assert row["nativeRvaRecovered"] is True
+    assert row["stage"] == "RUNTIME_NEEDED"
+    assert row["runtimeProbe"] is True
+    assert row["executableControl"] is False
+    assert plan["readyForPreflightCount"] == 0
