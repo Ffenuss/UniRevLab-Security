@@ -27,7 +27,11 @@ MAX_FUNCTION_ROWS = 1600
 MAX_FINDINGS = 1200
 MAX_STRING_SCAN_BYTES = 32 * 1024 * 1024
 MAX_STRING_TARGETS = 160
+MAX_NATIVE_MARKER_TARGETS = 320
+MAX_LOOKUP_IDENTIFIER_TARGETS = 320
 MAX_CONTROL_FLOW = 5000
+MAX_DEX_MARKER_BYTES = 24 * 1024 * 1024
+MAX_ASSET_ELF_BYTES = 128 * 1024 * 1024
 COPY_CHUNK_BYTES = 1024 * 1024
 PRINTABLE = re.compile(rb"[\x20-\x7e]{5,}")
 
@@ -43,6 +47,72 @@ _DOMAINS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("mana_energy", ("mana", "stamina", "energy")),
     ("security", ("certificate", "pinning", "keystore", "encrypt", "decrypt", "oauth", "token", "session")),
 )
+
+
+_IL2CPP_LOOKUP_APIS = {
+    "il2cpp_domain_get", "il2cpp_domain_get_assemblies", "il2cpp_domain_assembly_open",
+    "il2cpp_assembly_get_image", "il2cpp_class_from_name", "il2cpp_class_get_field_from_name",
+    "il2cpp_field_get_offset", "il2cpp_field_get_value", "il2cpp_field_set_value",
+    "il2cpp_class_get_method_from_name", "il2cpp_class_get_methods", "il2cpp_method_get_name",
+    "il2cpp_runtime_invoke", "il2cpp_object_new", "il2cpp_thread_attach",
+}
+_NATIVE_MARKERS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("ptrace-injector", ("ptrace", "ptrace_attach", "ptrace_pokedata", "process_vm_writev",
+                         "/proc/%d/maps", "/proc/%d/cmdline", "/proc/self/maps", "remote_dlopen")),
+    ("dynamic-loader", ("dlopen", "dlsym", "android_dlopen_ext")),
+    ("dobby-hook", ("dobbyhook", "dobbyinstrument", "dobbycodepatch", "dobbysymbolresolver")),
+    ("imgui-overlay", ("dear imgui", "imgui::", "imgui_impl_opengl3", "imgui_impl_android")),
+    ("egl-overlay", ("eglswapbuffers", "eglmakecurrent", "eglgetcurrentcontext", "anativewindow")),
+    ("il2cpp-runtime-api", tuple(sorted(_IL2CPP_LOOKUP_APIS))),
+    ("virtual-container-native", ("virtualapp", "sandhook", "nativeengine", "virtualcore")),
+)
+_DEX_MARKERS: tuple[tuple[str, tuple[bytes, ...]], ...] = (
+    ("virtual-container", (
+        b"com/lody/virtual", b"com.lody.virtual", b"NativeEngine", b"VirtualCore",
+        b"VirtualApp", b"dualspace", b"multispace",
+    )),
+    ("root-injector-orchestrator", (
+        b"/data/local/tmp/", b"chmod 755", b"libsuperuser", b"su -c",
+        b"InjectCezRoot", b"getInjectCommands", b"CopyFilesRoot",
+    )),
+)
+
+
+def _marker_tags(text: str) -> list[str]:
+    low = str(text or "").casefold()
+    out = []
+    for tag, needles in _NATIVE_MARKERS:
+        if any(needle in low for needle in needles):
+            out.append(tag)
+    return out
+
+
+def _managed_identifier_candidate(text: str) -> bool:
+    value = str(text or "").strip()
+    if not 2 <= len(value) <= 120 or " " in value or "/" in value or "\\" in value:
+        return False
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.$+<>\x60-]{1,119}", value):
+        return False
+    low = value.casefold()
+    if low in _IL2CPP_LOOKUP_APIS or low.startswith(("java.", "android.", "kotlin.", "std::")):
+        return False
+    if low.startswith(("get_", "set_", "m_", "is_", "has_")):
+        return True
+    if re.search(r"[a-z][A-Z]", value):
+        return True
+    return bool(_domain(value))
+
+
+def _lookup_identifier_role(text: str) -> str:
+    value = str(text or "")
+    low = value.casefold()
+    if low.startswith(("get_", "set_")):
+        return "method"
+    if low.startswith(("m_", "s_")):
+        return "field"
+    if value and value[0].isupper():
+        return "type"
+    return "identifier"
 
 
 class NativeScanCancelled(RuntimeError):
@@ -142,9 +212,11 @@ def _extract(zf: zipfile.ZipFile, info: zipfile.ZipInfo, apk: Path, cache: Path,
 
 
 def _semantic_strings(elf: ElfFile, cb: Any | None = None) -> list[dict[str, Any]]:
+    """One bounded non-executable-string pass for gameplay + native architecture evidence."""
     rows: list[dict[str, Any]] = []
     scanned = 0
     seen: set[tuple[int, str]] = set()
+    domain_count = marker_count = identifier_count = 0
     for sec in elf.sections:
         _check(cb)
         if sec.type != 1 or sec.is_exec or not sec.is_alloc or sec.size <= 0:
@@ -159,7 +231,12 @@ def _semantic_strings(elf: ElfFile, cb: Any | None = None) -> list[dict[str, Any
                 _check(cb)
             text = match.group().decode("utf-8", "replace").strip()
             domain = _domain(text)
-            if not domain:
+            markers = _marker_tags(text)
+            identifier = _managed_identifier_candidate(text)
+            keep_domain = bool(domain) and domain_count < MAX_STRING_TARGETS
+            keep_marker = bool(markers) and marker_count < MAX_NATIVE_MARKER_TARGETS
+            keep_identifier = bool(identifier) and identifier_count < MAX_LOOKUP_IDENTIFIER_TARGETS
+            if not (keep_domain or keep_marker or keep_identifier):
                 continue
             file_off = sec.offset + match.start()
             rva = elf.off_to_rva(file_off)
@@ -169,8 +246,22 @@ def _semantic_strings(elf: ElfFile, cb: Any | None = None) -> list[dict[str, Any
             if key in seen:
                 continue
             seen.add(key)
-            rows.append({"text": text[:300], "rva": rva, "section": sec.name, "domain": domain})
-            if len(rows) >= MAX_STRING_TARGETS:
+            if keep_domain:
+                domain_count += 1
+            if keep_marker:
+                marker_count += 1
+            if keep_identifier and not keep_marker:
+                identifier_count += 1
+            rows.append({
+                "text": text[:300], "rva": rva, "section": sec.name,
+                "domain": domain if keep_domain else "",
+                "markers": markers if keep_marker else [],
+                "lookupIdentifier": bool(keep_identifier and not keep_marker),
+                "lookupRole": _lookup_identifier_role(text) if keep_identifier and not keep_marker else None,
+            })
+            if (domain_count >= MAX_STRING_TARGETS
+                    and marker_count >= MAX_NATIVE_MARKER_TARGETS
+                    and identifier_count >= MAX_LOOKUP_IDENTIFIER_TARGETS):
                 return rows
     _check(cb)
     return rows
@@ -347,12 +438,181 @@ def _scan_control_flow(elf: ElfFile, functions: list[Any], *, limit: int = MAX_C
     return out
 
 
+def _architecture_profile(symbol_names: list[str], strings: list[dict[str, Any]], needed: list[str]) -> dict[str, Any]:
+    marker_evidence: dict[str, list[str]] = {}
+    def add(tag: str, value: str) -> None:
+        bucket = marker_evidence.setdefault(tag, [])
+        if value and value not in bucket and len(bucket) < 24:
+            bucket.append(value)
+
+    for name in symbol_names:
+        for tag in _marker_tags(name):
+            add(tag, "symbol:" + name)
+    for row in strings:
+        for tag in row.get("markers") or []:
+            add(str(tag), "string:" + str(row.get("text") or ""))
+    for lib in needed:
+        for tag in _marker_tags(lib):
+            add(tag, "needed:" + lib)
+
+    features: list[dict[str, Any]] = []
+    tags = set(marker_evidence)
+    if "ptrace-injector" in tags and "dynamic-loader" in tags:
+        features.append({"kind": "ROOT_OR_EXTERNAL_NATIVE_INJECTOR", "confidence": "HIGH",
+                         "evidenceTags": ["ptrace-injector", "dynamic-loader"]})
+    elif "ptrace-injector" in tags:
+        features.append({"kind": "NATIVE_PROCESS_MANIPULATION", "confidence": "MEDIUM",
+                         "evidenceTags": ["ptrace-injector"]})
+    if "dobby-hook" in tags:
+        features.append({"kind": "DOBBY_HOOK_FRAMEWORK", "confidence": "HIGH",
+                         "evidenceTags": ["dobby-hook"]})
+    if "imgui-overlay" in tags and "egl-overlay" in tags:
+        features.append({"kind": "IMGUI_EGL_OVERLAY", "confidence": "HIGH",
+                         "evidenceTags": ["imgui-overlay", "egl-overlay"]})
+    elif tags & {"imgui-overlay", "egl-overlay"}:
+        features.append({"kind": "NATIVE_OVERLAY_RENDERING", "confidence": "MEDIUM",
+                         "evidenceTags": sorted(tags & {"imgui-overlay", "egl-overlay"})})
+    if "il2cpp-runtime-api" in tags:
+        features.append({"kind": "IL2CPP_RUNTIME_RESOLVER", "confidence": "HIGH",
+                         "evidenceTags": ["il2cpp-runtime-api"]})
+    if "virtual-container-native" in tags:
+        features.append({"kind": "VIRTUAL_CONTAINER_NATIVE_RUNTIME", "confidence": "MEDIUM",
+                         "evidenceTags": ["virtual-container-native"]})
+    return {"markers": marker_evidence, "features": features}
+
+
+def _runtime_lookup_chains(strings: list[dict[str, Any]], xrefs: list[dict[str, Any]],
+                           calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_target = {int(row["rva"]): row for row in strings if isinstance(row.get("rva"), int)}
+    grouped: dict[int, dict[str, Any]] = {}
+    for edge in xrefs:
+        source = edge.get("sourceRva")
+        target = edge.get("targetRva")
+        row = by_target.get(int(target)) if isinstance(target, int) else None
+        if not isinstance(source, int) or row is None:
+            continue
+        bucket = grouped.setdefault(source, {
+            "sourceRva": source, "sourceFunction": edge.get("sourceFunction"),
+            "apiNames": set(), "identifiers": [], "gameplayDomains": set(), "stringXrefs": [],
+            "apiCalls": [],
+        })
+        text = str(row.get("text") or "")
+        if "il2cpp-runtime-api" in (row.get("markers") or []):
+            low = text.casefold()
+            for api in _IL2CPP_LOOKUP_APIS:
+                if api in low:
+                    bucket["apiNames"].add(api)
+        if row.get("lookupIdentifier"):
+            ident = {"value": text, "role": row.get("lookupRole") or "identifier",
+                     "targetRva": target, "xrefRva": edge.get("xrefRva")}
+            if all(x["value"] != text for x in bucket["identifiers"]) and len(bucket["identifiers"]) < 20:
+                bucket["identifiers"].append(ident)
+        domain = row.get("domain")
+        if domain and domain != "security":
+            bucket["gameplayDomains"].add(str(domain))
+        if len(bucket["stringXrefs"]) < 32:
+            bucket["stringXrefs"].append({
+                "xrefRva": edge.get("xrefRva"), "targetRva": target, "text": text,
+                "domain": domain or None, "markers": row.get("markers") or [],
+            })
+
+    for edge in calls:
+        source = edge.get("sourceRva")
+        target_name = str(edge.get("targetFunction") or "")
+        if not isinstance(source, int) or target_name not in _IL2CPP_LOOKUP_APIS:
+            continue
+        bucket = grouped.setdefault(source, {
+            "sourceRva": source, "sourceFunction": edge.get("sourceFunction"),
+            "apiNames": set(), "identifiers": [], "gameplayDomains": set(), "stringXrefs": [],
+            "apiCalls": [],
+        })
+        bucket["apiNames"].add(target_name)
+        if len(bucket["apiCalls"]) < 16:
+            bucket["apiCalls"].append({
+                "callRva": edge.get("callRva"), "targetRva": edge.get("targetRva"),
+                "targetFunction": target_name,
+            })
+
+    out = []
+    for source in sorted(grouped):
+        row = grouped[source]
+        if not row["apiNames"] or not row["identifiers"]:
+            continue
+        api_names = sorted(row["apiNames"])
+        identifiers = row["identifiers"]
+        roles = sorted({str(x.get("role") or "identifier") for x in identifiers})
+        confidence = "HIGH" if (
+            any(api in api_names for api in ("il2cpp_class_from_name", "il2cpp_class_get_field_from_name",
+                                             "il2cpp_class_get_method_from_name"))
+            and len(identifiers) >= 1
+        ) else "MEDIUM"
+        out.append({
+            "sourceRva": source, "sourceFunction": row.get("sourceFunction"),
+            "apiNames": api_names, "candidateIdentifiers": identifiers,
+            "candidateRoles": roles, "gameplayDomains": sorted(row["gameplayDomains"]),
+            "stringXrefs": row["stringXrefs"], "apiCalls": row["apiCalls"],
+            "confidence": confidence,
+            "associationStatus": "same-native-function-correlated",
+            "exactManagedIdentityConfirmed": False,
+            "automationExcluded": True,
+        })
+        if len(out) >= 160:
+            break
+    return out
+
+
+def _container_marker_profile(zf: zipfile.ZipFile, apk: Path, cb: Any | None = None) -> dict[str, Any]:
+    found: dict[str, list[str]] = {}
+    scanned = 0
+    max_marker = max(len(x) for _tag, needles in _DEX_MARKERS for x in needles)
+
+    def note(tag: str, marker: bytes, entry: str) -> None:
+        value = marker.decode("utf-8", "replace")
+        bucket = found.setdefault(tag, [])
+        evidence = f"{entry}:{value}"
+        if evidence not in bucket and len(bucket) < 24:
+            bucket.append(evidence)
+
+    for info in zf.infolist():
+        _check(cb)
+        low = info.filename.casefold()
+        if info.is_dir() or not (Path(low).name.startswith("classes") and low.endswith(".dex")):
+            continue
+        if scanned >= MAX_DEX_MARKER_BYTES:
+            break
+        remaining = min(info.file_size, MAX_DEX_MARKER_BYTES - scanned)
+        tail = b""
+        with zf.open(info, "r") as source:
+            while remaining > 0:
+                _check(cb)
+                chunk = source.read(min(COPY_CHUNK_BYTES, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk); scanned += len(chunk)
+                data = tail + chunk
+                for tag, needles in _DEX_MARKERS:
+                    for marker in needles:
+                        if marker.casefold() in data.casefold():
+                            note(tag, marker, info.filename)
+                tail = data[-max_marker:] if len(data) > max_marker else data
+    features = []
+    if len(found.get("virtual-container", [])) >= 2:
+        features.append({"kind": "VIRTUAL_CONTAINER_RUNTIME", "confidence": "HIGH",
+                         "evidenceTags": ["virtual-container"]})
+    if len(found.get("root-injector-orchestrator", [])) >= 2:
+        features.append({"kind": "ROOT_INJECTOR_ORCHESTRATOR", "confidence": "HIGH",
+                         "evidenceTags": ["root-injector-orchestrator"]})
+    return {"apk": apk.name, "dexBytesScanned": scanned, "markers": found, "features": features}
+
+
 def _scan_library(apk: Path, entry: str, extracted: Path, cb: Any | None = None) -> dict[str, Any]:
     _check(cb)
     elf = ElfFile.open_mmap(extracted)
     try:
         info = elf.info()
-        functions = [s for s in elf.all_symbols(functions_only=True) if s.name and s.value > 0 and s.shndx != 0]
+        all_symbols = [s for s in elf.all_symbols(functions_only=False) if s.name]
+        symbol_names = [s.name for s in all_symbols[:50000]]
+        functions = [s for s in all_symbols if getattr(s, "is_function", False) and s.value > 0 and s.shndx != 0]
         functions.sort(key=lambda s: (s.value, s.name))
         function_rows = [
             {"name": s.name, "rva": s.value, "size": s.size, "global": s.is_global}
@@ -366,8 +626,11 @@ def _scan_library(apk: Path, entry: str, extracted: Path, cb: Any | None = None)
         indirect = [row for row in control_flow if row.get("kind") == "arm64-indirect-slot-blr"]
         strings = _semantic_strings(elf, cb)
         targets = {int(row["rva"]) for row in strings}
-        xrefs = arm64_address_xrefs(elf, targets, limit=2500, max_scan_bytes=96 * 1024 * 1024, cb=cb) if targets else []
+        xrefs = arm64_address_xrefs(elf, targets, limit=4000, max_scan_bytes=96 * 1024 * 1024, cb=cb) if targets else []
         _check(cb)
+        needed = info.get("needed") or []
+        architecture = _architecture_profile(symbol_names, strings, needed)
+        lookup_chains = _runtime_lookup_chains(strings, xrefs, calls)
 
         callers: dict[int, list[dict[str, Any]]] = {}
         callees: dict[int, list[dict[str, Any]]] = {}
@@ -390,6 +653,49 @@ def _scan_library(apk: Path, entry: str, extracted: Path, cb: Any | None = None)
                 string_xrefs.setdefault(target, []).append(edge)
 
         findings: list[dict[str, Any]] = []
+        effective_abi = _abi(entry)
+        if effective_abi == "unknown" and str(info.get("arch") or "").casefold() in {"aarch64", "arm64"}:
+            effective_abi = "arm64-v8a"
+
+        for feature in architecture.get("features") or []:
+            kind = str(feature.get("kind") or "NATIVE_ARCHITECTURE")
+            findings.append({
+                "id": "native-arch:" + hashlib.sha256(f"{apk.name}!{entry}!{kind}".encode()).hexdigest()[:20],
+                "kind": kind, "title": kind.replace("_", " ").title(),
+                "category": "Runtime/Architecture", "status": "REVIEW",
+                "family": "native", "engineId": ENGINE_ID, "apk": apk.name, "entry": entry,
+                "library": entry, "abi": effective_abi,
+                "confidence": feature.get("confidence"), "architectureEvidence": {
+                    tag: architecture.get("markers", {}).get(tag, [])
+                    for tag in feature.get("evidenceTags") or []
+                },
+                "patchReady": False, "automationExcluded": True,
+                "runtimeConfirmed": False, "evidenceRole": "native-architecture-profile",
+            })
+
+        for chain_no, chain in enumerate(lookup_chains):
+            domains = chain.get("gameplayDomains") or []
+            title_ids = ", ".join(x.get("value", "") for x in (chain.get("candidateIdentifiers") or [])[:3])
+            findings.append({
+                "id": "il2cpp-runtime-lookup:" + hashlib.sha256(
+                    f"{apk.name}!{entry}!{chain.get('sourceRva')}!{chain_no}".encode()
+                ).hexdigest()[:20],
+                "kind": "IL2CPP_RUNTIME_LOOKUP_CHAIN",
+                "title": "IL2CPP runtime lookup" + (": " + title_ids if title_ids else ""),
+                "category": "Gameplay/IL2CPP Runtime Lookup" if domains else "RE/IL2CPP Runtime Lookup",
+                "status": "REVIEW", "family": "native", "engineId": ENGINE_ID,
+                "apk": apk.name, "entry": entry, "library": entry, "abi": effective_abi,
+                "sourceRva": chain.get("sourceRva"), "sourceFunction": chain.get("sourceFunction"),
+                "gameplayDomain": domains[0] if len(domains) == 1 else "",
+                "gameplayDomains": domains, "runtimeLookup": chain,
+                "ownershipKind": "APP_OR_GAME", "trustBoundary": "local",
+                "patchReady": False, "automationExcluded": True,
+                "runtimeConfirmed": False, "runtimeTruth": "not-observed-by-static-analysis",
+                "evidenceRole": "il2cpp-runtime-lookup-correlation",
+            })
+            if len(findings) >= MAX_FINDINGS:
+                break
+
         for no, sym in enumerate(functions):
             if (no & 0xFF) == 0:
                 _check(cb)
@@ -411,7 +717,7 @@ def _scan_library(apk: Path, entry: str, extracted: Path, cb: Any | None = None)
                 "apk": apk.name,
                 "entry": entry,
                 "library": entry,
-                "abi": _abi(entry),
+                "abi": effective_abi,
                 "function": sym.name,
                 "rva": sym.value,
                 "size": sym.size,
@@ -444,7 +750,7 @@ def _scan_library(apk: Path, entry: str, extracted: Path, cb: Any | None = None)
                     "apk": apk.name,
                     "entry": entry,
                     "library": entry,
-                    "abi": _abi(entry),
+                    "abi": effective_abi,
                     "stringRva": row["rva"],
                     "section": row["section"],
                     "gameplayDomain": "" if row["domain"] == "security" else row["domain"],
@@ -461,12 +767,16 @@ def _scan_library(apk: Path, entry: str, extracted: Path, cb: Any | None = None)
         return {
             "apk": apk.name,
             "entry": entry,
-            "abi": _abi(entry),
+            "abi": effective_abi,
             "size": extracted.stat().st_size,
             "architecture": info.get("arch"),
             "pie": info.get("pie"),
             "soname": info.get("soname"),
-            "needed": info.get("needed") or [],
+            "needed": needed,
+            "artifactKind": "shared-library" if entry.casefold().endswith(".so") else "asset-elf",
+            "architectureProfile": architecture,
+            "runtimeLookupChainCount": len(lookup_chains),
+            "runtimeLookupChains": lookup_chains,
             "functionSymbolCount": len(functions),
             "functions": function_rows,
             "directCallCount": len(calls),
@@ -494,6 +804,7 @@ def scan_apk_paths(paths: Iterable[str | Path], cache_dir: str | Path,
     errors: list[dict[str, str]] = []
     apk_count = 0
     candidates: list[tuple[Path, zipfile.ZipInfo]] = []
+    container_profiles: list[dict[str, Any]] = []
     for raw in paths:
         _check(cb)
         apk = Path(raw)
@@ -502,14 +813,24 @@ def scan_apk_paths(paths: Iterable[str | Path], cache_dir: str | Path,
         apk_count += 1
         try:
             with zipfile.ZipFile(apk) as zf:
+                container_profiles.append(_container_marker_profile(zf, apk, cb))
                 for info in zf.infolist():
                     _check(cb)
                     low = info.filename.casefold()
-                    if info.is_dir() or not low.endswith(".so") or info.file_size <= 0 or info.file_size > MAX_LIBRARY_BYTES:
+                    if info.is_dir() or info.file_size <= 0:
                         continue
-                    if "/arm64-v8a/" not in "/" + low:
+                    if low.endswith(".so"):
+                        if info.file_size > MAX_LIBRARY_BYTES or "/arm64-v8a/" not in "/" + low:
+                            continue
+                        candidates.append((apk, info))
                         continue
-                    candidates.append((apk, info))
+                    if (low.startswith("assets/") and info.file_size <= MAX_ASSET_ELF_BYTES):
+                        try:
+                            with zf.open(info, "r") as source:
+                                if source.read(4) == b"\x7fELF":
+                                    candidates.append((apk, info))
+                        except Exception:
+                            continue
         except NativeScanCancelled:
             raise
         except Exception as exc:
@@ -517,7 +838,8 @@ def scan_apk_paths(paths: Iterable[str | Path], cache_dir: str | Path,
                 raise NativeScanCancelled("native deep scan cancelled") from exc
             errors.append({"apk": apk.name, "error": str(exc)})
     candidates.sort(key=lambda item: (
-        0 if Path(item[1].filename).name.casefold() in {"libapp.so", "libil2cpp.so", "libmain.so", "libunity.so", "libcocos2dcpp.so"} else 1,
+        0 if (Path(item[1].filename).name.casefold() in {"libapp.so", "libil2cpp.so", "libmain.so", "libunity.so", "libcocos2dcpp.so"}
+              or any(x in Path(item[1].filename).name.casefold() for x in ("inject", "loader", "exec"))) else 1,
         item[0].name.casefold(), item[1].filename.casefold()))
 
     for apk, wanted in candidates[:MAX_LIBRARIES]:
@@ -538,6 +860,28 @@ def scan_apk_paths(paths: Iterable[str | Path], cache_dir: str | Path,
                 raise NativeScanCancelled("native deep scan cancelled") from exc
             errors.append({"apk": apk.name, "entry": wanted.filename, "error": str(exc)})
 
+    for profile in container_profiles:
+        for feature in profile.get("features") or []:
+            kind = str(feature.get("kind") or "APK_RUNTIME_ARCHITECTURE")
+            findings.append({
+                "id": "apk-arch:" + hashlib.sha256(f"{profile.get('apk')}!{kind}".encode()).hexdigest()[:20],
+                "kind": kind, "title": kind.replace("_", " ").title(),
+                "category": "Runtime/Architecture", "status": "REVIEW",
+                "family": "apk", "engineId": ENGINE_ID, "apk": profile.get("apk"),
+                "confidence": feature.get("confidence"),
+                "architectureEvidence": {
+                    tag: profile.get("markers", {}).get(tag, [])
+                    for tag in feature.get("evidenceTags") or []
+                },
+                "patchReady": False, "automationExcluded": True,
+                "runtimeConfirmed": False, "evidenceRole": "apk-container-architecture-profile",
+            })
+            if len(findings) >= MAX_FINDINGS:
+                break
+        if len(findings) >= MAX_FINDINGS:
+            break
+    findings = findings[:MAX_FINDINGS]
+
     _check(cb)
     out = {
         "schema": SCHEMA,
@@ -549,6 +893,8 @@ def scan_apk_paths(paths: Iterable[str | Path], cache_dir: str | Path,
         "cancelAware": cb is not None,
         "apkCount": apk_count,
         "candidateLibraryCount": len(candidates),
+        "candidateElfCount": len(candidates),
+        "containerProfiles": container_profiles,
         "analyzedLibraryCount": len(libraries),
         "libraryCountTruncated": max(0, len(candidates) - MAX_LIBRARIES),
         "findingCount": len(findings),
