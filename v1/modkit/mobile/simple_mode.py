@@ -308,6 +308,10 @@ def _quality(card: dict) -> dict:
         priority = 68
     elif source == "DotNetDeep":
         priority = 75
+    elif source == "UnrealDeep":
+        priority = 74
+    elif source == "GodotDeep":
+        priority = 74
     elif source == "NativeDeep" and "IL2CPP Runtime Lookup" in str(card.get("category") or ""):
         priority = 78
     elif card.get("serverAudit") and ownership not in {"FRAMEWORK"}:
@@ -578,6 +582,8 @@ def build_catalog(workdir: str | Path, output_path: str | Path | None = None) ->
         ("deobfuscation.json", "Deobfuscation"),
         ("native-inventory.json", "NativeInventory"),
         ("dotnet-deep.json", "DotNetDeep"),
+        ("unreal-deep.json", "UnrealDeep"),
+        ("godot-deep.json", "GodotDeep"),
         ("native-deep.json", "NativeDeep"),
         ("deep-gameplay.json", "Gameplay"),
     ]
