@@ -206,3 +206,134 @@ def test_verify_target_manifest_invalid_json_returns_fail_closed_report():
     assert verify["ok"] is False
     assert verify["schemaOk"] is False
     assert verify["countOk"] is False
+
+
+def test_build_output_plan_rejects_malformed_counts_without_raising(tmp_path):
+    base = tmp_path / "base.apk"
+    base.write_bytes(b"base")
+    target = json.loads(build_target_manifest(
+        {"splits": [_split(base, 0)]},
+        "dev.test", expected_apk_count=1, copy_errors_json=[],
+    ))
+
+    target["expectedApkCount"] = {"hostile": "shape"}
+    plan = json.loads(build_output_plan(target))
+    assert plan["ready"] is False
+    assert "invalid-expected-apk-count" in plan["blockers"]
+
+    target = json.loads(build_target_manifest(
+        {"splits": [_split(base, 0)]},
+        "dev.test", expected_apk_count=1, copy_errors_json=[],
+    ))
+    target["copiedApkCount"] = ["1"]
+    plan = json.loads(build_output_plan(target))
+    assert plan["ready"] is False
+    assert "invalid-copied-apk-count" in plan["blockers"]
+
+
+def test_build_output_plan_rejects_duplicate_member_path_and_name(tmp_path):
+    base = tmp_path / "base.apk"
+    other = tmp_path / "other.apk"
+    base.write_bytes(b"base")
+    other.write_bytes(b"other")
+    target = json.loads(build_target_manifest(
+        {"splits": [_split(base, 0), _split(other, 1)]},
+        "dev.test", expected_apk_count=2, copy_errors_json=[],
+    ))
+
+    target["splits"][1]["path"] = target["splits"][0]["path"]
+    plan = json.loads(build_output_plan(target))
+    assert plan["ready"] is False
+    assert "duplicate-split-path" in plan["blockers"]
+
+    target = json.loads(build_target_manifest(
+        {"splits": [_split(base, 0), _split(other, 1)]},
+        "dev.test", expected_apk_count=2, copy_errors_json=[],
+    ))
+    target["splits"][1]["name"] = target["splits"][0]["name"]
+    plan = json.loads(build_output_plan(target))
+    assert plan["ready"] is False
+    assert "duplicate-split-name" in plan["blockers"]
+
+
+def test_build_output_plan_requires_exact_patch_owner_identity(tmp_path):
+    base = tmp_path / "base.apk"
+    arm = tmp_path / "arm.apk"
+    base.write_bytes(b"base")
+    arm.write_bytes(b"arm")
+    scan = {
+        "splits": [_split(base, 0), _split(arm, 1)],
+        "selected": {
+            "library": {
+                "splitIndex": 1,
+                "split": arm.name,
+                "entry": "lib/arm64-v8a/libil2cpp.so",
+                "abi": "arm64-v8a",
+            },
+        },
+        "fullIl2cppPair": True,
+    }
+    target = json.loads(build_target_manifest(
+        scan, "dev.test", expected_apk_count=2, copy_errors_json=[],
+    ))
+    target["patchOwner"]["path"] = str(base)
+    plan = json.loads(build_output_plan(target))
+    assert plan["ready"] is False
+    assert "patch-owner-identity-mismatch" in plan["blockers"]
+
+    target = json.loads(build_target_manifest(
+        scan, "dev.test", expected_apk_count=2, copy_errors_json=[],
+    ))
+    target["patchOwner"]["sha256"] = "0" * 64
+    plan = json.loads(build_output_plan(target))
+    assert plan["ready"] is False
+    assert "patch-owner-identity-mismatch" in plan["blockers"]
+
+
+def test_verify_target_manifest_rejects_forged_complete_error_state(tmp_path):
+    base = tmp_path / "base.apk"
+    base.write_bytes(b"base")
+    target = json.loads(build_target_manifest(
+        {"splits": [_split(base, 0)]},
+        "dev.test", expected_apk_count=1, copy_errors_json=[],
+    ))
+
+    target["copyErrors"] = ["split copy failed"]
+    target["scanCompleteness"] = "COMPLETE"
+    verify = json.loads(verify_target_manifest(target))
+    assert verify["ok"] is False
+    assert verify["copyErrors"] == ["split copy failed"]
+
+    target = json.loads(build_target_manifest(
+        {"splits": [_split(base, 0)]},
+        "dev.test", expected_apk_count=1, copy_errors_json=[],
+    ))
+    target["normalizationErrors"] = {"unexpected": "object"}
+    verify = json.loads(verify_target_manifest(target))
+    assert verify["ok"] is False
+    assert verify["normalizationErrorsValid"] is False
+
+
+def test_verify_target_manifest_rejects_build_mode_and_target_id_drift(tmp_path):
+    base = tmp_path / "base.apk"
+    base.write_bytes(b"base")
+    target = json.loads(build_target_manifest(
+        {"splits": [_split(base, 0)]},
+        "dev.test", expected_apk_count=1, copy_errors_json=[],
+    ))
+
+    target["buildMode"] = "apk-set"
+    target["requiresWholeSetSigning"] = True
+    verify = json.loads(verify_target_manifest(target))
+    assert verify["ok"] is False
+    assert verify["buildModeOk"] is False
+    assert verify["signingModeOk"] is False
+
+    target = json.loads(build_target_manifest(
+        {"splits": [_split(base, 0)]},
+        "dev.test", expected_apk_count=1, copy_errors_json=[],
+    ))
+    target["targetId"] = "0" * 24
+    verify = json.loads(verify_target_manifest(target))
+    assert verify["ok"] is False
+    assert verify["targetIdOk"] is False
