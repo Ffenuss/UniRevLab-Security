@@ -35,6 +35,7 @@ _PROFILE_TITLES = {
     "libgdx": "libGDX",
     "lua_runtime": "Lua / xLua / SLua",
     "webview_hybrid": "Hybrid WebView application",
+    "webassembly": "WebAssembly",
 }
 
 class RuntimeProfileCancelled(RuntimeError):
@@ -173,6 +174,8 @@ def scan_apk_paths(paths: Iterable[str | Path], output_path: str | Path | None =
                         mark("qt_qml", f"{apk.name}:{info.filename}")
                     if base in {"libgdx.so", "libgdx-box2d.so"}:
                         mark("libgdx", f"{apk.name}:{info.filename}")
+                    if low.endswith(".wasm"):
+                        mark("webassembly", f"{apk.name}:{info.filename}")
 
                 # Bounded DEX/string marker pass catches framework identity that filenames hide.
                 marker_needles = {
