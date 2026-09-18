@@ -224,7 +224,7 @@ def scan_apk_paths(paths: Iterable[str | Path], output_path: str | Path | None =
                         if len(data) >= 4096:
                             entropy = _entropy(data)
                             printable = sum(1 for b in data if 0x20 <= b <= 0x7E) / len(data)
-                            if entropy >= 7.6 and printable <= 0.12:
+                            if entropy >= 7.6 and printable <= 0.45:
                                 opaque_assets.append({
                                     "apk": apk.name, "entry": info.filename,
                                     "sampleBytes": len(data), "entropy": round(entropy, 3),
