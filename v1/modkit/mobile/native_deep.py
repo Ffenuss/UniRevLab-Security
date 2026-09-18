@@ -669,6 +669,7 @@ def _scan_library(apk: Path, entry: str, extracted: Path, cb: Any | None = None)
                     tag: architecture.get("markers", {}).get(tag, [])
                     for tag in feature.get("evidenceTags") or []
                 },
+                "ownershipKind": "ENGINE",
                 "patchReady": False, "automationExcluded": True,
                 "runtimeConfirmed": False, "evidenceRole": "native-architecture-profile",
             })
@@ -875,6 +876,7 @@ def scan_apk_paths(paths: Iterable[str | Path], cache_dir: str | Path,
                     tag: profile.get("markers", {}).get(tag, [])
                     for tag in feature.get("evidenceTags") or []
                 },
+                "ownershipKind": "ENGINE",
                 "patchReady": False, "automationExcluded": True,
                 "runtimeConfirmed": False, "evidenceRole": "apk-container-architecture-profile",
             })
