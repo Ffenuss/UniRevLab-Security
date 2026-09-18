@@ -24,7 +24,9 @@ def test_required_builtin_engines_are_registered():
         "godot.static",
         "godot.deep-embedded",
         "defold.static",
+        "defold.deep-embedded",
         "qt.qml-static",
+        "qt.qml-deep-embedded",
         "webassembly.static",
         "apktool.android",
         "dex.structural",
@@ -107,3 +109,11 @@ def test_unreal_and_godot_deep_engines_are_bundled():
     godot = registry.get("godot.deep-embedded")
     assert unreal.bundled and "iostore-pairs" in unreal.capabilities
     assert godot.bundled and "text-scene-graph" in godot.capabilities
+
+
+def test_defold_and_qml_deep_engines_are_bundled():
+    registry = build_default_registry()
+    defold = registry.get("defold.deep-embedded")
+    qml = registry.get("qt.qml-deep-embedded")
+    assert defold.bundled and "archive-pair" in defold.capabilities
+    assert qml.bundled and "properties" in qml.capabilities
