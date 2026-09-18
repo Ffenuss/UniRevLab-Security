@@ -826,12 +826,14 @@ def scan_apk_paths(paths: Iterable[str | Path], cache_dir: str | Path,
                     low = info.filename.casefold()
                     if info.is_dir() or info.file_size <= 0:
                         continue
-                    if low.endswith(".so"):
-                        if info.file_size > MAX_LIBRARY_BYTES or "/arm64-v8a/" not in "/" + low:
-                            continue
-                        candidates.append((apk, info))
+                    if low.endswith(".so") and "/arm64-v8a/" in "/" + low:
+                        if info.file_size <= MAX_LIBRARY_BYTES:
+                            candidates.append((apk, info))
                         continue
-                    if (low.startswith("assets/") and info.file_size <= MAX_ASSET_ELF_BYTES):
+                    # Injectors frequently ship their payload as assets/libX.so
+                    # next to an extensionless executable. Treat any bounded
+                    # asset ELF as native evidence regardless of its suffix.
+                    if low.startswith("assets/") and info.file_size <= MAX_ASSET_ELF_BYTES:
                         try:
                             with zf.open(info, "r") as source:
                                 if source.read(4) == b"\x7fELF":
