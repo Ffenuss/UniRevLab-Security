@@ -97,6 +97,9 @@ def test_same_domain_graph_bridge_is_visible_but_never_confirmed(tmp_path):
     assert health["methods"] == []
     assert [row["metadataMethodId"] for row in health["bridges"]] == [20]
     assert health["bridges"][0]["bridgeDomains"] == ["health"]
+    assert health["bridges"][0]["reviewOnlySemantic"] is True
+    assert health["bridges"][0]["automationExcluded"] is True
+    assert health["bridges"][0]["semanticEvidenceRole"] == "xref-bridge"
 
 
 def test_third_party_strong_method_does_not_bypass_owner_gate(tmp_path):
@@ -188,6 +191,9 @@ def test_accessor_review_domain_reaches_coverage_without_confirmation(tmp_path):
     assert [row["metadataMethodId"] for row in progression["methods"]] == [41]
     assert progression["methods"][0]["accessorReviewDomains"] == ["progression"]
     assert progression["methods"][0]["typedFieldAccesses"] == []
+    assert progression["methods"][0]["reviewOnlySemantic"] is True
+    assert progression["methods"][0]["automationExcluded"] is True
+    assert progression["methods"][0]["semanticEvidenceRole"] == "ambiguous-accessor"
 
 
 def test_accessor_review_domains_stay_out_of_automatic_binding_seed():
