@@ -36,6 +36,22 @@ _DOMAIN_WORDS = {
     "debug": {"debug", "console", "developer", "devmenu", "godmode", "noclip"},
 }
 
+# Multi-token CamelCase/underscore concepts. Keep this curated instead of doing
+# arbitrary substring matches: e.g. "rage" must never match "StorageManager".
+_COMPOUND_DOMAIN_WORDS = {
+    "health": {"hitpoint", "hitpoints", "lifestate"},
+    "damage": {"attackdamage", "attackpower"},
+    "currency": set(),
+    "progression": {"levelup", "skillpoint", "skillpoints", "statpoint", "statpoints", "perkpoint", "perkpoints"},
+    "movement": {"movespeed", "movementspeed", "runspeed", "walkspeed", "sprintspeed", "attackspeed", "actionspeed", "timescale"},
+    "resource": set(),
+    "cooldown": {"cdtime"},
+    "inventory": {"stackcount"},
+    "camera": set(),
+    "world": {"gametime"},
+    "debug": {"devmenu", "godmode"},
+}
+
 # ``level`` and ``balance`` are extremely ambiguous.  They are accepted only on
 # gameplay-looking state owners and never by package-string evidence alone.
 _WEAK_FIELD_WORDS = {
@@ -90,10 +106,11 @@ def _package_domains(text):
         "pay currency", "pay item", "ali log track",
     )):
         return []
-    tokens=set(_tokens(text)); compact="".join(tokens)
+    token_list=_tokens(text); tokens=set(token_list); compact="".join(token_list)
     out=[]
     for domain, words in _PACKAGE_STRONG_WORDS.items():
-        if tokens & words or compact in words:
+        compounds=_COMPOUND_DOMAIN_WORDS.get(domain, set())
+        if tokens & words or any(word in compact for word in compounds):
             out.append(domain)
 
     # Generic Currency APIs, locale formatting and analytics are not game-wallet evidence.
@@ -104,7 +121,7 @@ def _package_domains(text):
         has_concrete=bool(tokens & concrete)
         if (not has_concrete and not bool(tokens & context)) or (tokens & sdk_noise and not has_concrete):
             out=[d for d in out if d != "currency"]
-    low=" ".join(tokens)
+    low=" ".join(token_list)
     if "cri mana" in low or "vitamana" in low:
         out=[d for d in out if d != "resource"]
     return sorted(out)
@@ -233,9 +250,9 @@ def domains_for(text, *, owner=None, field=False, application_owned=False):
 
     out = set()
     compact = "".join(token_list)
-    compound_words={"timescale","movespeed","movementspeed","hitpoint","hitpoints","levelup","skillpoint","skillpoints","devmenu","godmode"}
     for domain, words in _DOMAIN_WORDS.items():
-        if tokens & words or any(w in compact for w in (words & compound_words)):
+        compounds = _COMPOUND_DOMAIN_WORDS.get(domain, set())
+        if tokens & words or any(word in compact for word in compounds):
             out.add(domain)
     low = " ".join(_tokens(text))
     if "cri mana" in low:
@@ -254,7 +271,8 @@ def _method_domain_relevant(row, domain):
     label = (row.get("class") or "") + " " + (row.get("name") or "")
     if _noise(label):
         return False
-    tokens = set(_tokens(label))
+    token_list = _tokens(label)
+    tokens = set(token_list)
     owner_ok = bool(row.get("applicationOwned")) or _owner_gameplay(row.get("class") or "")
     strong = {
         "health": {"health", "hp", "heal", "healing", "revive", "alive"},
@@ -269,8 +287,9 @@ def _method_domain_relevant(row, domain):
         "world": {"weather", "timescale", "gametime"},
         "debug": {"debug", "console", "devmenu", "godmode", "noclip"},
     }.get(domain, set())
-    compact = "".join(tokens)
-    hit = bool(tokens & strong) or compact in strong
+    compact = "".join(token_list)
+    compounds = _COMPOUND_DOMAIN_WORDS.get(domain, set())
+    hit = bool(tokens & strong) or any(word in compact for word in compounds)
     # Exact typed-field evidence can carry semantics through an obfuscated name.
     if any(domain in (a.get("domains") or []) for a in (row.get("typedFieldAccesses") or [])):
         return True
