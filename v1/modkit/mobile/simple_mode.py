@@ -316,6 +316,10 @@ def _quality(card: dict) -> dict:
         priority = 72
     elif source == "QmlDeep":
         priority = 72
+    elif source == "JscDeep":
+        priority = 73
+    elif source == "WasmDeep":
+        priority = 72
     elif source == "NativeDeep" and "IL2CPP Runtime Lookup" in str(card.get("category") or ""):
         priority = 78
     elif card.get("serverAudit") and ownership not in {"FRAMEWORK"}:
@@ -590,6 +594,8 @@ def build_catalog(workdir: str | Path, output_path: str | Path | None = None) ->
         ("godot-deep.json", "GodotDeep"),
         ("defold-deep.json", "DefoldDeep"),
         ("qml-deep.json", "QmlDeep"),
+        ("jsc-deep.json", "JscDeep"),
+        ("wasm-deep.json", "WasmDeep"),
         ("native-deep.json", "NativeDeep"),
         ("deep-gameplay.json", "Gameplay"),
     ]
