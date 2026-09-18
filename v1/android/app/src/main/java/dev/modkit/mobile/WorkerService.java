@@ -13,6 +13,7 @@ import org.json.JSONArray;
 import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
 import java.util.*;
 import java.util.zip.*;
 
@@ -77,7 +78,7 @@ public class WorkerService extends Service {
                 else if ("patchpack_inspect".equals(op)) patchPackInspect();
                 else if ("patchpack_build".equals(op)) patchPackBuild(Uri.parse(intent.getStringExtra("uri")));
                 else if ("workspace_inspect".equals(op)) workspaceInspect(intent.getStringExtra("source"));
-                else if ("workspace_build".equals(op)) workspaceBuild(intent.getStringExtra("source"),Uri.parse(intent.getStringExtra("uri")));
+                else if ("workspace_build".equals(op)) workspaceBuild(intent,Uri.parse(intent.getStringExtra("uri")));
                 else if ("simple_prepare".equals(op)) simplePrepare();
                 else if ("simple_build".equals(op)) simpleBuild(Uri.parse(intent.getStringExtra("uri")),intent.getStringExtra("controls"));
                 else if ("menu_seed".equals(op)) menuSeed();
@@ -205,24 +206,25 @@ public class WorkerService extends Service {
         }finally{singleSigned.delete();bundle.delete();deleteTree(signedDir);if(!saved)try{DocumentsContract.deleteDocument(getContentResolver(),uri);}catch(Exception ignored){}}
     }
 
-    private void exportSignedTargetForSource(Uri uri,File patchedUnsigned,File sourceApk,String singleDone,String setDone) throws Exception {
+    private void exportSignedTargetForSource(Uri uri,File patchedUnsigned,File sourceApk,Intent guardRequest,String singleDone,String setDone) throws Exception {
+        TargetResolver.Member guardedSource=verifyWorkspaceHandoff(guardRequest,sourceApk,app.file("workspace-patch.zip"));
         JSONObject target=installedTarget();
         if(target==null||!targetIsApkSet()){
             boolean saved=false;File signed=app.file("workspace-target-signed.apk");SigningKeyManager.Identity identity=SigningKeyManager.getOrCreate();
-            try{ApkSignerUtil.sign(patchedUnsigned,signed,identity);copyFileToUri(signed,uri,"Сохранение APK");saved=true;app.progress(singleDone);}
+            try{ApkSignerUtil.sign(patchedUnsigned,signed,identity);copyFileToUri(signed,uri,"Сохранение APK");verifyWorkspaceHandoff(guardRequest,sourceApk,app.file("workspace-patch.zip"));saved=true;app.progress(singleDone);}
             finally{signed.delete();if(!saved)try{DocumentsContract.deleteDocument(getContentResolver(),uri);}catch(Exception ignored){}}
             return;
         }
         if(!"COMPLETE".equals(target.optString("scanCompleteness")))throw new IOException("APK-set неполный: повторите Installed Scanner перед сборкой.");
         verifyInstalledTarget();JSONArray rows=target.optJSONArray("splits");if(rows==null)throw new IOException("Некорректный APK-set target manifest");
         int ownerIndex=-1;String sourceCanonical=sourceApk.getCanonicalPath();
-        for(int i=0;i<rows.length();i++){JSONObject row=rows.optJSONObject(i);if(row==null)continue;File f=new File(row.optString("path",""));if(f.isFile()&&f.getCanonicalPath().equals(sourceCanonical)){ownerIndex=row.optInt("index",i);break;}}
+        for(int i=0;i<rows.length();i++){JSONObject row=rows.optJSONObject(i);if(row==null)continue;File f=new File(row.optString("path",""));if(f.isFile()&&f.getCanonicalPath().equals(sourceCanonical)){ownerIndex=row.optInt("index",-1);if(ownerIndex!=guardedSource.index||!guardedSource.name.equals(row.optString("name","")))throw new IOException("Workspace owning split identity изменилась после build guard");break;}}
         if(ownerIndex<0)throw new IOException("Редактируемый APK не принадлежит текущему установленному APK-set. Повторите выбор target.");
         boolean saved=false;File bundle=app.file("workspace-target-signed.apks"),signedDir=app.file("workspace-target-signed-set");SigningKeyManager.Identity identity=SigningKeyManager.getOrCreate();
         try{deleteTree(signedDir);if(!signedDir.mkdirs()&&!signedDir.isDirectory())throw new IOException("Не удалось создать каталог подписанного APK-set");ArrayList<File> signedFiles=new ArrayList<>();ArrayList<String> names=new ArrayList<>();
             for(int i=0;i<rows.length();i++){check();JSONObject row=rows.optJSONObject(i);if(row==null)continue;int index=row.optInt("index",i);File input=index==ownerIndex?patchedUnsigned:new File(row.optString("path",""));if(!input.isFile())throw new IOException("Split отсутствует: "+row.optString("name"));String entry=row.optString("name",String.format(Locale.ROOT,"%03d.apk",index));File signed=new File(signedDir,entry);app.progress("APK-set: подпись "+(i+1)+"/"+rows.length()+" · "+entry);ApkSignerUtil.sign(input,signed,identity);signedFiles.add(signed);names.add(entry);}
             File tmp=new File(bundle.getParentFile(),bundle.getName()+".tmp");try(ZipOutputStream z=new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(tmp)))){byte[] buf=new byte[1024*1024];for(int i=0;i<signedFiles.size();i++){ZipEntry e=new ZipEntry(names.get(i));z.putNextEntry(e);try(InputStream in=new FileInputStream(signedFiles.get(i))){int n;while((n=in.read(buf))!=-1){check();z.write(buf,0,n);}}z.closeEntry();}ZipEntry readme=new ZipEntry("INSTALL.txt");z.putNextEntry(readme);z.write(("ModKit edited APK-set. Install all APKs together. Certificate SHA-256: "+identity.fingerprintSha256+"\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));z.closeEntry();}
-            Files.move(tmp.toPath(),bundle.toPath(),StandardCopyOption.REPLACE_EXISTING);copyFileToUri(bundle,uri,"Сохранение APK-set");saved=true;app.progress(setDone);
+            Files.move(tmp.toPath(),bundle.toPath(),StandardCopyOption.REPLACE_EXISTING);copyFileToUri(bundle,uri,"Сохранение APK-set");verifyWorkspaceHandoff(guardRequest,sourceApk,app.file("workspace-patch.zip"));saved=true;app.progress(setDone);
         }finally{bundle.delete();deleteTree(signedDir);if(!saved)try{DocumentsContract.deleteDocument(getContentResolver(),uri);}catch(Exception ignored){}}
     }
 
@@ -525,9 +527,32 @@ public class WorkerService extends Service {
         if(source==null||source.isEmpty())throw new IOException("Не выбран source APK для File Workspace");File src=new File(source);if(!src.isFile())throw new IOException("Source APK больше не существует");File pack=app.file("workspace-patch.zip");if(!pack.isFile())throw new IOException("Workspace Patch Pack отсутствует");
         PyObject result=engine().callAttr("patchpack_inspect",src.getPath(),pack.getPath(),app.file("workspace-report.json").getPath(),new Progress());JSONObject obj=new JSONObject(result.toString());app.progress(obj.optBoolean("blocked")?"File Workspace: Patch Pack BLOCKED":"File Workspace: Patch Pack совместим; можно собирать APK/APK-set.");
     }
-    private void workspaceBuild(String source,Uri uri) throws Exception {
-        if(source==null||source.isEmpty())throw new IOException("Не выбран source APK для File Workspace");File src=new File(source),pack=app.file("workspace-patch.zip"),unsigned=app.file("workspace-unsigned.apk");if(!src.isFile()||!pack.isFile())throw new IOException("Workspace source/patch отсутствует");
-        try{engine().callAttr("patchpack_apply_unsigned",src.getPath(),pack.getPath(),unsigned.getPath(),app.file("workspace-report.json").getPath(),new Progress());exportSignedTargetForSource(uri,unsigned,src,"Изменённый APK собран и подписан.","Изменён owning split; APK-set переподписан одним ключом.");}finally{unsigned.delete();}
+    private static final long WORKSPACE_PATCH_MAX_BYTES=21L*1024L*1024L;
+    private String workspaceGuardString(Intent request,String key)throws IOException{String value=request==null?null:request.getStringExtra(key);if(value==null)throw new IOException("Workspace build handoff не содержит "+key);return value;}
+    private String workspaceGuardSha(Intent request,String key)throws IOException{String value=workspaceGuardString(request,key);if(!value.matches("(?i)[0-9a-f]{64}"))throw new IOException("Workspace build handoff содержит некорректный SHA-256: "+key);return value;}
+    private String sha256WorkspaceArtifact(File file,long maxBytes)throws Exception{
+        MessageDigest digest=MessageDigest.getInstance("SHA-256");byte[] buffer=new byte[256*1024];long total=0;
+        try(InputStream in=new FileInputStream(file)){int n;while((n=in.read(buffer))!=-1){check();total+=n;if(total>maxBytes)throw new IOException("Workspace Patch Pack превышает допустимый размер");digest.update(buffer,0,n);}}
+        StringBuilder out=new StringBuilder(64);for(byte b:digest.digest())out.append(String.format(Locale.ROOT,"%02x",b));return out.toString();
+    }
+    private TargetResolver.Member verifyWorkspaceHandoff(Intent request,File source,File pack)throws Exception{
+        if(request==null)throw new IOException("Workspace build handoff отсутствует");
+        String expectedTargetId=workspaceGuardString(request,"workspaceGuardTargetId"),expectedFingerprint=workspaceGuardString(request,"workspaceGuardTargetFingerprint"),expectedDigest=workspaceGuardSha(request,"workspaceGuardTargetDigest"),expectedPatch=workspaceGuardSha(request,"workspaceGuardPatchSha256"),expectedName=workspaceGuardString(request,"workspaceGuardSplitName");
+        int expectedIndex=request.getIntExtra("workspaceGuardSplitIndex",Integer.MIN_VALUE);if(expectedIndex<0)throw new IOException("Workspace build handoff содержит некорректный split index");
+        TargetResolver.Target target=TargetResolver.resolve(app);JSONObject verification=TargetResolver.requireVerified(target,app.cancelled);
+        if(!expectedTargetId.equals(target.targetId))throw new IOException("Workspace targetId изменился после build guard");
+        if(!expectedFingerprint.equals(target.fingerprint))throw new IOException("Workspace target fingerprint изменился после build guard");
+        if(!expectedDigest.equalsIgnoreCase(verification.optString("currentTargetDigest","")))throw new IOException("Workspace target digest изменился после build guard");
+        String canonical=source.getCanonicalPath();TargetResolver.Member found=null;for(TargetResolver.Member member:target.members)if(member.file.getCanonicalPath().equals(canonical)){found=member;break;}
+        if(found==null||found.index!=expectedIndex||!found.name.equals(expectedName))throw new IOException("Workspace source split изменился после build guard");
+        if(!pack.isFile())throw new IOException("Workspace Patch Pack отсутствует после build guard");
+        String actualPatch=sha256WorkspaceArtifact(pack,WORKSPACE_PATCH_MAX_BYTES);if(!expectedPatch.equalsIgnoreCase(actualPatch))throw new IOException("Workspace Patch Pack изменился после build guard");
+        return found;
+    }
+    private void workspaceBuild(Intent request,Uri uri) throws Exception {
+        String source=workspaceGuardString(request,"source");if(source.isEmpty())throw new IOException("Не выбран source APK для File Workspace");File src=new File(source),pack=app.file("workspace-patch.zip"),unsigned=app.file("workspace-unsigned.apk");if(!src.isFile()||!pack.isFile())throw new IOException("Workspace source/patch отсутствует");
+        verifyWorkspaceHandoff(request,src,pack);
+        try{engine().callAttr("patchpack_apply_unsigned",src.getPath(),pack.getPath(),unsigned.getPath(),app.file("workspace-report.json").getPath(),new Progress());verifyWorkspaceHandoff(request,src,pack);exportSignedTargetForSource(uri,unsigned,src,request,"Изменённый APK собран и подписан.","Изменён owning split; APK-set переподписан одним ключом.");}finally{unsigned.delete();}
     }
     private long simpleStartedAt=0L;
     private void simpleCheckCancelled() throws IOException {
