@@ -100,7 +100,7 @@ void append_registers(std::ostringstream &out, csh handle, const cs_insn &insn,
         handle, &insn, read_regs, &read_count, write_regs, &write_count);
     out << "[";
     if (err == CS_ERR_OK) {
-        const cs_regs &regs = read_side ? read_regs : write_regs;
+        const uint16_t *regs = read_side ? read_regs : write_regs;
         const uint8_t count = read_side ? read_count : write_count;
         for (uint8_t i = 0; i < count; ++i) {
             if (i) out << ",";
@@ -158,7 +158,10 @@ Java_dev_modkit_mobile_NativeDisasmBridge_disassemble(
     std::vector<uint8_t> bytes(static_cast<size_t>(size));
     env->GetByteArrayRegion(
         code, 0, size, reinterpret_cast<jbyte *>(bytes.data()));
-    if (env->ExceptionCheck()) return result(env, error_json("byte-array-read-failed"));
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        return result(env, error_json("byte-array-read-failed"));
+    }
 
     csh handle = 0;
     const cs_err open_err = cs_open(arch, mode, &handle);
