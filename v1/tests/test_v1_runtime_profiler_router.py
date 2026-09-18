@@ -105,4 +105,4 @@ def test_embedded_pipeline_publishes_universal_reports():
     assert 'root / "runtime-profiler.json"' in source
     assert 'root / "engine-router.json"' in source
     assert 'root / "deobfuscation.json"' in source
-    assert '"Embedded 10/10 · gameplay semantic correlation…"' in source
+    assert '"Embedded 11/11 · gameplay semantic correlation…"' in source
