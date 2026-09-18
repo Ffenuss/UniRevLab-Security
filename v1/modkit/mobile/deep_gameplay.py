@@ -225,7 +225,8 @@ def _finding_from_native(lib: dict[str, Any], fn: dict[str, Any]) -> dict[str, A
 
 
 def _findings_from_runtime_argument_flow(row: dict[str, Any]) -> list[dict[str, Any]]:
-    if str(row.get("kind") or "") != "IL2CPP_RUNTIME_ARGUMENT_FLOW":
+    source_kind = str(row.get("kind") or "")
+    if source_kind not in {"IL2CPP_RUNTIME_ARGUMENT_FLOW", "IL2CPP_DLSYM_ARGUMENT_FLOW"}:
         return []
     flow = row.get("runtimeArgumentFlow") if isinstance(row.get("runtimeArgumentFlow"), dict) else {}
     identifier = str(flow.get("identifier") or "")
@@ -237,7 +238,8 @@ def _findings_from_runtime_argument_flow(row: dict[str, Any]) -> list[dict[str, 
     exact = bool(flow.get("exactManagedIdentityConfirmed"))
     return [{
         "id": "deep-il2cpp-argument-flow:" + _id(row.get("id"), domain),
-        "kind": "IL2CPP_RUNTIME_ARGUMENT_FLOW_EVIDENCE",
+        "kind": "IL2CPP_DLSYM_ARGUMENT_FLOW_EVIDENCE" if source_kind == "IL2CPP_DLSYM_ARGUMENT_FLOW"
+                else "IL2CPP_RUNTIME_ARGUMENT_FLOW_EVIDENCE",
         "title": str(row.get("title") or "IL2CPP argument-register flow"),
         "category": "Gameplay/IL2CPP Runtime Lookup",
         "status": "CORRELATED_EVIDENCE",
@@ -263,7 +265,9 @@ def _findings_from_runtime_argument_flow(row: dict[str, Any]) -> list[dict[str, 
         "automationExcluded": True,
         "runtimeConfirmed": False,
         "runtimeTruth": "not-observed-by-static-analysis",
-        "evidenceRole": "deep-gameplay-il2cpp-argument-register-flow",
+        "evidenceRole": ("deep-gameplay-il2cpp-dlsym-pointer-argument-flow"
+                         if source_kind == "IL2CPP_DLSYM_ARGUMENT_FLOW"
+                         else "deep-gameplay-il2cpp-argument-register-flow"),
     }]
 
 
@@ -423,7 +427,7 @@ def analyze(artifact_report: dict[str, Any], native_report: dict[str, Any],
                 _check(cb)
             for finding in _findings_from_runtime_lookup(row):
                 add(finding)
-        elif kind == "IL2CPP_RUNTIME_ARGUMENT_FLOW":
+        elif kind in {"IL2CPP_RUNTIME_ARGUMENT_FLOW", "IL2CPP_DLSYM_ARGUMENT_FLOW"}:
             argument_flow_count += 1
             if (argument_flow_count & 0x3F) == 0:
                 _check(cb)
@@ -454,7 +458,14 @@ def analyze(artifact_report: dict[str, Any], native_report: dict[str, Any],
         "runtimeLookupSourceCount": lookup_count,
         "runtimeLookupGameplayCount": sum(1 for row in findings if row.get("kind") == "IL2CPP_RUNTIME_LOOKUP_CORRELATION"),
         "runtimeArgumentFlowSourceCount": argument_flow_count,
-        "runtimeArgumentFlowGameplayCount": sum(1 for row in findings if row.get("kind") == "IL2CPP_RUNTIME_ARGUMENT_FLOW_EVIDENCE"),
+        "runtimeArgumentFlowGameplayCount": sum(
+            1 for row in findings if row.get("kind") in {
+                "IL2CPP_RUNTIME_ARGUMENT_FLOW_EVIDENCE", "IL2CPP_DLSYM_ARGUMENT_FLOW_EVIDENCE"
+            }
+        ),
+        "dlsymArgumentFlowGameplayCount": sum(
+            1 for row in findings if row.get("kind") == "IL2CPP_DLSYM_ARGUMENT_FLOW_EVIDENCE"
+        ),
         "exactManagedIdentityCount": sum(1 for row in findings if row.get("exactManagedIdentityConfirmed")),
         "findings": findings,
         "truncated": len(findings) >= MAX_FINDINGS,
