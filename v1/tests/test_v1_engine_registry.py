@@ -28,6 +28,8 @@ def test_required_builtin_engines_are_registered():
         "qt.qml-static",
         "qt.qml-deep-embedded",
         "webassembly.static",
+        "webassembly.deep-embedded",
+        "jsc.deep-embedded",
         "apktool.android",
         "dex.structural",
         "jadx.android",
@@ -117,3 +119,11 @@ def test_defold_and_qml_deep_engines_are_bundled():
     qml = registry.get("qt.qml-deep-embedded")
     assert defold.bundled and "archive-pair" in defold.capabilities
     assert qml.bundled and "properties" in qml.capabilities
+
+
+def test_jsc_and_webassembly_deep_engines_are_bundled():
+    registry = build_default_registry()
+    jsc = registry.get("jsc.deep-embedded")
+    wasm = registry.get("webassembly.deep-embedded")
+    assert jsc.bundled and "jsc-binary-inventory" in jsc.capabilities
+    assert wasm.bundled and "exports" in wasm.capabilities
