@@ -531,7 +531,7 @@ def build_output_plan(target_json: str | dict[str, Any]) -> str:
 
     blockers = list(dict.fromkeys(blockers))
     return json.dumps({
-        "schema": "modkit-package-build-plan-1.1",
+        "schema": "modkit-package-build-plan-1.0",
         "ready": not blockers,
         "blockers": blockers,
         "mode": expected_mode,
