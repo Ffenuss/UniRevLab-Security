@@ -794,6 +794,270 @@ def _il2cpp_argument_register_flow(elf: ElfFile, functions: list[Any],
     return out
 
 
+def _dlsym_il2cpp_pointer_flow(elf: ElfFile, functions: list[Any],
+                               strings: list[dict[str, Any]],
+                               calls: list[dict[str, Any]],
+                               cb: Any | None = None,
+                               *, max_function_bytes: int = 64 * 1024,
+                               max_total_bytes: int = 8 * 1024 * 1024) -> list[dict[str, Any]]:
+    """Trace dlsym("il2cpp_*") results into later ARM64 BLR calls.
+
+    Only register-resident flow is modeled. Values stored to memory or crossing
+    unsupported instructions are deliberately not reconstructed.
+    """
+    if not elf.is_arm64():
+        return []
+    dlsym_calls = [
+        row for row in calls
+        if str(row.get("targetFunction") or "") in {"dlsym", "__loader_dlsym"}
+        and isinstance(row.get("sourceRva"), int)
+        and isinstance(row.get("callRva"), int)
+    ]
+    if not dlsym_calls:
+        return []
+
+    strings_by_rva = {
+        int(row["rva"]): row for row in strings
+        if isinstance(row.get("rva"), int)
+    }
+    calls_by_source: dict[int, dict[int, dict[str, Any]]] = {}
+    for row in calls:
+        if isinstance(row.get("sourceRva"), int) and isinstance(row.get("callRva"), int):
+            calls_by_source.setdefault(int(row["sourceRva"]), {})[int(row["callRva"])] = row
+
+    funcs = [fn for fn in functions if isinstance(getattr(fn, "value", None), int) and fn.value > 0]
+    funcs.sort(key=lambda fn: fn.value)
+    by_start = {int(fn.value): (idx, fn) for idx, fn in enumerate(funcs)}
+    sources = sorted({int(row["sourceRva"]) for row in dlsym_calls})
+    total = 0
+    out: list[dict[str, Any]] = []
+
+    def string_value(target: int) -> dict[str, Any] | None:
+        row = strings_by_rva.get(int(target))
+        if not row:
+            return None
+        return {
+            "kind": "string", "targetRva": int(target),
+            "value": str(row.get("text") or ""),
+            "domain": str(row.get("domain") or ""),
+            "lookupRole": row.get("lookupRole"),
+        }
+
+    def clear_caller_saved(state: dict[int, dict[str, Any]]) -> None:
+        for reg in range(0, 19):
+            state.pop(reg, None)
+
+    def managed_call(api: str, state: dict[int, dict[str, Any]], call_rva: int,
+                     pointer_register: int, pointer: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        x0 = state.get(0); x1 = state.get(1); x2 = state.get(2)
+        evidence: dict[str, Any] | None = None
+        return_value: dict[str, Any] | None = None
+        if api == "il2cpp_domain_get":
+            return_value = {"kind": "domain-object", "sourceCallRva": call_rva}
+        elif api == "il2cpp_domain_assembly_open" and x1 and x1.get("kind") == "string":
+            evidence = {
+                "lookupKind": "assembly", "identifier": x1.get("value"),
+                "identifierRegister": "X1", "argumentRva": x1.get("targetRva"),
+            }
+            return_value = {
+                "kind": "assembly-object", "assembly": x1.get("value"),
+                "sourceCallRva": call_rva,
+            }
+        elif api == "il2cpp_assembly_get_image" and x0 and x0.get("kind") == "assembly-object":
+            evidence = {
+                "lookupKind": "image", "assembly": x0.get("assembly"),
+                "objectRegister": "X0",
+            }
+            return_value = {
+                "kind": "image-object", "assembly": x0.get("assembly"),
+                "sourceCallRva": call_rva,
+            }
+        elif api == "il2cpp_class_from_name" and x2 and x2.get("kind") == "string":
+            namespace = x1.get("value") if x1 and x1.get("kind") == "string" else None
+            assembly = x0.get("assembly") if x0 and x0.get("kind") == "image-object" else None
+            evidence = {
+                "lookupKind": "type", "identifier": x2.get("value"),
+                "identifierRegister": "X2", "argumentRva": x2.get("targetRva"),
+                "namespace": namespace, "namespaceRegister": "X1" if namespace is not None else None,
+                "assembly": assembly, "objectRegister": "X0" if assembly is not None else None,
+            }
+            return_value = {
+                "kind": "class-object", "assembly": assembly, "namespace": namespace,
+                "type": x2.get("value"), "sourceCallRva": call_rva,
+                "exactTypeIdentity": bool(assembly and x2.get("value")),
+            }
+        elif api in {"il2cpp_class_get_field_from_name", "il2cpp_class_get_method_from_name"}:
+            member_kind = "field" if api.endswith("field_from_name") else "method"
+            if x1 and x1.get("kind") == "string":
+                clazz = x0 if x0 and x0.get("kind") == "class-object" else None
+                evidence = {
+                    "lookupKind": member_kind, "identifier": x1.get("value"),
+                    "identifierRegister": "X1", "argumentRva": x1.get("targetRva"),
+                    "assembly": clazz.get("assembly") if clazz else None,
+                    "namespace": clazz.get("namespace") if clazz else None,
+                    "type": clazz.get("type") if clazz else None,
+                    "classObjectFlowConfirmed": bool(clazz),
+                }
+                return_value = {
+                    "kind": member_kind + "-object",
+                    "assembly": clazz.get("assembly") if clazz else None,
+                    "namespace": clazz.get("namespace") if clazz else None,
+                    "type": clazz.get("type") if clazz else None,
+                    "name": x1.get("value"), "sourceCallRva": call_rva,
+                }
+        if evidence:
+            exact = bool(
+                evidence.get("assembly") and evidence.get("type")
+                and evidence.get("lookupKind") in {"field", "method"}
+                and evidence.get("classObjectFlowConfirmed")
+            )
+            domain = _domain(str(evidence.get("identifier") or ""))
+            evidence = {
+                **evidence,
+                "apiName": api,
+                "pointerRegister": f"X{pointer_register}",
+                "dlsymCallRva": pointer.get("dlsymCallRva"),
+                "dlsymNameArgumentRva": pointer.get("nameArgumentRva"),
+                "dlsymResolvedName": pointer.get("apiName"),
+                "gameplayDomain": "" if domain == "security" else domain,
+                "argumentFlowConfirmed": True,
+                "functionPointerFlowConfirmed": True,
+                "associationStatus": "dlsym-pointer-to-blr-argument-confirmed",
+                "exactManagedIdentityConfirmed": exact,
+                "automationExcluded": True,
+                "flowModel": "dlsym+adr-adrp-add-mov+blr+abi-clobber",
+            }
+        return evidence, return_value
+
+    for source_rva in sources:
+        _check(cb)
+        pair = by_start.get(source_rva)
+        if not pair:
+            continue
+        idx, fn = pair
+        next_start = int(funcs[idx + 1].value) if idx + 1 < len(funcs) else None
+        if int(getattr(fn, "size", 0) or 0) > 0:
+            end = source_rva + int(fn.size)
+            if next_start is not None:
+                end = min(end, next_start)
+        else:
+            end = next_start or source_rva
+        size = end - source_rva
+        if size < 4 or size > int(max_function_bytes) or total + size > int(max_total_bytes):
+            continue
+        try:
+            raw = elf.read_at_rva(source_rva, size)
+        except ValueError:
+            continue
+        total += size
+        state: dict[int, dict[str, Any]] = {}
+        page_state: dict[int, int] = {}
+        function_calls = calls_by_source.get(source_rva, {})
+
+        for rel in range(0, len(raw) & ~3, 4):
+            if (rel & 0x3FFF) == 0:
+                _check(cb)
+            pc = source_rva + rel
+            word = struct.unpack_from("<I", raw, rel)[0]
+
+            if word & 0xFC000000 == 0x94000000:
+                edge = function_calls.get(pc)
+                target_name = str(edge.get("targetFunction") or "") if edge else ""
+                if target_name in {"dlsym", "__loader_dlsym"}:
+                    name = state.get(1)
+                    result = None
+                    if name and name.get("kind") == "string":
+                        api = str(name.get("value") or "")
+                        if api in _IL2CPP_LOOKUP_APIS:
+                            result = {
+                                "kind": "il2cpp-api-pointer", "apiName": api,
+                                "dlsymCallRva": pc,
+                                "nameArgumentRva": name.get("targetRva"),
+                            }
+                    clear_caller_saved(state)
+                    page_state = {r: v for r, v in page_state.items() if r >= 19}
+                    if result:
+                        state[0] = result
+                    continue
+                clear_caller_saved(state)
+                page_state = {r: v for r, v in page_state.items() if r >= 19}
+                continue
+
+            if word & 0xFFFFFC1F == 0xD63F0000:
+                rn = (word >> 5) & 0x1F
+                pointer = state.get(rn)
+                if pointer and pointer.get("kind") == "il2cpp-api-pointer":
+                    evidence, return_value = managed_call(
+                        str(pointer.get("apiName") or ""), state, pc, rn, pointer
+                    )
+                    if evidence:
+                        out.append({
+                            "sourceRva": source_rva,
+                            "sourceFunction": getattr(fn, "name", None),
+                            "callRva": pc,
+                            **evidence,
+                        })
+                        if len(out) >= 320:
+                            return out
+                    clear_caller_saved(state)
+                    page_state = {r: v for r, v in page_state.items() if r >= 19}
+                    if return_value:
+                        state[0] = return_value
+                    continue
+                clear_caller_saved(state)
+                page_state = {r: v for r, v in page_state.items() if r >= 19}
+                continue
+
+            adrp = _decode_adrp(word, pc)
+            if adrp:
+                rd, page = adrp
+                state.pop(rd, None); page_state[rd] = page
+                continue
+            adr = _decode_adr(word, pc)
+            if adr:
+                rd, target = adr
+                page_state.pop(rd, None)
+                value = string_value(target)
+                if value:
+                    state[rd] = value
+                else:
+                    state.pop(rd, None)
+                continue
+            add = _decode_add_imm(word)
+            if add:
+                rd, rn, imm = add
+                base_page = page_state.get(rn)
+                source_value = state.get(rn)
+                page_state.pop(rd, None)
+                if base_page is not None:
+                    value = string_value(base_page + imm)
+                    if value:
+                        state[rd] = value
+                    else:
+                        state.pop(rd, None)
+                elif source_value and imm == 0:
+                    state[rd] = dict(source_value)
+                else:
+                    state.pop(rd, None)
+                continue
+            mov = _decode_mov_x_register(word)
+            if mov:
+                rd, rm = mov
+                page_state.pop(rd, None)
+                if rm in state:
+                    state[rd] = dict(state[rm])
+                else:
+                    state.pop(rd, None)
+                continue
+            load = _decode_ldr_x_unsigned(word)
+            if load:
+                rt, _rn, _off = load
+                state.pop(rt, None); page_state.pop(rt, None)
+                continue
+
+    return out
+
+
 def _architecture_profile(symbol_names: list[str], strings: list[dict[str, Any]], needed: list[str]) -> dict[str, Any]:
     marker_evidence: dict[str, list[str]] = {}
     def add(tag: str, value: str) -> None:
@@ -989,6 +1253,7 @@ def _scan_library(apk: Path, entry: str, extracted: Path, cb: Any | None = None)
         architecture = _architecture_profile(symbol_names, strings, needed)
         lookup_chains = _runtime_lookup_chains(strings, xrefs, calls)
         argument_flows = _il2cpp_argument_register_flow(elf, functions, strings, calls, cb)
+        dlsym_argument_flows = _dlsym_il2cpp_pointer_flow(elf, functions, strings, calls, cb)
 
         callers: dict[int, list[dict[str, Any]]] = {}
         callees: dict[int, list[dict[str, Any]]] = {}
@@ -1031,6 +1296,30 @@ def _scan_library(apk: Path, entry: str, extracted: Path, cb: Any | None = None)
                 "patchReady": False, "automationExcluded": True,
                 "runtimeConfirmed": False, "evidenceRole": "native-architecture-profile",
             })
+
+        for flow_no, flow in enumerate(dlsym_argument_flows):
+            title_bits = [str(x) for x in (flow.get("assembly"), flow.get("namespace"),
+                                           flow.get("type"), flow.get("identifier")) if x]
+            findings.append({
+                "id": "il2cpp-dlsym-flow:" + hashlib.sha256(
+                    f"{apk.name}!{entry}!{flow.get('callRva')}!{flow_no}".encode()
+                ).hexdigest()[:20],
+                "kind": "IL2CPP_DLSYM_ARGUMENT_FLOW",
+                "title": "IL2CPP dlsym→BLR flow" + (": " + " :: ".join(title_bits) if title_bits else ""),
+                "category": "Gameplay/IL2CPP Runtime Lookup" if flow.get("gameplayDomain") else "RE/IL2CPP Runtime Lookup",
+                "status": "CORRELATED_EVIDENCE",
+                "family": "native", "engineId": ENGINE_ID,
+                "apk": apk.name, "entry": entry, "library": entry, "abi": effective_abi,
+                "sourceRva": flow.get("sourceRva"), "sourceFunction": flow.get("sourceFunction"),
+                "callRva": flow.get("callRva"), "gameplayDomain": flow.get("gameplayDomain") or "",
+                "runtimeArgumentFlow": flow,
+                "ownershipKind": "APP_OR_GAME", "trustBoundary": "local",
+                "patchReady": False, "automationExcluded": True,
+                "runtimeConfirmed": False, "runtimeTruth": "not-observed-by-static-analysis",
+                "evidenceRole": "il2cpp-dlsym-pointer-argument-register-correlation",
+            })
+            if len(findings) >= MAX_FINDINGS:
+                break
 
         for flow_no, flow in enumerate(argument_flows):
             title_bits = [str(x) for x in (flow.get("assembly"), flow.get("namespace"),
@@ -1164,6 +1453,8 @@ def _scan_library(apk: Path, entry: str, extracted: Path, cb: Any | None = None)
             "runtimeLookupChains": lookup_chains,
             "runtimeArgumentFlowCount": len(argument_flows),
             "runtimeArgumentFlows": argument_flows,
+            "dlsymArgumentFlowCount": len(dlsym_argument_flows),
+            "dlsymArgumentFlows": dlsym_argument_flows,
             "functionSymbolCount": len(functions),
             "functions": function_rows,
             "directCallCount": len(calls),
