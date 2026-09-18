@@ -18,7 +18,7 @@ _ROUTES: dict[str, dict[str, Any]] = {
         "coverage": "FULL_BUNDLED",
     },
     "native_elf": {
-        "engines": ["elf.universal-inventory", "native.portable-embedded", "native.arm32-deep-embedded", "elf.static", "native.deep-embedded", "security.passive"],
+        "engines": ["elf.universal-inventory", "native.portable-embedded", "native.arm32-deep-embedded", "native.x86-deep-embedded", "elf.static", "native.deep-embedded", "security.passive"],
         "coverage": "FULL_BUNDLED",
     },
     "unity_il2cpp": {
@@ -130,6 +130,11 @@ def route(profile_report: dict[str, Any], output_path: str | Path | None = None)
                     route_missing.append(
                         "advanced ARMv7/Thumb register/stack data-flow; "
                         "symbol-bounded control-flow and portable relocations are bundled"
+                    )
+                elif abi in {"x86", "x86_64"}:
+                    route_missing.append(
+                        f"advanced {abi} register/stack data-flow; "
+                        "Capstone instruction/control-flow and portable relocations are bundled"
                     )
                 else:
                     route_missing.append(
