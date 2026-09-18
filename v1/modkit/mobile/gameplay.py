@@ -25,12 +25,12 @@ _MISSING = (1 << 64) - 1
 _DOMAIN_WORDS = {
     "health": {"health", "hp", "hitpoint", "hitpoints", "alive", "dead", "death", "heal", "healing", "revive", "revived", "lifestate"},
     "damage": {"damage", "dmg", "attack", "attacker", "hurt", "injury", "crit", "critical", "combat", "armor", "armour", "defense", "defence"},
-    "currency": {"gold", "coin", "coins", "currency", "currencies", "gem", "gems", "diamond", "diamonds", "wallet", "spend", "cost", "purchase", "grant"},
-    "progression": {"xp", "experience", "levelup", "progression", "rank", "upgrade", "unlock", "skillpoint", "skillpoints"},
-    "movement": {"speed", "movespeed", "movementspeed", "movement", "velocity", "timescale"},
+    "currency": {"gold", "coin", "coins", "currency", "currencies", "gem", "gems", "diamond", "diamonds", "wallet", "money", "cash", "credits", "spend", "cost", "purchase", "grant"},
+    "progression": {"xp", "experience", "levelup", "progression", "rank", "upgrade", "unlock", "skillpoint", "skillpoints", "statpoint", "statpoints", "perkpoint", "perkpoints"},
+    "movement": {"speed", "movespeed", "movementspeed", "runspeed", "walkspeed", "sprintspeed", "attackspeed", "actionspeed", "movement", "velocity", "timescale"},
     "resource": {"mana", "energy", "stamina", "rage"},
     "cooldown": {"cooldown", "cooldowns", "cdtime"},
-    "inventory": {"inventory", "item", "items", "stack", "quantity", "backpack"},
+    "inventory": {"inventory", "item", "items", "stack", "quantity", "backpack", "ammo", "ammunition", "magazine", "clip"},
     "camera": {"fov", "camera", "zoom"},
     "world": {"world", "weather", "day", "night", "timescale", "gametime"},
     "debug": {"debug", "console", "developer", "devmenu", "godmode", "noclip"},
@@ -59,19 +59,19 @@ _NOISE_PARTS = {
 _GAME_OWNER_PARTS = {
     "player", "hero", "actor", "avatar", "character", "unit", "battle",
     "combat", "inventory", "wallet", "currency", "skill", "ability", "quest",
-    "mapunit", "fighter", "enemy", "npc", "pet",
+    "mapunit", "fighter", "enemy", "npc", "pet", "pawn", "weapon", "combatant",
 }
 
 
 _PACKAGE_STRONG_WORDS = {
     "health": {"health", "hitpoint", "hitpoints", "alive", "heal", "revive"},
-    "damage": {"damage", "hurt", "injury", "attackdamage", "attackpower"},
+    "damage": {"damage", "hurt", "injury", "attackdamage", "attackpower", "armor", "armour", "defense", "defence"},
     "currency": {"gold", "coin", "coins", "currency", "gem", "gems", "diamond", "diamonds", "wallet"},
     "progression": {"experience", "levelup", "rankup", "skillpoint", "skillpoints"},
     "movement": {"movespeed", "movementspeed", "actionspeed", "globalspeed", "timescale"},
     "resource": {"mana", "energy", "stamina", "rage"},
     "cooldown": {"cooldown", "cdtime"},
-    "inventory": {"inventory", "backpack", "stackcount"},
+    "inventory": {"inventory", "backpack", "stackcount", "ammo", "ammunition"},
     "camera": {"fov", "camera", "zoom"},
     "world": {"weather", "timescale", "gametime"},
     "debug": {"debug", "console", "devmenu", "godmode", "noclip"},
@@ -111,16 +111,30 @@ def _package_domains(text):
 
 _FIELD_DOMAIN_WORDS = {
     "health": {"health", "hp", "hitpoint", "hitpoints", "alive"},
-    "damage": {"damage", "dmg", "attackpower", "attackdamage"},
+    "damage": {"damage", "dmg", "attackpower", "attackdamage", "armor", "armour", "defense", "defence"},
     "currency": {"gold", "coin", "coins", "currency", "gem", "gems", "diamond", "diamonds"},
-    "progression": {"xp", "experience", "level", "rank"},
-    "movement": {"speed", "movespeed", "movementspeed", "actionspeed", "globalspeed", "timescale"},
+    "progression": {"xp", "experience", "level", "rank", "skillpoint", "skillpoints", "statpoint", "statpoints", "perkpoint", "perkpoints"},
+    "movement": {"speed", "movespeed", "movementspeed", "runspeed", "walkspeed", "sprintspeed", "attackspeed", "actionspeed", "globalspeed", "timescale"},
     "resource": {"mana", "energy", "stamina", "rage"},
     "cooldown": {"cooldown", "cd", "cdtime"},
-    "inventory": {"inventory", "quantity", "stackcount"},
+    "inventory": {"inventory", "quantity", "stackcount", "ammo", "ammunition", "magazine", "clip"},
     "camera": {"fov", "zoom"},
     "world": {"weather", "timescale", "gametime"},
     "debug": {"debug", "godmode", "noclip"},
+}
+
+_OBFUSCATION_SAFE_FIELD_WORDS = {
+    # Concrete state names may survive even when the declaring managed type was
+    # obfuscated. They are accepted only when that type is proven application-owned.
+    # Ambiguous names such as level/speed/balance/count remain owner-gated.
+    "health": {"health", "hp", "hitpoint", "hitpoints"},
+    "damage": {"damage", "dmg", "attackpower", "attackdamage", "armor", "armour"},
+    "currency": {"gold", "coin", "coins", "gem", "gems", "diamond", "diamonds"},
+    "progression": {"xp", "experience", "skillpoint", "skillpoints", "statpoint", "statpoints", "perkpoint", "perkpoints"},
+    "movement": {"movespeed", "movementspeed", "runspeed", "walkspeed", "sprintspeed", "attackspeed", "actionspeed"},
+    "resource": {"mana", "stamina", "rage"},
+    "cooldown": {"cooldown", "cdtime"},
+    "inventory": {"inventory", "ammo", "ammunition"},
 }
 
 
@@ -146,7 +160,7 @@ def _owner_gameplay(text):
     return bool(t & _GAME_OWNER_PARTS) and not bool(t & _NOISE_PARTS)
 
 
-def domains_for(text, *, owner=None, field=False):
+def domains_for(text, *, owner=None, field=False, application_owned=False):
     token_list = _tokens(text)
     tokens = set(token_list)
     owner_text = owner or ""
@@ -165,16 +179,18 @@ def domains_for(text, *, owner=None, field=False):
             matched = bool(tokens & words) or compact in words
             if not matched:
                 continue
+            concrete = _OBFUSCATION_SAFE_FIELD_WORDS.get(domain, set())
+            obfuscation_safe = bool(application_owned) and (bool(tokens & concrete) or compact in concrete)
             if domain in {"camera"}:
-                allowed = owner_ok or bool(owner_tokens & {"camera", "mapcamera"})
+                allowed = obfuscation_safe or owner_ok or bool(owner_tokens & {"camera", "mapcamera"})
             elif domain in {"world"}:
-                allowed = owner_ok or bool(owner_tokens & {"weather", "world", "time", "environment", "sky"})
+                allowed = obfuscation_safe or owner_ok or bool(owner_tokens & {"weather", "world", "time", "environment", "sky"})
             elif domain == "cooldown":
-                allowed = owner_ok or compact in {"cd", "cooldown", "cdtime"}
+                allowed = obfuscation_safe or owner_ok or compact in {"cd", "cooldown", "cdtime"}
             elif domain == "debug":
                 allowed = owner_ok
             else:
-                allowed = owner_ok
+                allowed = obfuscation_safe or owner_ok
             if allowed:
                 out.add(domain)
         low = " ".join(_tokens(owner_text + " " + text))
@@ -209,13 +225,13 @@ def _method_domain_relevant(row, domain):
     owner_ok = bool(row.get("applicationOwned")) or _owner_gameplay(row.get("class") or "")
     strong = {
         "health": {"health", "hp", "heal", "healing", "revive", "alive"},
-        "damage": {"damage", "hurt", "injury", "attackdamage", "attackpower"},
-        "currency": {"gold", "coin", "coins", "currency", "gem", "gems", "diamond", "diamonds", "wallet", "spend", "purchase"},
-        "progression": {"xp", "experience", "levelup", "rankup", "upgrade", "progression"},
-        "movement": {"speed", "movespeed", "movementspeed", "actionspeed", "globalspeed", "timescale", "movement"},
+        "damage": {"damage", "hurt", "injury", "attackdamage", "attackpower", "armor", "armour", "defense", "defence"},
+        "currency": {"gold", "coin", "coins", "currency", "gem", "gems", "diamond", "diamonds", "wallet", "money", "cash", "credits", "spend", "purchase"},
+        "progression": {"xp", "experience", "levelup", "rankup", "upgrade", "progression", "skillpoint", "skillpoints", "statpoint", "statpoints", "perkpoint", "perkpoints"},
+        "movement": {"speed", "movespeed", "movementspeed", "runspeed", "walkspeed", "sprintspeed", "attackspeed", "actionspeed", "globalspeed", "timescale", "movement"},
         "resource": {"mana", "energy", "stamina", "rage"},
         "cooldown": {"cooldown", "cd", "cdtime"},
-        "inventory": {"inventory", "backpack", "quantity", "stackcount"},
+        "inventory": {"inventory", "backpack", "quantity", "stackcount", "ammo", "ammunition", "magazine", "clip"},
         "camera": {"fov", "camera", "zoom"},
         "world": {"weather", "timescale", "gametime"},
         "debug": {"debug", "console", "devmenu", "godmode", "noclip"},
@@ -224,6 +240,11 @@ def _method_domain_relevant(row, domain):
     hit = bool(tokens & strong) or compact in strong
     # Exact typed-field evidence can carry semantics through an obfuscated name.
     if any(domain in (a.get("domains") or []) for a in (row.get("typedFieldAccesses") or [])):
+        return True
+    # An unnamed graph bridge is discovery evidence only. It is admitted when
+    # an application-owned method sits between same-domain native neighbors.
+    # Coverage keeps bridges out of CONFIRMED, so this cannot create a binding.
+    if bool(row.get("applicationOwned")) and domain in (row.get("bridgeDomains") or []):
         return True
     owner_tokens = set(_tokens(row.get("class") or ""))
     gameplay_owner = _owner_gameplay(row.get("class") or "")
@@ -241,7 +262,10 @@ def _method_domain_relevant(row, domain):
         allowed_owner = bool(row.get("applicationOwned"))
     else:
         allowed_owner = owner_ok
-    return bool(allowed_owner and hit)
+    # Strong names in application-owned code remain useful even when the type
+    # name itself is obfuscated. Name-only evidence stays REVIEW unless exact
+    # typed-field access independently confirms the state relation.
+    return bool(hit and (allowed_owner or bool(row.get("applicationOwned"))))
 
 
 def _sha256(path):
@@ -321,9 +345,10 @@ def _catalog_compact(catalog_path, cb=None):
     return nodes, rva_to_mid, max_mid
 
 
-def _field_catalog(meta, elf, registration, types, cb=None):
+def _field_catalog(meta, elf, registration, types, cb=None, application_owned_types=None):
     by_type = {}
     rows = []
+    application_owned_types = set(application_owned_types or ())
     for ti in range(meta.type_count):
         if ti % 512 == 0 and cb is not None:
             from modkit.mobile.engine import check
@@ -353,7 +378,9 @@ def _field_catalog(meta, elf, registration, types, cb=None):
                 "fieldTypeDefinitionIndex": (shape or {}).get("typeDefIndex"),
                 "fieldTypeCode": (shape or {}).get("typeCode"),
                 "primitive": (shape or {}).get("primitive"),
-                "domains": domains_for(f["name"], owner=f["declaringType"], field=True),
+                "applicationOwned": ti in application_owned_types,
+                "domains": domains_for(f["name"], owner=f["declaringType"], field=True,
+                                       application_owned=ti in application_owned_types),
             }
             offset_map.setdefault(int(off), []).append(row)
             rows.append(row)
@@ -623,7 +650,15 @@ def build_evidence_graph(metadata_path, library_path, catalog_path, graph_path, 
         max_type_index = max(meta.parameter_type_indices(), default=0)
         types = elf.type_table(meta.type_count, max_type_index)
         registration = elf.metadata_registration(meta.type_count, max_type_index)
-        field_rows, field_by_type = _field_catalog(meta, elf, registration, types, cb) if registration else ([], {})
+        application_owned_types = {
+            int(node["declaringTypeIndex"]) for node in nodes.values()
+            if node.get("applicationOwned") and isinstance(node.get("declaringTypeIndex"), int)
+            and int(node["declaringTypeIndex"]) >= 0
+        }
+        field_rows, field_by_type = (
+            _field_catalog(meta, elf, registration, types, cb, application_owned_types)
+            if registration else ([], {})
+        )
 
         # Build a name-independent resolver *candidate* index once.  Deep
         # Resolver still performs the machine-code proof (stable global pointer
@@ -806,6 +841,11 @@ def build_evidence_graph(metadata_path, library_path, catalog_path, graph_path, 
             "tailBEdges": int(edge_counts["tail-b"]),
             "typedFieldAccesses": sum(len(x) for x in field_access_by_mid.values()),
             "exactRuntimeFields": len(field_rows),
+            "applicationOwnedRuntimeFields": sum(1 for x in field_rows if x.get("applicationOwned")),
+            "obfuscationSafeGameplayFields": sum(
+                1 for x in field_rows if x.get("domains") and x.get("applicationOwned")
+                and not _owner_gameplay(x.get("declaringType") or "")
+            ),
             "bridgeMethods": len(bridge_domains),
             "fieldScanMethods": len(ranked),
             "resolverTargetTypes": len(resolver_by_type),
@@ -999,6 +1039,8 @@ def build_gameplay_coverage(graph_path, fields_path=None, package_evidence=None,
                     "typedFieldAccesses": [x for x in (row.get("typedFieldAccesses") or []) if d in (x.get("domains") or [])][:8],
                     "callers": row.get("callers") or [], "callees": row.get("callees") or [],
                     "applicationOwned": row.get("applicationOwned"),
+                    "methodRole": row.get("methodRole"),
+                    "bridgeDomains": row.get("bridgeDomains") or [],
                 }
                 bucket = "bridges" if d in (row.get("bridgeDomains") or []) and d not in (row.get("domains") or []) else "methods"
                 if len(domains[d][bucket]) < 512:
