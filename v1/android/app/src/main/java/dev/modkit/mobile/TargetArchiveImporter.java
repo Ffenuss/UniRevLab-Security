@@ -65,7 +65,7 @@ final class TargetArchiveImporter {
         if(baseFile==null)throw new IOException("Base APK не определён");copy(baseFile,new File(filesDir,"game.apk"),cancelled);
 
         PackageInfo pi=archiveInfo(context,baseFile);String pkg=pi==null?"":String.valueOf(pi.packageName==null?"":pi.packageName);String versionName=pi==null||pi.versionName==null?"":pi.versionName;long versionCode=pi==null?0L:versionCode(pi);String label=label(context,pi);
-        String fp=fingerprint(pkg,versionCode,splits);
+        String fp=fingerprint(pkg,versionCode,splits);boolean requiresWholeSetSigning=ordered.size()>1;
         JSONObject target=new JSONObject()
                 .put("schema","modkit-target-selection-1.1")
                 .put("preparedOnly",true).put("analysisPerformed",false)
@@ -73,7 +73,7 @@ final class TargetArchiveImporter {
                 .put("packageName",pkg).put("label",label).put("versionName",versionName).put("versionCode",versionCode)
                 .put("targetId",fp.substring(0,24)).put("fingerprintSha256",fp)
                 .put("scanCompleteness","COMPLETE").put("expectedApkCount",ordered.size()).put("copiedApkCount",ordered.size())
-                .put("copyErrors",new JSONArray()).put("buildMode","apk-set").put("requiresWholeSetSigning",true)
+                .put("copyErrors",new JSONArray()).put("buildMode",requiresWholeSetSigning?"apk-set":"single-apk").put("requiresWholeSetSigning",requiresWholeSetSigning)
                 .put("fullIl2cppPair",false).put("pairConfidence","UNSCANNED")
                 .put("splits",splits);
         return new Result(true,target,"APK-set готов: "+ordered.size()+" APK"+(pkg.isEmpty()?"":" · "+pkg));
