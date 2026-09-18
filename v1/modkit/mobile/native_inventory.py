@@ -93,7 +93,7 @@ def _header(data: bytes) -> dict[str, Any] | None:
         "elfType": int(e_type),
         "machine": int(e_machine),
         "arch": _MACHINE.get(int(e_machine), f"machine-{int(e_machine)}"),
-        "entry": int(e_entry),
+        "entryPoint": int(e_entry),
         "dynamicOrPie": int(e_type) == 3,
     }
 
