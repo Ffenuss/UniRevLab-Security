@@ -74,3 +74,28 @@ def test_known_framework_cdn_surface_is_downranked():
     assert item["networkRole"] == "FRAMEWORK_CDN_OR_TELEMETRY"
     assert item["important"] is False
     assert item["priority"] <= 36
+
+
+def test_review_only_semantic_method_stays_non_control_even_with_method_identity():
+    out = refine_catalog({"cards": [
+        card(
+            "Gameplay",
+            "GetLevel",
+            evidence={
+                "metadataMethodId": 42,
+                "class": "a.b.C",
+                "methodName": "GetLevel",
+                "reviewOnlySemantic": True,
+                "automationExcluded": True,
+            },
+        )
+    ]})
+    item = out["cards"][0]
+    assert item["methodBoundEvidence"] is True
+    assert item["evidenceTier"] == "CORRELATED_EVIDENCE"
+    assert item["automationExcluded"] is True
+    assert item["controlCandidate"] is False
+    assert item["buildable"] is False
+    assert item["selectable"] is False
+    assert item["actionable"] is False
+    assert out["qualityPolicy"]["reviewOnlySemanticAutomationExcluded"] is True
