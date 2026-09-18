@@ -945,6 +945,11 @@ def _dlsym_il2cpp_pointer_flow(elf: ElfFile, functions: list[Any],
                 "functionPointerStorage": pointer.get("storage"),
                 "functionPointerSlotRva": pointer.get("slotRva"),
                 "functionPointerStackOffset": pointer.get("stackOffset"),
+                "functionPointerStorageBaseRva": pointer.get("storageBaseRva"),
+                "functionPointerStorageMemberOffset": pointer.get("storageMemberOffset"),
+                "functionPointerTableBaseRva": pointer.get("tableBaseRva"),
+                "functionPointerTableOffset": pointer.get("tableOffset"),
+                "functionPointerTableEntryCount": pointer.get("tableEntryCount"),
                 "gameplayDomain": "" if domain == "security" else domain,
                 "argumentFlowConfirmed": True,
                 "functionPointerFlowConfirmed": True,
@@ -996,18 +1001,20 @@ def _dlsym_il2cpp_pointer_flow(elf: ElfFile, functions: list[Any],
         sp_delta = 0
         function_calls = calls_by_source.get(source_rva, {})
 
-        def memory_key(rn: int, offset: int) -> tuple[str, int] | None:
+        def memory_key(rn: int, offset: int) -> tuple[str, int, int | None, int] | None:
             if rn == 31:
-                return "stack", sp_delta + offset
+                return "stack", sp_delta + offset, None, offset
             base = state.get(rn)
             if base and base.get("kind") == "address" and isinstance(base.get("targetRva"), int):
-                return "global", int(base["targetRva"]) + offset
+                base_rva = int(base["targetRva"])
+                return "global", base_rva + offset, base_rva, offset
             if rn in page_state:
-                return "global", int(page_state[rn]) + offset
+                base_rva = int(page_state[rn])
+                return "global", base_rva + offset, base_rva, offset
             return None
 
-        def load_slot(rt: int, key: tuple[str, int]) -> None:
-            kind, slot = key
+        def load_slot(rt: int, key: tuple[str, int, int | None, int]) -> None:
+            kind, slot, _base_rva, _member_offset = key
             if kind == "stack":
                 value = stack_slots.get(slot)
             elif slot in invalid_global_slots:
@@ -1087,7 +1094,7 @@ def _dlsym_il2cpp_pointer_flow(elf: ElfFile, functions: list[Any],
                 rt, rn, off = store
                 key = memory_key(rn, off)
                 if key:
-                    kind, slot = key
+                    kind, slot, storage_base_rva, storage_member_offset = key
                     value = state.get(rt)
                     if kind == "stack":
                         if value:
@@ -1099,6 +1106,8 @@ def _dlsym_il2cpp_pointer_flow(elf: ElfFile, functions: list[Any],
                             stored = dict(value)
                             stored["storage"] = "global"
                             stored["slotRva"] = slot
+                            stored["storageBaseRva"] = storage_base_rva
+                            stored["storageMemberOffset"] = storage_member_offset
                             global_slots[slot] = stored
                         else:
                             global_slots.pop(slot, None)
@@ -1111,6 +1120,8 @@ def _dlsym_il2cpp_pointer_flow(elf: ElfFile, functions: list[Any],
                             stored = dict(value)
                             stored["storage"] = "global"
                             stored["slotRva"] = slot
+                            stored["storageBaseRva"] = storage_base_rva
+                            stored["storageMemberOffset"] = storage_member_offset
                             local_global_slots[slot] = stored
                             invalid_global_slots.discard(slot)
                         else:
@@ -1191,6 +1202,27 @@ def _dlsym_il2cpp_pointer_flow(elf: ElfFile, functions: list[Any],
             break
         scan(source_rva, allow_dlsym=True, allow_global_loads=True)
 
+    # Recover a resolver-table only when multiple independently proven dlsym
+    # pointers are written through the same statically known base and distinct
+    # member offsets. A single global pointer never becomes a "table".
+    grouped_tables: dict[int, list[tuple[int, dict[str, Any]]]] = {}
+    for slot_rva, value in global_slots.items():
+        base_rva = value.get("storageBaseRva")
+        member_offset = value.get("storageMemberOffset")
+        if isinstance(base_rva, int) and isinstance(member_offset, int):
+            grouped_tables.setdefault(base_rva, []).append((slot_rva, value))
+    for base_rva, entries in grouped_tables.items():
+        api_names = {str(value.get("apiName") or "") for _slot, value in entries if value.get("apiName")}
+        member_offsets = {int(value.get("storageMemberOffset")) for _slot, value in entries
+                          if isinstance(value.get("storageMemberOffset"), int)}
+        if len(api_names) < 2 or len(member_offsets) < 2:
+            continue
+        count = len(entries)
+        for _slot, value in entries:
+            value["tableBaseRva"] = base_rva
+            value["tableOffset"] = value.get("storageMemberOffset")
+            value["tableEntryCount"] = count
+
     # Once a global slot has a proven dlsym origin, scan other known functions
     # for exact LDR(slot) -> BLR flow. Functions already scanned above are skipped.
     if global_slots and total < int(max_total_bytes) and len(out) < 320:
@@ -1203,6 +1235,15 @@ def _dlsym_il2cpp_pointer_flow(elf: ElfFile, functions: list[Any],
                 break
             scan(source_rva, allow_dlsym=False, allow_global_loads=True)
 
+    # Same-function calls may have been emitted before the grouping pass.
+    # Enrich them after the fact by exact slot identity.
+    for row in out:
+        slot_rva = row.get("functionPointerSlotRva")
+        value = global_slots.get(int(slot_rva)) if isinstance(slot_rva, int) else None
+        if value and value.get("tableBaseRva") is not None:
+            row["functionPointerTableBaseRva"] = value.get("tableBaseRva")
+            row["functionPointerTableOffset"] = value.get("tableOffset")
+            row["functionPointerTableEntryCount"] = value.get("tableEntryCount")
     return out
 
 def _architecture_profile(symbol_names: list[str], strings: list[dict[str, Any]], needed: list[str]) -> dict[str, Any]:
