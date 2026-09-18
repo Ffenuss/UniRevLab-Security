@@ -44,9 +44,9 @@ _ROUTES: dict[str, dict[str, Any]] = {
         "coverage": "FULL_BUNDLED",
     },
     "react_native_jsc": {
-        "engines": ["javascript.static", "dex.structural", "native.deep-embedded", "security.passive"],
+        "engines": ["javascript.static", "jsc.deep-embedded", "dex.structural", "native.deep-embedded", "security.passive"],
         "coverage": "PARTIAL_BUNDLED",
-        "missing": ["JavaScriptCore bytecode/version-specific structural decoder"],
+        "missing": ["version-specific JavaScriptCore bytecode instruction decoder"],
     },
     "dotnet_android": {
         "engines": ["dotnet.static", "dotnet.metadata-embedded", "apktool.android", "dex.structural", "elf.static", "native.deep-embedded", "security.passive"],
@@ -91,6 +91,11 @@ _ROUTES: dict[str, dict[str, Any]] = {
     "webview_hybrid": {
         "engines": ["javascript.static", "apktool.android", "dex.structural", "security.passive"],
         "coverage": "FULL_BUNDLED",
+    },
+    "webassembly": {
+        "engines": ["webassembly.static", "webassembly.deep-embedded", "security.passive"],
+        "coverage": "PARTIAL_BUNDLED",
+        "missing": ["WebAssembly instruction-body disassembly/decompilation"],
     },
     "unknown": {
         "engines": ["apktool.android", "dex.structural", "jadx.android", "elf.static", "native.deep-embedded", "security.passive"],
