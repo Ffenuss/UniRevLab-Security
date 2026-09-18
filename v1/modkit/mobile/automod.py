@@ -473,6 +473,12 @@ def _classify(card: dict[str, Any], native_recovery: dict[str, Any] | None = Non
         return _AUDIT, "Server/payment/auth/network/trust evidence сохраняется только для аудита."
 
     app_owned = ownership in _APP_OWNERSHIP
+    evidence = card.get("evidence") if isinstance(card.get("evidence"), dict) else {}
+    automation_excluded = bool(
+        card.get("automationExcluded")
+        or evidence.get("automationExcluded")
+        or evidence.get("reviewOnlySemantic")
+    )
     native_exact = bool(
         native_recovery
         and native_recovery.get("addressConfirmed")
@@ -483,6 +489,10 @@ def _classify(card: dict[str, Any], native_recovery: dict[str, Any] | None = Non
     quality_control = _quality_control_eligible(card)
     patch_ready = bool(card.get("buildable")) and stage == "PATCH_READY" and app_owned
 
+    if app_owned and automation_excluded:
+        if stage in {"RUNTIME_CONFIRMED", "FLOW_CONFIRMED", "LOCATOR_CONFIRMED"}:
+            return _RUNTIME, "Semantic evidence сохранён для runtime/read-only проверки; automationExcluded запрещает preflight даже после RVA recovery."
+        return _REVIEW, "Semantic evidence помечен review-only; RVA/metadata recovery не превращает его в executable control."
     if patch_ready:
         return _BUILD, "Есть проверенный локальный executable binding; допустим signed build после обязательного preflight."
     if app_owned and native_exact:
@@ -516,7 +526,10 @@ def _candidate(card, runtime_by_id, il2cpp_by_rva, identity_indexes, native_inde
     if il2cpp and il2cpp.get("status") == "STRUCTURAL_BOTH_PRESENT":
         reason += " IL2CPP cross-check отдельно подтвердил metadata method name и executable ELF range; их ассоциация этим backend'ом не считается доказанной."
     if native:
-        reason += " Native recovery подтвердил точную MethodDef→CodeGenModule→unique executable pointer ассоциацию; recovered RVA допускается только к preflight."
+        if card.get("automationExcluded"):
+            reason += " Native recovery подтвердил точный RVA, но finding остаётся automationExcluded и используется только как read-only locator."
+        else:
+            reason += " Native recovery подтвердил точную MethodDef→CodeGenModule→unique executable pointer ассоциацию; recovered RVA допускается только к preflight."
     if identity:
         if identity.get("metadataTokenConfirmed"):
             reason += " Global metadata подтверждает method token и identity."
@@ -558,6 +571,7 @@ def _candidate(card, runtime_by_id, il2cpp_by_rva, identity_indexes, native_inde
         "flowCorrelated": bool(card.get("flowCorrelated")),
         "qualityPolicyPresent": _has_quality_policy(card),
         "qualityControlEligible": _quality_control_eligible(card),
+        "automationExcluded": bool(card.get("automationExcluded")),
         "executableControl": executable_control,
         "runtimeProbe": stage == _RUNTIME,
         "reviewOnly": stage == _REVIEW,
