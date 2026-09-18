@@ -56,7 +56,7 @@ def test_embedded_pipeline_stops_before_next_backend_on_cancel(tmp_path, monkeyp
         )
 
     assert calls == {"profiler": 1, "artifact": 0, "lua": 0}
-    assert callback.progress_rows == ["Embedded 1/19 · runtime / engine profiler…"]
+    assert callback.progress_rows == ["Embedded 1/20 · runtime / engine profiler…"]
     assert not (tmp_path / "embedded-analysis.json").exists()
 
 
