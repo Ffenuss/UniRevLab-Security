@@ -18,7 +18,7 @@ _ROUTES: dict[str, dict[str, Any]] = {
         "coverage": "FULL_BUNDLED",
     },
     "native_elf": {
-        "engines": ["elf.static", "native.deep-embedded", "security.passive"],
+        "engines": ["elf.universal-inventory", "elf.static", "native.deep-embedded", "security.passive"],
         "coverage": "FULL_BUNDLED",
     },
     "unity_il2cpp": {
