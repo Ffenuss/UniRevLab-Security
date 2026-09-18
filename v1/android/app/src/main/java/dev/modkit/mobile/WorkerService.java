@@ -208,23 +208,44 @@ public class WorkerService extends Service {
 
     private void exportSignedTargetForSource(Uri uri,File patchedUnsigned,File sourceApk,Intent guardRequest,String singleDone,String setDone) throws Exception {
         TargetResolver.Member guardedSource=verifyWorkspaceHandoff(guardRequest,sourceApk,app.file("workspace-patch.zip"));
-        JSONObject target=installedTarget();
-        if(target==null||!targetIsApkSet()){
+        TargetResolver.Target canonical=TargetResolver.resolve(app);JSONObject canonicalVerification=TargetResolver.requireVerified(canonical,app.cancelled);
+        if(!canonical.apkSet){
             boolean saved=false;File signed=app.file("workspace-target-signed.apk");SigningKeyManager.Identity identity=SigningKeyManager.getOrCreate();
             try{ApkSignerUtil.sign(patchedUnsigned,signed,identity);copyFileToUri(signed,uri,"Сохранение APK");verifyWorkspaceHandoff(guardRequest,sourceApk,app.file("workspace-patch.zip"));saved=true;app.progress(singleDone);}
             finally{signed.delete();if(!saved)try{DocumentsContract.deleteDocument(getContentResolver(),uri);}catch(Exception ignored){}}
             return;
         }
-        if(!"COMPLETE".equals(target.optString("scanCompleteness")))throw new IOException("APK-set неполный: повторите Installed Scanner перед сборкой.");
-        verifyInstalledTarget();JSONArray rows=target.optJSONArray("splits");if(rows==null)throw new IOException("Некорректный APK-set target manifest");
-        int ownerIndex=-1;String sourceCanonical=sourceApk.getCanonicalPath();
-        for(int i=0;i<rows.length();i++){JSONObject row=rows.optJSONObject(i);if(row==null)continue;File f=new File(row.optString("path",""));if(f.isFile()&&f.getCanonicalPath().equals(sourceCanonical)){ownerIndex=row.optInt("index",-1);if(ownerIndex!=guardedSource.index||!guardedSource.name.equals(row.optString("name","")))throw new IOException("Workspace owning split identity изменилась после build guard");break;}}
-        if(ownerIndex<0)throw new IOException("Редактируемый APK не принадлежит текущему установленному APK-set. Повторите выбор target.");
+        if(canonical.members.size()<2)throw new IOException("Canonical APK-set не содержит полный набор splits");
+        TargetResolver.Member currentSource=null;String sourceCanonical=sourceApk.getCanonicalPath();
+        for(TargetResolver.Member member:canonical.members)if(member.file.getCanonicalPath().equals(sourceCanonical)){currentSource=member;break;}
+        if(currentSource==null||currentSource.index!=guardedSource.index||!currentSource.name.equals(guardedSource.name))throw new IOException("Workspace owning split identity изменилась после build guard");
+
         boolean saved=false;File bundle=app.file("workspace-target-signed.apks"),signedDir=app.file("workspace-target-signed-set");SigningKeyManager.Identity identity=SigningKeyManager.getOrCreate();
-        try{deleteTree(signedDir);if(!signedDir.mkdirs()&&!signedDir.isDirectory())throw new IOException("Не удалось создать каталог подписанного APK-set");ArrayList<File> signedFiles=new ArrayList<>();ArrayList<String> names=new ArrayList<>();
-            for(int i=0;i<rows.length();i++){check();JSONObject row=rows.optJSONObject(i);if(row==null)continue;int index=row.optInt("index",i);File input=index==ownerIndex?patchedUnsigned:new File(row.optString("path",""));if(!input.isFile())throw new IOException("Split отсутствует: "+row.optString("name"));String entry=row.optString("name",String.format(Locale.ROOT,"%03d.apk",index));File signed=new File(signedDir,entry);app.progress("APK-set: подпись "+(i+1)+"/"+rows.length()+" · "+entry);ApkSignerUtil.sign(input,signed,identity);signedFiles.add(signed);names.add(entry);}
-            File tmp=new File(bundle.getParentFile(),bundle.getName()+".tmp");try(ZipOutputStream z=new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(tmp)))){byte[] buf=new byte[1024*1024];for(int i=0;i<signedFiles.size();i++){ZipEntry e=new ZipEntry(names.get(i));z.putNextEntry(e);try(InputStream in=new FileInputStream(signedFiles.get(i))){int n;while((n=in.read(buf))!=-1){check();z.write(buf,0,n);}}z.closeEntry();}ZipEntry readme=new ZipEntry("INSTALL.txt");z.putNextEntry(readme);z.write(("ModKit edited APK-set. Install all APKs together. Certificate SHA-256: "+identity.fingerprintSha256+"\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));z.closeEntry();}
-            Files.move(tmp.toPath(),bundle.toPath(),StandardCopyOption.REPLACE_EXISTING);copyFileToUri(bundle,uri,"Сохранение APK-set");verifyWorkspaceHandoff(guardRequest,sourceApk,app.file("workspace-patch.zip"));saved=true;app.progress(setDone);
+        try{
+            deleteTree(signedDir);if(!signedDir.mkdirs()&&!signedDir.isDirectory())throw new IOException("Не удалось создать каталог подписанного APK-set");
+            ArrayList<File> signedFiles=new ArrayList<>();ArrayList<TargetResolver.Member> signedMembers=new ArrayList<>();int patchedCount=0;
+            for(int i=0;i<canonical.members.size();i++){
+                check();TargetResolver.Member member=canonical.members.get(i);boolean patched=member.index==guardedSource.index;if(patched)patchedCount++;
+                File input=patched?patchedUnsigned:member.file;if(!input.isFile())throw new IOException("Split отсутствует: "+member.name);
+                File signed=new File(signedDir,member.name);app.progress("APK-set: подпись "+(i+1)+"/"+canonical.members.size()+" · "+member.name);ApkSignerUtil.sign(input,signed,identity);signedFiles.add(signed);signedMembers.add(member);
+            }
+            if(patchedCount!=1||signedFiles.size()!=canonical.members.size())throw new IOException("Workspace APK-set build должен изменить ровно один split и сохранить полный set");
+
+            File tmp=new File(bundle.getParentFile(),bundle.getName()+".tmp");Files.deleteIfExists(tmp.toPath());
+            try(ZipOutputStream z=new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(tmp)))){
+                byte[] buf=new byte[1024*1024];JSONArray exportedMembers=new JSONArray();
+                for(int i=0;i<signedFiles.size();i++){
+                    check();File signedFile=signedFiles.get(i);TargetResolver.Member member=signedMembers.get(i);boolean patched=member.index==guardedSource.index;MessageDigest digest=MessageDigest.getInstance("SHA-256");
+                    ZipEntry e=new ZipEntry(member.name);e.setTime(0L);z.putNextEntry(e);try(InputStream in=new FileInputStream(signedFile)){int n;while((n=in.read(buf))!=-1){check();digest.update(buf,0,n);z.write(buf,0,n);}}z.closeEntry();
+                    StringBuilder sha=new StringBuilder(64);for(byte b:digest.digest())sha.append(String.format(Locale.ROOT,"%02x",b));
+                    exportedMembers.put(new JSONObject().put("index",member.index).put("name",member.name).put("sourceSha256",member.sha256).put("signedSha256",sha.toString()).put("modified",patched));
+                }
+                JSONObject exportedTarget=new JSONObject().put("schema","modkit-workspace-export-target-1.0").put("sourceTargetId",canonical.targetId).put("sourceFingerprintSha256",canonical.fingerprint).put("sourceTargetDigest",canonicalVerification.getString("currentTargetDigest")).put("memberCount",canonical.members.size()).put("patchedSplitIndex",guardedSource.index).put("patchedSplitName",guardedSource.name).put("signing",new JSONObject().put("provider","AndroidKeyStore").put("certificateSha256",identity.fingerprintSha256)).put("members",exportedMembers);
+                ZipEntry manifest=new ZipEntry("modkit-target.json");manifest.setTime(0L);z.putNextEntry(manifest);z.write(exportedTarget.toString(2).getBytes(java.nio.charset.StandardCharsets.UTF_8));z.closeEntry();
+                ZipEntry readme=new ZipEntry("INSTALL.txt");readme.setTime(0L);z.putNextEntry(readme);z.write(("ModKit edited APK-set. Install all APKs together. Certificate SHA-256: "+identity.fingerprintSha256+"\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));z.closeEntry();
+            }catch(Exception e){Files.deleteIfExists(tmp.toPath());throw e;}
+            catch(Error e){try{Files.deleteIfExists(tmp.toPath());}catch(Exception ignored){}throw e;}
+            verifyWorkspaceHandoff(guardRequest,sourceApk,app.file("workspace-patch.zip"));Files.move(tmp.toPath(),bundle.toPath(),StandardCopyOption.REPLACE_EXISTING);copyFileToUri(bundle,uri,"Сохранение APK-set");verifyWorkspaceHandoff(guardRequest,sourceApk,app.file("workspace-patch.zip"));saved=true;app.progress(setDone);
         }finally{bundle.delete();deleteTree(signedDir);if(!saved)try{DocumentsContract.deleteDocument(getContentResolver(),uri);}catch(Exception ignored){}}
     }
 
