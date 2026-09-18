@@ -819,3 +819,63 @@ def test_global_pointer_slot_is_invalidated_by_unknown_store():
         "targetFunction": "dlsym", "targetRva": 0x5000,
     }]
     assert native_deep._dlsym_il2cpp_pointer_flow(FakeElf(), functions, strings, calls) == []
+
+
+def test_consumer_overwrite_invalidates_cached_global_pointer_before_load():
+    import struct
+    from types import SimpleNamespace
+
+    def adrp(rd, pc, target):
+        delta = (target & ~0xFFF) - (pc & ~0xFFF)
+        imm21 = (delta >> 12) & ((1 << 21) - 1)
+        return 0x90000000 | ((imm21 & 0x3) << 29) | (((imm21 >> 2) & 0x7FFFF) << 5) | rd
+
+    def add(rd, rn, imm):
+        return 0x91000000 | ((imm & 0xFFF) << 10) | (rn << 5) | rd
+
+    def str_x(rt, rn, imm):
+        return 0xF9000000 | (((imm // 8) & 0xFFF) << 10) | (rn << 5) | rt
+
+    def ldr_x(rt, rn, imm):
+        return 0xF9400000 | (((imm // 8) & 0xFFF) << 10) | (rn << 5) | rt
+
+    def blr(rn):
+        return 0xD63F0000 | (rn << 5)
+
+    BL = 0x94000000
+    resolver = 0x1000
+    caller = 0x2000
+    rwords = [
+        adrp(1, resolver, 0x3000), add(1, 1, 0), BL,
+        adrp(9, resolver + 12, 0x7000), str_x(0, 9, 0),
+    ]
+    cwords = [
+        adrp(9, caller, 0x7000),
+        str_x(5, 9, 0),  # overwrite cached slot with unknown X5
+        ldr_x(22, 9, 0),
+        adrp(2, caller + 12, 0x3000), add(2, 2, 0x040),
+        blr(22),
+    ]
+    rblob = b"".join(struct.pack("<I", word) for word in rwords)
+    cblob = b"".join(struct.pack("<I", word) for word in cwords)
+
+    class FakeElf:
+        def is_arm64(self):
+            return True
+        def read_at_rva(self, rva, size):
+            return (rblob if rva == resolver else cblob)[:size]
+
+    functions = [
+        SimpleNamespace(value=resolver, size=len(rblob), name="init_api", shndx=1),
+        SimpleNamespace(value=caller, size=len(cblob), name="use_api", shndx=1),
+    ]
+    strings = [
+        {"rva": 0x3000, "text": "il2cpp_class_from_name", "domain": "", "lookupRole": None},
+        {"rva": 0x3040, "text": "PlayerStats", "domain": "", "lookupRole": "type"},
+    ]
+    calls = [{
+        "sourceRva": resolver, "sourceFunction": "init_api", "callRva": resolver + 8,
+        "targetFunction": "dlsym", "targetRva": 0x5000,
+    }]
+
+    assert native_deep._dlsym_il2cpp_pointer_flow(FakeElf(), functions, strings, calls) == []
