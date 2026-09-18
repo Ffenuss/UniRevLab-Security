@@ -128,3 +128,15 @@ def test_third_party_strong_method_does_not_bypass_owner_gate(tmp_path):
     assert health["status"] == "NOT FOUND LOCAL"
     assert health["methods"] == []
     assert health["bridges"] == []
+
+
+def test_compact_gameplay_summary_keeps_related_xref_methods_visible():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "modkit/mobile/engine.py").read_text(encoding="utf-8")
+    block = source.split("def build_gameplay_discovery", 1)[1].split("\ndef ", 1)[0]
+    assert "'relatedMethods':related" in block
+    assert "'relatedMethodCount':len(card.get('bridges') or [])" in block
+    assert "'fieldCount':len(card.get('fields') or [])" in block
+    assert "'methodCount':len(card.get('methods') or [])" in block
