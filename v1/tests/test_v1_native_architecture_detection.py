@@ -147,3 +147,135 @@ def test_simple_mode_reads_native_architecture_reports():
     assert '("native-deep.json", "NativeDeep")' in source
     assert '("deep-gameplay.json", "Gameplay")' in source
     assert 'source == "NativeDeep"' in source
+
+
+def test_il2cpp_argument_flow_confirms_assembly_class_and_field_registers():
+    import struct
+    from types import SimpleNamespace
+
+    def adrp(rd, pc, target):
+        delta = (target & ~0xFFF) - (pc & ~0xFFF)
+        imm21 = (delta >> 12) & ((1 << 21) - 1)
+        return 0x90000000 | ((imm21 & 0x3) << 29) | (((imm21 >> 2) & 0x7FFFF) << 5) | rd
+
+    def add(rd, rn, imm):
+        return 0x91000000 | ((imm & 0xFFF) << 10) | (rn << 5) | rd
+
+    def mov(rd, rm):
+        return 0xAA0003E0 | (rm << 16) | rd
+
+    BL = 0x94000000
+    start = 0x1000
+    words = []
+    call_rows = []
+
+    def emit(word):
+        words.append(word)
+        return start + (len(words) - 1) * 4
+
+    emit(adrp(1, 0x1000, 0x3000))
+    emit(add(1, 1, 0x000))
+    pc = emit(BL)
+    call_rows.append({"sourceRva": start, "sourceFunction": "resolve", "callRva": pc,
+                      "targetFunction": "il2cpp_domain_assembly_open", "targetRva": 0x8000})
+    emit(mov(19, 0))
+    emit(mov(0, 19))
+    pc = emit(BL)
+    call_rows.append({"sourceRva": start, "sourceFunction": "resolve", "callRva": pc,
+                      "targetFunction": "il2cpp_assembly_get_image", "targetRva": 0x8010})
+    emit(mov(20, 0))
+    emit(adrp(1, start + len(words) * 4, 0x3000))
+    emit(add(1, 1, 0x020))
+    emit(adrp(2, start + len(words) * 4, 0x3000))
+    emit(add(2, 2, 0x040))
+    emit(mov(0, 20))
+    pc = emit(BL)
+    call_rows.append({"sourceRva": start, "sourceFunction": "resolve", "callRva": pc,
+                      "targetFunction": "il2cpp_class_from_name", "targetRva": 0x8020})
+    emit(mov(21, 0))
+    emit(adrp(1, start + len(words) * 4, 0x3000))
+    emit(add(1, 1, 0x060))
+    emit(mov(0, 21))
+    pc = emit(BL)
+    call_rows.append({"sourceRva": start, "sourceFunction": "resolve", "callRva": pc,
+                      "targetFunction": "il2cpp_class_get_field_from_name", "targetRva": 0x8030})
+
+    blob = b"".join(struct.pack("<I", word) for word in words)
+
+    class FakeElf:
+        def is_arm64(self):
+            return True
+
+        def read_at_rva(self, rva, size):
+            assert rva == start
+            return blob[:size]
+
+    strings = [
+        {"rva": 0x3000, "text": "Assembly-CSharp.dll", "domain": "", "lookupRole": "identifier"},
+        {"rva": 0x3020, "text": "Game", "domain": "", "lookupRole": "identifier"},
+        {"rva": 0x3040, "text": "PlayerStats", "domain": "", "lookupRole": "type"},
+        {"rva": 0x3060, "text": "m_Health", "domain": "health", "lookupRole": "field"},
+    ]
+    functions = [SimpleNamespace(value=start, size=len(blob), name="resolve", shndx=1)]
+
+    flows = native_deep._il2cpp_argument_register_flow(FakeElf(), functions, strings, call_rows)
+    kinds = [row["lookupKind"] for row in flows]
+    assert kinds == ["assembly", "image", "type", "field"]
+
+    type_flow = next(row for row in flows if row["lookupKind"] == "type")
+    assert type_flow["assembly"] == "Assembly-CSharp.dll"
+    assert type_flow["namespace"] == "Game"
+    assert type_flow["identifier"] == "PlayerStats"
+    assert type_flow["identifierRegister"] == "X2"
+    assert type_flow["argumentFlowConfirmed"] is True
+    assert type_flow["exactManagedIdentityConfirmed"] is False
+
+    field_flow = next(row for row in flows if row["lookupKind"] == "field")
+    assert field_flow["assembly"] == "Assembly-CSharp.dll"
+    assert field_flow["namespace"] == "Game"
+    assert field_flow["type"] == "PlayerStats"
+    assert field_flow["identifier"] == "m_Health"
+    assert field_flow["identifierRegister"] == "X1"
+    assert field_flow["classObjectFlowConfirmed"] is True
+    assert field_flow["gameplayDomain"] == "health"
+    assert field_flow["argumentFlowConfirmed"] is True
+    assert field_flow["exactManagedIdentityConfirmed"] is True
+    assert field_flow["automationExcluded"] is True
+
+
+def test_il2cpp_argument_flow_drops_caller_saved_state_across_unknown_call():
+    import struct
+    from types import SimpleNamespace
+
+    def adrp(rd, pc, target):
+        delta = (target & ~0xFFF) - (pc & ~0xFFF)
+        imm21 = (delta >> 12) & ((1 << 21) - 1)
+        return 0x90000000 | ((imm21 & 0x3) << 29) | (((imm21 >> 2) & 0x7FFFF) << 5) | rd
+
+    def add(rd, rn, imm):
+        return 0x91000000 | ((imm & 0xFFF) << 10) | (rn << 5) | rd
+
+    BL = 0x94000000
+    start = 0x1000
+    words = [
+        adrp(1, 0x1000, 0x3000),
+        add(1, 1, 0),
+        BL,  # unknown call: X1 must be invalidated
+        BL,  # class_get_field_from_name
+    ]
+    blob = b"".join(struct.pack("<I", word) for word in words)
+
+    class FakeElf:
+        def is_arm64(self):
+            return True
+
+        def read_at_rva(self, rva, size):
+            return blob[:size]
+
+    functions = [SimpleNamespace(value=start, size=len(blob), name="resolve", shndx=1)]
+    calls = [{
+        "sourceRva": start, "sourceFunction": "resolve", "callRva": start + 12,
+        "targetFunction": "il2cpp_class_get_field_from_name", "targetRva": 0x8030,
+    }]
+    strings = [{"rva": 0x3000, "text": "m_Health", "domain": "health", "lookupRole": "field"}]
+    assert native_deep._il2cpp_argument_register_flow(FakeElf(), functions, strings, calls) == []
