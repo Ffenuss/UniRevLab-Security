@@ -11,11 +11,11 @@ from typing import Any
 
 from modkit.mobile import (
     artifact_families, cocos_deep, deep_gameplay, deobfuscator, dotnet_deep, engine_router,
-    flutter_deep, hermes_deep, lua_deep, lua_deep_cancellable, native_deep,
-    native_inventory, runtime_profiler,
+    flutter_deep, godot_deep, hermes_deep, lua_deep, lua_deep_cancellable, native_deep,
+    native_inventory, runtime_profiler, unreal_deep,
 )
 
-SCHEMA = "modkit-embedded-analysis-1.5"
+SCHEMA = "modkit-embedded-analysis-1.6"
 
 
 class Cancelled(Exception):
@@ -91,7 +91,7 @@ def run_workspace(
     router_report: dict[str, Any] = {}
     deob_report: dict[str, Any] = {}
 
-    _check(cb, "Embedded 1/12 · runtime / engine profiler…")
+    _check(cb, "Embedded 1/14 · runtime / engine profiler…")
     try:
         profile_report = runtime_profiler.scan_workspace(root, root / "runtime-profiler.json", cb)
         runs.append({
@@ -109,7 +109,7 @@ def run_workspace(
         runs.append({"engineId": "runtime.profiler", "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 2/12 · multi-runtime engine routing…")
+    _check(cb, "Embedded 2/14 · multi-runtime engine routing…")
     try:
         router_report = engine_router.route(profile_report, root / "engine-router.json")
         runs.append({
@@ -125,7 +125,7 @@ def run_workspace(
         runs.append({"engineId": "runtime.engine-router", "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 3/12 · deobfuscation / protection profile…")
+    _check(cb, "Embedded 3/14 · deobfuscation / protection profile…")
     try:
         deob_report = deobfuscator.scan_workspace(root, root / "deobfuscation.json", cb)
         runs.append({
@@ -142,7 +142,7 @@ def run_workspace(
         runs.append({"engineId": deobfuscator.ENGINE_ID, "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 4/12 · artifact families…")
+    _check(cb, "Embedded 4/14 · artifact families…")
     try:
         static_report = artifact_families.scan_workspace(root, None, cb)
         runs.append({
@@ -192,7 +192,7 @@ def run_workspace(
         "missingBackends": router_report.get("missingBackends") or [],
     }
 
-    _check(cb, "Embedded 5/12 · universal ELF / Android ABI inventory…")
+    _check(cb, "Embedded 5/14 · universal ELF / Android ABI inventory…")
     try:
         native_inventory_report = native_inventory.scan_workspace(root, root / "native-inventory.json", cb)
         runs.append({
@@ -214,7 +214,7 @@ def run_workspace(
         runs.append({"engineId": native_inventory.ENGINE_ID, "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 6/12 · .NET / Mono CLI metadata…")
+    _check(cb, "Embedded 6/14 · .NET / Mono CLI metadata…")
     try:
         dotnet_report = dotnet_deep.scan_workspace(root, root / "dotnet-deep.json", cb)
         runs.append({
@@ -237,7 +237,60 @@ def run_workspace(
         runs.append({"engineId": dotnet_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 7/12 · Lua bytecode…")
+    _check(cb, "Embedded 7/14 · Unreal cooked assets / reflection…")
+    try:
+        unreal_report = unreal_deep.scan_workspace(root, root / "unreal-deep.json", cb)
+        runs.append({
+            "engineId": unreal_deep.ENGINE_ID,
+            "status": "SUCCESS" if (
+                unreal_report.get("containerCount") or unreal_report.get("cookedAssetCount")
+                or unreal_report.get("nativeLibraryCount")
+            ) else "UNAVAILABLE",
+            "containerCount": int(unreal_report.get("containerCount") or 0),
+            "cookedAssetCount": int(unreal_report.get("cookedAssetCount") or 0),
+            "ioStorePairCount": int(unreal_report.get("ioStorePairCount") or 0),
+            "reflectionNameCount": int(unreal_report.get("reflectionNameCount") or 0),
+            "findingCount": int(unreal_report.get("findingCount") or 0),
+        })
+        _merge_findings(static_report, unreal_report, summary_key="deepUnreal",
+                        default_engine=unreal_deep.ENGINE_ID,
+                        default_kind="UNREAL_COOKED_EVIDENCE",
+                        default_category="Runtime/Unreal")
+    except unreal_deep.UnrealScanCancelled as exc:
+        raise Cancelled(str(exc)) from exc
+    except Cancelled:
+        raise
+    except Exception as exc:
+        runs.append({"engineId": unreal_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
+    _check(cb)
+
+    _check(cb, "Embedded 8/14 · Godot PCK / scene graph…")
+    try:
+        godot_report = godot_deep.scan_workspace(root, root / "godot-deep.json", cb)
+        runs.append({
+            "engineId": godot_deep.ENGINE_ID,
+            "status": "SUCCESS" if (
+                godot_report.get("packCount") or godot_report.get("sceneCount")
+                or godot_report.get("scriptCount")
+            ) else "UNAVAILABLE",
+            "packCount": int(godot_report.get("packCount") or 0),
+            "sceneCount": int(godot_report.get("sceneCount") or 0),
+            "scriptCount": int(godot_report.get("scriptCount") or 0),
+            "findingCount": int(godot_report.get("findingCount") or 0),
+        })
+        _merge_findings(static_report, godot_report, summary_key="deepGodot",
+                        default_engine=godot_deep.ENGINE_ID,
+                        default_kind="GODOT_EVIDENCE",
+                        default_category="Runtime/Godot")
+    except godot_deep.GodotScanCancelled as exc:
+        raise Cancelled(str(exc)) from exc
+    except Cancelled:
+        raise
+    except Exception as exc:
+        runs.append({"engineId": godot_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
+    _check(cb)
+
+    _check(cb, "Embedded 9/14 · Lua bytecode…")
     try:
         lua_report = lua_deep_cancellable.scan_workspace(root, root / "lua-deep.json", cb)
         runs.append({
@@ -258,7 +311,7 @@ def run_workspace(
         runs.append({"engineId": lua_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 8/12 · Hermes HBC…")
+    _check(cb, "Embedded 10/14 · Hermes HBC…")
     try:
         deep = hermes_deep.scan_workspace(root, root / "hermes-deep.json", cb)
         runs.append({
@@ -280,7 +333,7 @@ def run_workspace(
     _check(cb)
 
     native_report: dict[str, Any] = {}
-    _check(cb, "Embedded 9/12 · native ELF/ARM64…")
+    _check(cb, "Embedded 11/14 · native ELF/ARM64…")
     try:
         native_report = native_deep.scan_workspace(root, root / "native-deep.json", cb)
         runs.append({
@@ -301,7 +354,7 @@ def run_workspace(
         runs.append({"engineId": native_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 10/12 · Cocos correlation…")
+    _check(cb, "Embedded 12/14 · Cocos correlation…")
     try:
         cocos_report = cocos_deep.scan_workspace(root, static_report, native_report, root / "cocos-deep.json", cb)
         runs.append({
@@ -323,7 +376,7 @@ def run_workspace(
         runs.append({"engineId": cocos_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 11/12 · Flutter/Dart AOT…")
+    _check(cb, "Embedded 13/14 · Flutter/Dart AOT…")
     try:
         flutter_report = flutter_deep.scan_workspace(root, native_report, root / "flutter-deep.json", cb)
         runs.append({
@@ -344,7 +397,7 @@ def run_workspace(
         runs.append({"engineId": flutter_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 12/12 · gameplay semantic correlation…")
+    _check(cb, "Embedded 14/14 · gameplay semantic correlation…")
     try:
         gameplay_report = deep_gameplay.scan_workspace(root, static_report, native_report, root / "deep-gameplay.json", cb)
         runs.append({
@@ -383,6 +436,8 @@ def run_workspace(
         "deobfuscationReport": "deobfuscation.json",
         "nativeInventoryReport": "native-inventory.json",
         "dotnetReport": "dotnet-deep.json",
+        "unrealReport": "unreal-deep.json",
+        "godotReport": "godot-deep.json",
         "luaReport": "lua-deep.json",
         "nativeReport": "native-deep.json",
         "cocosReport": "cocos-deep.json",
