@@ -191,7 +191,10 @@ def test_workspace_worker_reverifies_exact_guard_handoff_before_apply_and_export
     assert "found.index!=expectedIndex" in verify
     assert "!found.name.equals(expectedName)" in verify
     assert "sha256WorkspaceArtifact(pack,WORKSPACE_PATCH_MAX_BYTES)" in verify
-    assert "check();total+=n" in verify
+
+    hasher = worker.split("private String sha256WorkspaceArtifact", 1)[1].split("private TargetResolver.Member verifyWorkspaceHandoff", 1)[0]
+    assert "check();total+=n" in hasher
+    assert "if(total>maxBytes)" in hasher
 
     build = worker.split("private void workspaceBuild(Intent request,Uri uri)", 1)[1].split("private long simpleStartedAt", 1)[0]
     first = build.index("verifyWorkspaceHandoff(request,src,pack)")
