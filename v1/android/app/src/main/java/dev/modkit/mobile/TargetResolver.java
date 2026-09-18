@@ -57,18 +57,30 @@ final class TargetResolver {
         JSONObject manifest=manifestFile.isFile()?new JSONObject(Io.readUtf8(manifestFile)):null;
         ArrayList<Member> members=new ArrayList<>();
         if(manifest!=null){
+            String schema=manifest.optString("schema","");
+            boolean selection="modkit-target-selection-1.1".equals(schema),analyzed="modkit-package-target-1.1".equals(schema);
+            if(!selection&&!analyzed)throw new IOException("Target manifest schema не поддерживается: "+schema);
+            if(selection&&!manifest.optBoolean("preparedOnly",false))throw new IOException("Target selection manifest не помечен preparedOnly");
             JSONArray splits=manifest.optJSONArray("splits");
             if(splits==null||splits.length()==0)throw new IOException("Target manifest не содержит APK/split members; fallback на base.apk запрещён");
-            Set<Integer> seenIndexes=new HashSet<>();Set<String> seenPaths=new HashSet<>();
+            if(!"COMPLETE".equals(manifest.optString("scanCompleteness","")))throw new IOException("Target APK-set не помечен COMPLETE");
+            JSONArray copyErrors=manifest.optJSONArray("copyErrors");if(copyErrors==null||copyErrors.length()!=0)throw new IOException("Target manifest содержит copyErrors или повреждённое поле copyErrors");
+            if(analyzed){JSONArray normalizationErrors=manifest.optJSONArray("normalizationErrors");if(normalizationErrors==null||normalizationErrors.length()!=0)throw new IOException("Target manifest содержит normalizationErrors или повреждённое поле normalizationErrors");}
+            int expected=requireNonNegativeInt(manifest,"expectedApkCount");int copied=requireNonNegativeInt(manifest,"copiedApkCount");if(expected<=0||copied!=expected||splits.length()!=expected)throw new IOException("Target APK-set неполон: copied="+copied+" / expected="+expected+" / manifest="+splits.length());
+            Set<Integer> seenIndexes=new HashSet<>();Set<String> seenPaths=new HashSet<>();Set<String> seenNames=new HashSet<>();String installedRoot=app.file("installed-apks").getCanonicalPath()+File.separator;
             for(int i=0;i<splits.length();i++){
                 JSONObject row=splits.optJSONObject(i);if(row==null)throw new IOException("Target manifest содержит повреждённую split row #"+i);
-                int index=row.optInt("index",i);if(!seenIndexes.add(index))throw new IOException("Target manifest содержит duplicate split index: "+index);
+                int index=requireNonNegativeInt(row,"index");if(!seenIndexes.add(index))throw new IOException("Target manifest содержит duplicate split index: "+index);
+                String name=row.optString("name","");validateMemberName(name);if(!seenNames.add(name))throw new IOException("Target manifest содержит duplicate split name: "+name);
                 String path=row.optString("path","");if(path.isEmpty())throw new IOException("Target split #"+index+" не содержит path");
-                File file=new File(path);String canonical=file.getCanonicalPath();if(!seenPaths.add(canonical))throw new IOException("Target manifest повторно ссылается на один APK: "+canonical);
-                if(!file.isFile())throw new IOException("Target split отсутствует: "+row.optString("name",file.getName()));
-                members.add(new Member(index,row.optString("name",file.getName()),file,row.optString("sha256",""),row.optInt("nativeCount",0),row.optInt("dexCount",0)));
+                File file=new File(path);String canonical=file.getCanonicalPath();if(!canonical.startsWith(installedRoot))throw new IOException("Target split находится вне canonical installed-apks: "+name);if(!seenPaths.add(canonical))throw new IOException("Target manifest повторно ссылается на один APK: "+canonical);
+                if(!file.isFile())throw new IOException("Target split отсутствует: "+name);
+                String sha=requireSha256(row,"sha256");
+                members.add(new Member(index,name,file,sha,optionalNonNegativeInt(row,"nativeCount"),optionalNonNegativeInt(row,"dexCount")));
             }
-            int expected=manifest.optInt("expectedApkCount",members.size());if(expected>0&&members.size()!=expected)throw new IOException("Target APK-set неполон: copied="+members.size()+" / expected="+expected);
+            String expectedMode=splits.length()>1?"apk-set":"single-apk";if(!expectedMode.equals(manifest.optString("buildMode","")))throw new IOException("Target buildMode не соответствует числу APK members");
+            Object signing=manifest.opt("requiresWholeSetSigning");if(!(signing instanceof Boolean)||((Boolean)signing)!=(splits.length()>1))throw new IOException("Target requiresWholeSetSigning не соответствует APK-set");
+            long versionCode=requireNonNegativeLong(manifest,"versionCode");String packageName=manifest.optString("packageName","");String actualFingerprint=manifestFingerprint(packageName,versionCode,splits);String fingerprint=requireSha256(manifest,"fingerprintSha256");if(!fingerprint.equalsIgnoreCase(actualFingerprint))throw new IOException("Target fingerprint не соответствует member identity");String targetId=manifest.optString("targetId","");if(!actualFingerprint.substring(0,24).equals(targetId))throw new IOException("TargetId не соответствует fingerprint");
         }else{
             File single=app.file("game.apk");if(!single.isFile())throw new IOException("Target APK не выбран");members.add(new Member(0,single.getName(),single,"",0,0));
         }
@@ -124,6 +136,13 @@ final class TargetResolver {
     static JSONObject describe(Target target){
         JSONObject out=new JSONObject();JSONArray members=new JSONArray();try{out.put("schema","modkit-target-resolver-1.1").put("packageName",target.packageName).put("targetId",target.targetId).put("fingerprintSha256",target.fingerprint).put("apkSet",target.apkSet).put("memberCount",target.members.size());for(Member member:target.members)members.put(new JSONObject().put("index",member.index).put("name",member.name).put("path",member.file.getAbsolutePath()).put("sha256",member.sha256).put("nativeCount",member.nativeCount).put("dexCount",member.dexCount));out.put("members",members).put("patchOwner",target.patchOwnerApk().getAbsolutePath());}catch(Exception ignored){}return out;
     }
+
+    private static int requireNonNegativeInt(JSONObject object,String key)throws IOException{Object raw=object.opt(key);if(!(raw instanceof Number))throw new IOException("Target manifest содержит некорректное целое поле: "+key);Number number=(Number)raw;double d=number.doubleValue();long value=number.longValue();if(!Double.isFinite(d)||d!=(double)value||value<0||value>Integer.MAX_VALUE)throw new IOException("Target manifest содержит некорректное целое поле: "+key);return (int)value;}
+    private static long requireNonNegativeLong(JSONObject object,String key)throws IOException{Object raw=object.opt(key);if(!(raw instanceof Number))throw new IOException("Target manifest содержит некорректное целое поле: "+key);Number number=(Number)raw;double d=number.doubleValue();long value=number.longValue();if(!Double.isFinite(d)||d!=(double)value||value<0)throw new IOException("Target manifest содержит некорректное целое поле: "+key);return value;}
+    private static int optionalNonNegativeInt(JSONObject object,String key)throws IOException{if(!object.has(key)||object.isNull(key))return 0;return requireNonNegativeInt(object,key);}
+    private static String requireSha256(JSONObject object,String key)throws IOException{String value=object.optString(key,"");if(!value.matches("(?i)[0-9a-f]{64}"))throw new IOException("Target manifest содержит некорректный SHA-256: "+key);return value;}
+    private static void validateMemberName(String name)throws IOException{if(name==null||name.isEmpty()||name.contains("/")||name.contains("\\")||".".equals(name)||"..".equals(name))throw new IOException("Target split name небезопасен или пуст");}
+    private static String manifestFingerprint(String packageName,long versionCode,JSONArray splits)throws Exception{MessageDigest d=MessageDigest.getInstance("SHA-256");d.update((packageName==null?"":packageName).getBytes(java.nio.charset.StandardCharsets.UTF_8));d.update((byte)0);d.update(Long.toString(versionCode).getBytes(java.nio.charset.StandardCharsets.US_ASCII));for(int i=0;i<splits.length();i++){JSONObject row=splits.getJSONObject(i);d.update((byte)0);d.update(row.getString("name").getBytes(java.nio.charset.StandardCharsets.UTF_8));d.update((byte)0);d.update(row.getString("sha256").getBytes(java.nio.charset.StandardCharsets.US_ASCII));}StringBuilder out=new StringBuilder(64);for(byte b:d.digest())out.append(String.format(Locale.ROOT,"%02x",b));return out.toString();}
 
     private static String sha256(File file,AtomicBoolean cancelled)throws Exception{MessageDigest digest=MessageDigest.getInstance("SHA-256");byte[] buffer=new byte[1024*1024];try(FileInputStream in=new FileInputStream(file)){int n;while((n=in.read(buffer))!=-1){check(cancelled);digest.update(buffer,0,n);}}StringBuilder out=new StringBuilder();for(byte b:digest.digest())out.append(String.format(Locale.ROOT,"%02x",b));return out.toString();}
     private static void check(AtomicBoolean cancelled)throws java.io.InterruptedIOException{if((cancelled!=null&&cancelled.get())||Thread.currentThread().isInterrupted())throw new java.io.InterruptedIOException("cancelled");}
