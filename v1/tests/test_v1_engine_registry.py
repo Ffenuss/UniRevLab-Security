@@ -20,7 +20,9 @@ def test_required_builtin_engines_are_registered():
         "dotnet.static",
         "dotnet.metadata-embedded",
         "unreal.static",
+        "unreal.deep-embedded",
         "godot.static",
+        "godot.deep-embedded",
         "defold.static",
         "qt.qml-static",
         "webassembly.static",
@@ -97,3 +99,11 @@ def test_universal_artifact_inventory_engines_are_bundled():
         "webassembly.static",
     }
     assert expected.issubset({engine.engine_id for engine in registry.all() if engine.bundled})
+
+
+def test_unreal_and_godot_deep_engines_are_bundled():
+    registry = build_default_registry()
+    unreal = registry.get("unreal.deep-embedded")
+    godot = registry.get("godot.deep-embedded")
+    assert unreal.bundled and "iostore-pairs" in unreal.capabilities
+    assert godot.bundled and "text-scene-graph" in godot.capabilities
