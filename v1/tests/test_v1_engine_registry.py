@@ -16,6 +16,13 @@ def test_required_builtin_engines_are_registered():
         "runtime.profiler",
         "runtime.engine-router",
         "protection.deobfuscator",
+        "elf.universal-inventory",
+        "dotnet.static",
+        "unreal.static",
+        "godot.static",
+        "defold.static",
+        "qt.qml-static",
+        "webassembly.static",
         "apktool.android",
         "dex.structural",
         "jadx.android",
@@ -75,3 +82,17 @@ def test_universal_runtime_and_deobfuscation_engines_are_bundled():
     assert router.bundled and "coverage-gaps" in router.capabilities
     assert deob.bundled and "stable-aliases" in deob.capabilities
     assert "packer-markers" in deob.capabilities
+
+
+def test_universal_artifact_inventory_engines_are_bundled():
+    registry = build_default_registry()
+    expected = {
+        "elf.universal-inventory",
+        "dotnet.static",
+        "unreal.static",
+        "godot.static",
+        "defold.static",
+        "qt.qml-static",
+        "webassembly.static",
+    }
+    assert expected.issubset({engine.engine_id for engine in registry.all() if engine.bundled})
