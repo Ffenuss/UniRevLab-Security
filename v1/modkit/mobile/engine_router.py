@@ -26,14 +26,14 @@ _ROUTES: dict[str, dict[str, Any]] = {
         "coverage": "FULL_BUNDLED",
     },
     "unity_mono": {
-        "engines": ["apktool.android", "dex.structural", "jadx.android", "security.passive"],
+        "engines": ["dotnet.static", "apktool.android", "dex.structural", "jadx.android", "security.passive"],
         "coverage": "PARTIAL_BUNDLED",
         "missing": ["managed CIL/assembly reconstruction for Unity Mono"],
     },
     "unreal": {
-        "engines": ["elf.static", "native.deep-embedded", "security.passive"],
+        "engines": ["unreal.static", "elf.static", "native.deep-embedded", "security.passive"],
         "coverage": "PARTIAL_BUNDLED",
-        "missing": ["Unreal UObject/UClass/FName reflection", "PAK/IoStore cooked-asset backend"],
+        "missing": ["Unreal UObject/UClass/FName reflection", "PAK/IoStore semantic/cooked-object backend"],
     },
     "flutter": {
         "engines": ["flutter.static", "flutter.aot-embedded", "native.deep-embedded", "security.passive"],
@@ -49,7 +49,7 @@ _ROUTES: dict[str, dict[str, Any]] = {
         "missing": ["JavaScriptCore bytecode/version-specific structural decoder"],
     },
     "dotnet_android": {
-        "engines": ["apktool.android", "dex.structural", "elf.static", "native.deep-embedded", "security.passive"],
+        "engines": ["dotnet.static", "apktool.android", "dex.structural", "elf.static", "native.deep-embedded", "security.passive"],
         "coverage": "PARTIAL_BUNDLED",
         "missing": [".NET metadata/CIL/Mono/CoreCLR/NativeAOT reconstructor"],
     },
@@ -66,19 +66,19 @@ _ROUTES: dict[str, dict[str, Any]] = {
         "coverage": "FULL_BUNDLED",
     },
     "godot": {
-        "engines": ["elf.static", "native.deep-embedded", "security.passive"],
+        "engines": ["godot.static", "elf.static", "native.deep-embedded", "security.passive"],
         "coverage": "PARTIAL_BUNDLED",
-        "missing": ["Godot PCK/scene/GDScript structural backend"],
+        "missing": ["Godot PCK binary/resource semantic backend"],
     },
     "defold": {
-        "engines": ["elf.static", "native.deep-embedded", "lua.static", "lua.bytecode-embedded"],
+        "engines": ["defold.static", "elf.static", "native.deep-embedded", "lua.static", "lua.bytecode-embedded"],
         "coverage": "PARTIAL_BUNDLED",
-        "missing": ["Defold archive/resource graph backend"],
+        "missing": ["Defold archive/resource semantic graph backend"],
     },
     "qt_qml": {
-        "engines": ["elf.static", "native.deep-embedded", "apktool.android", "security.passive"],
+        "engines": ["qt.qml-static", "elf.static", "native.deep-embedded", "apktool.android", "security.passive"],
         "coverage": "PARTIAL_BUNDLED",
-        "missing": ["QML/QML-cache structural backend"],
+        "missing": ["QML cache/version-specific bytecode semantic backend"],
     },
     "libgdx": {
         "engines": ["apktool.android", "dex.structural", "jadx.android", "elf.static", "native.deep-embedded"],
