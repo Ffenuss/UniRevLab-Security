@@ -12,7 +12,7 @@ from typing import Any
 from modkit.mobile import (
     artifact_families, cocos_deep, deep_gameplay, deobfuscator, engine_router,
     flutter_deep, hermes_deep, lua_deep, lua_deep_cancellable, native_deep,
-    runtime_profiler,
+    native_inventory, runtime_profiler,
 )
 
 SCHEMA = "modkit-embedded-analysis-1.5"
@@ -91,7 +91,7 @@ def run_workspace(
     router_report: dict[str, Any] = {}
     deob_report: dict[str, Any] = {}
 
-    _check(cb, "Embedded 1/10 · runtime / engine profiler…")
+    _check(cb, "Embedded 1/11 · runtime / engine profiler…")
     try:
         profile_report = runtime_profiler.scan_workspace(root, root / "runtime-profiler.json", cb)
         runs.append({
@@ -109,7 +109,7 @@ def run_workspace(
         runs.append({"engineId": "runtime.profiler", "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 2/10 · multi-runtime engine routing…")
+    _check(cb, "Embedded 2/11 · multi-runtime engine routing…")
     try:
         router_report = engine_router.route(profile_report, root / "engine-router.json")
         runs.append({
@@ -125,7 +125,7 @@ def run_workspace(
         runs.append({"engineId": "runtime.engine-router", "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 3/10 · deobfuscation / protection profile…")
+    _check(cb, "Embedded 3/11 · deobfuscation / protection profile…")
     try:
         deob_report = deobfuscator.scan_workspace(root, root / "deobfuscation.json", cb)
         runs.append({
@@ -142,7 +142,7 @@ def run_workspace(
         runs.append({"engineId": deobfuscator.ENGINE_ID, "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 4/10 · artifact families…")
+    _check(cb, "Embedded 4/11 · artifact families…")
     try:
         static_report = artifact_families.scan_workspace(root, None, cb)
         runs.append({
@@ -192,7 +192,29 @@ def run_workspace(
         "missingBackends": router_report.get("missingBackends") or [],
     }
 
-    _check(cb, "Embedded 5/10 · Lua bytecode…")
+    _check(cb, "Embedded 5/11 · universal ELF / Android ABI inventory…")
+    try:
+        native_inventory_report = native_inventory.scan_workspace(root, root / "native-inventory.json", cb)
+        runs.append({
+            "engineId": native_inventory.ENGINE_ID,
+            "status": "SUCCESS",
+            "findingCount": int(native_inventory_report.get("findingCount") or 0),
+            "archCounts": native_inventory_report.get("archCounts") or {},
+            "abiCounts": native_inventory_report.get("abiCounts") or {},
+        })
+        _merge_findings(static_report, native_inventory_report, summary_key="nativeInventory",
+                        default_engine=native_inventory.ENGINE_ID,
+                        default_kind="ELF_UNIVERSAL_INVENTORY",
+                        default_category="Native/Inventory")
+    except native_inventory.NativeInventoryCancelled as exc:
+        raise Cancelled(str(exc)) from exc
+    except Cancelled:
+        raise
+    except Exception as exc:
+        runs.append({"engineId": native_inventory.ENGINE_ID, "status": "FAILED", "error": str(exc)})
+    _check(cb)
+
+    _check(cb, "Embedded 6/11 · Lua bytecode…")
     try:
         lua_report = lua_deep_cancellable.scan_workspace(root, root / "lua-deep.json", cb)
         runs.append({
@@ -213,7 +235,7 @@ def run_workspace(
         runs.append({"engineId": lua_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 6/10 · Hermes HBC…")
+    _check(cb, "Embedded 7/11 · Hermes HBC…")
     try:
         deep = hermes_deep.scan_workspace(root, root / "hermes-deep.json", cb)
         runs.append({
@@ -235,7 +257,7 @@ def run_workspace(
     _check(cb)
 
     native_report: dict[str, Any] = {}
-    _check(cb, "Embedded 7/10 · native ELF/ARM64…")
+    _check(cb, "Embedded 8/11 · native ELF/ARM64…")
     try:
         native_report = native_deep.scan_workspace(root, root / "native-deep.json", cb)
         runs.append({
@@ -256,7 +278,7 @@ def run_workspace(
         runs.append({"engineId": native_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 8/10 · Cocos correlation…")
+    _check(cb, "Embedded 9/11 · Cocos correlation…")
     try:
         cocos_report = cocos_deep.scan_workspace(root, static_report, native_report, root / "cocos-deep.json", cb)
         runs.append({
@@ -278,7 +300,7 @@ def run_workspace(
         runs.append({"engineId": cocos_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 9/10 · Flutter/Dart AOT…")
+    _check(cb, "Embedded 10/11 · Flutter/Dart AOT…")
     try:
         flutter_report = flutter_deep.scan_workspace(root, native_report, root / "flutter-deep.json", cb)
         runs.append({
@@ -299,7 +321,7 @@ def run_workspace(
         runs.append({"engineId": flutter_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 10/10 · gameplay semantic correlation…")
+    _check(cb, "Embedded 11/11 · gameplay semantic correlation…")
     try:
         gameplay_report = deep_gameplay.scan_workspace(root, static_report, native_report, root / "deep-gameplay.json", cb)
         runs.append({
@@ -336,6 +358,7 @@ def run_workspace(
         "runtimeProfilerReport": "runtime-profiler.json",
         "engineRouterReport": "engine-router.json",
         "deobfuscationReport": "deobfuscation.json",
+        "nativeInventoryReport": "native-inventory.json",
         "luaReport": "lua-deep.json",
         "nativeReport": "native-deep.json",
         "cocosReport": "cocos-deep.json",
