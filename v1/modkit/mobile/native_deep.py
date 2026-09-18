@@ -1278,7 +1278,8 @@ def _dlsym_il2cpp_pointer_flow(elf: ElfFile, functions: list[Any],
     for slot_rva, value in global_slots.items():
         base_rva = value.get("storageBaseRva")
         member_offset = value.get("storageMemberOffset")
-        if isinstance(base_rva, int) and isinstance(member_offset, int):
+        if (value.get("kind") == "il2cpp-api-pointer"
+                and isinstance(base_rva, int) and isinstance(member_offset, int)):
             grouped_tables.setdefault(base_rva, []).append((slot_rva, value))
     for base_rva, entries in grouped_tables.items():
         api_names = {str(value.get("apiName") or "") for _slot, value in entries if value.get("apiName")}
@@ -1341,34 +1342,77 @@ def _dlsym_il2cpp_pointer_flow(elf: ElfFile, functions: list[Any],
     return out
 
 def _dlsym_pointer_table_summary(flows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    grouped: dict[int, dict[int, dict[str, Any]]] = {}
+    grouped: dict[tuple[str, Any], dict[int, dict[str, Any]]] = {}
+    meta: dict[tuple[str, Any], dict[str, Any]] = {}
     for row in flows:
         base = row.get("functionPointerTableBaseRva")
+        object_id = row.get("functionPointerTableObjectId")
         offset = row.get("functionPointerTableOffset")
-        if not isinstance(base, int) or not isinstance(offset, int):
+        if not isinstance(offset, int):
             continue
-        grouped.setdefault(base, {})[offset] = {
+        if isinstance(base, int):
+            key = ("static", base)
+            table_meta = {
+                "storageKind": "static-indirect" if row.get("functionPointerRootSlotRva") is not None else "static",
+                "baseRva": base,
+                "objectId": None,
+            }
+        elif object_id:
+            key = ("object", str(object_id))
+            table_meta = {
+                "storageKind": "allocator-object",
+                "baseRva": None,
+                "objectId": str(object_id),
+            }
+        else:
+            continue
+        grouped.setdefault(key, {})[offset] = {
             "offset": offset,
             "slotRva": row.get("functionPointerSlotRva"),
+            "storageObjectId": row.get("functionPointerStorageObjectId"),
             "apiName": row.get("apiName") or row.get("dlsymResolvedName"),
             "sourceRva": row.get("sourceRva"),
             "sourceFunction": row.get("sourceFunction"),
             "callRva": row.get("callRva"),
             "gameplayDomain": row.get("gameplayDomain") or "",
+            "rootSlotRva": row.get("functionPointerRootSlotRva"),
+            "indirectionDepth": row.get("functionPointerIndirectionDepth") or 1,
         }
+        current = meta.setdefault(key, table_meta)
+        roots = current.setdefault("_roots", set())
+        if isinstance(row.get("functionPointerRootSlotRva"), int):
+            roots.add(int(row["functionPointerRootSlotRva"]))
+        allocators = current.setdefault("_allocators", set())
+        if row.get("functionPointerAllocator"):
+            allocators.add(str(row["functionPointerAllocator"]))
+
     out = []
-    for base in sorted(grouped):
-        entries = [grouped[base][off] for off in sorted(grouped[base])]
+    for key in sorted(grouped, key=lambda x: (x[0], str(x[1]))):
+        entries = [grouped[key][off] for off in sorted(grouped[key])]
         api_names = {str(x.get("apiName") or "") for x in entries if x.get("apiName")}
         if len(entries) < 2 or len(api_names) < 2:
             continue
+        table_meta = meta[key]
+        roots = sorted(table_meta.pop("_roots", set()))
+        allocators = sorted(table_meta.pop("_allocators", set()))
+        storage_kind = str(table_meta.get("storageKind") or "static")
         out.append({
-            "baseRva": base,
+            **table_meta,
+            "rootSlotRva": roots[0] if len(roots) == 1 else None,
+            "rootSlotRvas": roots,
+            "allocator": allocators[0] if len(allocators) == 1 else None,
+            "allocators": allocators,
             "entryCount": len(entries),
             "apiNames": sorted(api_names),
             "entries": entries[:64],
             "confidence": "HIGH",
-            "associationStatus": "same-static-base-multi-dlsym-table-confirmed",
+            "associationStatus": (
+                "allocator-object-multi-dlsym-table-confirmed"
+                if storage_kind == "allocator-object"
+                else "two-level-static-multi-dlsym-table-confirmed"
+                if storage_kind == "static-indirect"
+                else "same-static-base-multi-dlsym-table-confirmed"
+            ),
             "automationExcluded": True,
         })
         if len(out) >= 64:
@@ -1622,7 +1666,7 @@ def _scan_library(apk: Path, entry: str, extracted: Path, cb: Any | None = None)
         for table_no, table in enumerate(dlsym_pointer_tables):
             findings.append({
                 "id": "il2cpp-pointer-table:" + hashlib.sha256(
-                    f"{apk.name}!{entry}!{table.get('baseRva')}!{table_no}".encode()
+                    f"{apk.name}!{entry}!{table.get('baseRva') or table.get('objectId')}!{table_no}".encode()
                 ).hexdigest()[:20],
                 "kind": "IL2CPP_FUNCTION_POINTER_TABLE",
                 "title": f"IL2CPP function-pointer table ({table.get('entryCount')} entries)",
@@ -1631,6 +1675,9 @@ def _scan_library(apk: Path, entry: str, extracted: Path, cb: Any | None = None)
                 "family": "native", "engineId": ENGINE_ID,
                 "apk": apk.name, "entry": entry, "library": entry, "abi": effective_abi,
                 "tableBaseRva": table.get("baseRva"),
+                "tableObjectId": table.get("objectId"),
+                "tableRootSlotRva": table.get("rootSlotRva"),
+                "tableStorageKind": table.get("storageKind"),
                 "functionPointerTable": table,
                 "ownershipKind": "ENGINE", "trustBoundary": "local",
                 "patchReady": False, "automationExcluded": True,
