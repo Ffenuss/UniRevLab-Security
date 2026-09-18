@@ -276,6 +276,23 @@ def _sign_extend(value: int, bits: int) -> int:
     return (value ^ sign) - sign
 
 
+def _decode_adr(word: int, pc: int) -> tuple[int, int] | None:
+    if word & 0x9F000000 != 0x10000000:
+        return None
+    rd = word & 0x1F
+    immlo = (word >> 29) & 0x3
+    immhi = (word >> 5) & 0x7FFFF
+    imm21 = _sign_extend((immhi << 2) | immlo, 21)
+    return rd, pc + imm21
+
+
+def _decode_mov_x_register(word: int) -> tuple[int, int] | None:
+    # MOV Xd, Xm is the ORR Xd, XZR, Xm alias with no shift.
+    if word & 0xFFE0FFE0 != 0xAA0003E0:
+        return None
+    return word & 0x1F, (word >> 16) & 0x1F
+
+
 def _decode_adrp(word: int, pc: int) -> tuple[int, int] | None:
     if word & 0x9F000000 != 0x90000000:
         return None
@@ -439,6 +456,240 @@ def _scan_control_flow(elf: ElfFile, functions: list[Any], *, limit: int = MAX_C
         finally:
             raw.release()
     _check(cb)
+    return out
+
+
+def _il2cpp_argument_register_flow(elf: ElfFile, functions: list[Any],
+                                   strings: list[dict[str, Any]],
+                                   calls: list[dict[str, Any]],
+                                   cb: Any | None = None,
+                                   *, max_function_bytes: int = 64 * 1024,
+                                   max_total_bytes: int = 8 * 1024 * 1024) -> list[dict[str, Any]]:
+    """Conservative ARM64 register-flow proof for direct IL2CPP runtime calls.
+
+    The model follows only ADR/ADRP+ADD string materialization, MOV Xd,Xs and
+    ABI call clobbers.  It can preserve resolved objects through X19-X28 across
+    calls, which is the common compiler pattern. Unsupported writes invalidate
+    tracked registers rather than guessing.
+    """
+    if not elf.is_arm64():
+        return []
+    interesting = [row for row in calls
+                   if str(row.get("targetFunction") or "") in _IL2CPP_LOOKUP_APIS
+                   and isinstance(row.get("sourceRva"), int)
+                   and isinstance(row.get("callRva"), int)]
+    if not interesting:
+        return []
+
+    strings_by_rva = {
+        int(row["rva"]): row for row in strings
+        if isinstance(row.get("rva"), int)
+    }
+    calls_by_source: dict[int, dict[int, dict[str, Any]]] = {}
+    for row in interesting:
+        calls_by_source.setdefault(int(row["sourceRva"]), {})[int(row["callRva"])] = row
+
+    funcs = [fn for fn in functions if isinstance(getattr(fn, "value", None), int) and fn.value > 0]
+    funcs.sort(key=lambda fn: fn.value)
+    by_start = {int(fn.value): (idx, fn) for idx, fn in enumerate(funcs)}
+    total = 0
+    out: list[dict[str, Any]] = []
+
+    def string_value(target: int) -> dict[str, Any] | None:
+        row = strings_by_rva.get(int(target))
+        if not row:
+            return None
+        return {
+            "kind": "string", "targetRva": int(target),
+            "value": str(row.get("text") or ""),
+            "domain": str(row.get("domain") or ""),
+            "lookupRole": row.get("lookupRole"),
+        }
+
+    def clear_caller_saved(state: dict[int, dict[str, Any]]) -> None:
+        for reg in range(0, 19):
+            state.pop(reg, None)
+
+    def token(kind: str, **kwargs: Any) -> dict[str, Any]:
+        return {"kind": kind, **kwargs}
+
+    for source_rva in sorted(calls_by_source):
+        _check(cb)
+        pair = by_start.get(source_rva)
+        if not pair:
+            continue
+        idx, fn = pair
+        next_start = int(funcs[idx + 1].value) if idx + 1 < len(funcs) else None
+        if int(getattr(fn, "size", 0) or 0) > 0:
+            end = source_rva + int(fn.size)
+            if next_start is not None:
+                end = min(end, next_start)
+        else:
+            end = next_start or source_rva
+        size = end - source_rva
+        if size < 4 or size > int(max_function_bytes) or total + size > int(max_total_bytes):
+            continue
+        try:
+            raw = elf.read_at_rva(source_rva, size)
+        except ValueError:
+            continue
+        total += size
+        state: dict[int, dict[str, Any]] = {}
+        page_state: dict[int, int] = {}
+        function_calls = calls_by_source[source_rva]
+
+        for rel in range(0, len(raw) & ~3, 4):
+            if (rel & 0x3FFF) == 0:
+                _check(cb)
+            pc = source_rva + rel
+            word = struct.unpack_from("<I", raw, rel)[0]
+
+            # Any BL is an ABI clobber for X0-X18. For recognized IL2CPP calls,
+            # capture arguments immediately before applying that clobber.
+            if word & 0xFC000000 == 0x94000000:
+                edge = function_calls.get(pc)
+                if edge:
+                    api = str(edge.get("targetFunction") or "")
+                    x0 = state.get(0); x1 = state.get(1); x2 = state.get(2)
+                    evidence: dict[str, Any] | None = None
+                    return_value: dict[str, Any] | None = None
+
+                    if api == "il2cpp_domain_get":
+                        return_value = token("domain-object", sourceCallRva=pc)
+                    elif api == "il2cpp_domain_assembly_open" and x1 and x1.get("kind") == "string":
+                        evidence = {
+                            "lookupKind": "assembly", "identifier": x1.get("value"),
+                            "identifierRegister": "X1", "argumentRva": x1.get("targetRva"),
+                        }
+                        return_value = token("assembly-object", assembly=x1.get("value"), sourceCallRva=pc)
+                    elif api == "il2cpp_assembly_get_image" and x0 and x0.get("kind") == "assembly-object":
+                        evidence = {
+                            "lookupKind": "image", "assembly": x0.get("assembly"),
+                            "objectRegister": "X0",
+                        }
+                        return_value = token("image-object", assembly=x0.get("assembly"), sourceCallRva=pc)
+                    elif api == "il2cpp_class_from_name" and x2 and x2.get("kind") == "string":
+                        namespace = x1.get("value") if x1 and x1.get("kind") == "string" else None
+                        assembly = x0.get("assembly") if x0 and x0.get("kind") == "image-object" else None
+                        evidence = {
+                            "lookupKind": "type", "identifier": x2.get("value"),
+                            "identifierRegister": "X2", "argumentRva": x2.get("targetRva"),
+                            "namespace": namespace, "namespaceRegister": "X1" if namespace is not None else None,
+                            "assembly": assembly, "objectRegister": "X0" if assembly is not None else None,
+                        }
+                        return_value = token(
+                            "class-object", assembly=assembly, namespace=namespace,
+                            type=x2.get("value"), sourceCallRva=pc,
+                            exactTypeIdentity=bool(assembly and x2.get("value")),
+                        )
+                    elif api in {"il2cpp_class_get_field_from_name", "il2cpp_class_get_method_from_name"}:
+                        member_kind = "field" if api.endswith("field_from_name") else "method"
+                        if x1 and x1.get("kind") == "string":
+                            clazz = x0 if x0 and x0.get("kind") == "class-object" else None
+                            evidence = {
+                                "lookupKind": member_kind, "identifier": x1.get("value"),
+                                "identifierRegister": "X1", "argumentRva": x1.get("targetRva"),
+                                "assembly": clazz.get("assembly") if clazz else None,
+                                "namespace": clazz.get("namespace") if clazz else None,
+                                "type": clazz.get("type") if clazz else None,
+                                "classObjectFlowConfirmed": bool(clazz),
+                            }
+                            return_value = token(
+                                member_kind + "-object",
+                                assembly=clazz.get("assembly") if clazz else None,
+                                namespace=clazz.get("namespace") if clazz else None,
+                                type=clazz.get("type") if clazz else None,
+                                name=x1.get("value"), sourceCallRva=pc,
+                            )
+
+                    if evidence:
+                        exact = bool(
+                            evidence.get("assembly") and evidence.get("type")
+                            and evidence.get("lookupKind") in {"field", "method"}
+                            and evidence.get("classObjectFlowConfirmed")
+                        )
+                        domain, _aliases = _domain(str(evidence.get("identifier") or "")), []
+                        out.append({
+                            "sourceRva": source_rva, "sourceFunction": edge.get("sourceFunction"),
+                            "callRva": pc, "apiName": api,
+                            **evidence,
+                            "gameplayDomain": "" if domain == "security" else domain,
+                            "argumentFlowConfirmed": True,
+                            "associationStatus": "arm64-argument-register-confirmed",
+                            "exactManagedIdentityConfirmed": exact,
+                            "automationExcluded": True,
+                            "flowModel": "adr-adrp-add-mov+abi-clobber",
+                        })
+                        if len(out) >= 320:
+                            return out
+
+                    clear_caller_saved(state)
+                    page_state = {r: v for r, v in page_state.items() if r >= 19}
+                    if return_value:
+                        state[0] = return_value
+                    continue
+
+                clear_caller_saved(state)
+                page_state = {r: v for r, v in page_state.items() if r >= 19}
+                continue
+
+            adrp = _decode_adrp(word, pc)
+            if adrp:
+                rd, page = adrp
+                state.pop(rd, None); page_state[rd] = page
+                continue
+
+            adr = _decode_adr(word, pc)
+            if adr:
+                rd, target = adr
+                page_state.pop(rd, None)
+                value = string_value(target)
+                if value:
+                    state[rd] = value
+                else:
+                    state.pop(rd, None)
+                continue
+
+            add = _decode_add_imm(word)
+            if add:
+                rd, rn, imm = add
+                base_page = page_state.get(rn)
+                source_value = state.get(rn)
+                page_state.pop(rd, None)
+                if base_page is not None:
+                    value = string_value(base_page + imm)
+                    if value:
+                        state[rd] = value
+                    else:
+                        state.pop(rd, None)
+                elif source_value and imm == 0:
+                    state[rd] = dict(source_value)
+                else:
+                    state.pop(rd, None)
+                continue
+
+            mov = _decode_mov_x_register(word)
+            if mov:
+                rd, rm = mov
+                page_state.pop(rd, None)
+                if rm in state:
+                    state[rd] = dict(state[rm])
+                else:
+                    state.pop(rd, None)
+                continue
+
+            load = _decode_ldr_x_unsigned(word)
+            if load:
+                rt, _rn, _off = load
+                state.pop(rt, None); page_state.pop(rt, None)
+                continue
+
+            # Common 64-bit move-wide immediates overwrite Rd.
+            if word & 0x1F800000 in {0x12800000, 0x12800000 | 0x00800000,
+                                     0x12800000 | 0x01000000}:
+                rd = word & 0x1F
+                state.pop(rd, None); page_state.pop(rd, None)
+
     return out
 
 
@@ -635,6 +886,7 @@ def _scan_library(apk: Path, entry: str, extracted: Path, cb: Any | None = None)
         needed = info.get("needed") or []
         architecture = _architecture_profile(symbol_names, strings, needed)
         lookup_chains = _runtime_lookup_chains(strings, xrefs, calls)
+        argument_flows = _il2cpp_argument_register_flow(elf, functions, strings, calls, cb)
 
         callers: dict[int, list[dict[str, Any]]] = {}
         callees: dict[int, list[dict[str, Any]]] = {}
@@ -677,6 +929,30 @@ def _scan_library(apk: Path, entry: str, extracted: Path, cb: Any | None = None)
                 "patchReady": False, "automationExcluded": True,
                 "runtimeConfirmed": False, "evidenceRole": "native-architecture-profile",
             })
+
+        for flow_no, flow in enumerate(argument_flows):
+            title_bits = [str(x) for x in (flow.get("assembly"), flow.get("namespace"),
+                                           flow.get("type"), flow.get("identifier")) if x]
+            findings.append({
+                "id": "il2cpp-arg-flow:" + hashlib.sha256(
+                    f"{apk.name}!{entry}!{flow.get('callRva')}!{flow_no}".encode()
+                ).hexdigest()[:20],
+                "kind": "IL2CPP_RUNTIME_ARGUMENT_FLOW",
+                "title": "IL2CPP argument flow" + (": " + " :: ".join(title_bits) if title_bits else ""),
+                "category": "Gameplay/IL2CPP Runtime Lookup" if flow.get("gameplayDomain") else "RE/IL2CPP Runtime Lookup",
+                "status": "CORRELATED_EVIDENCE",
+                "family": "native", "engineId": ENGINE_ID,
+                "apk": apk.name, "entry": entry, "library": entry, "abi": effective_abi,
+                "sourceRva": flow.get("sourceRva"), "sourceFunction": flow.get("sourceFunction"),
+                "callRva": flow.get("callRva"), "gameplayDomain": flow.get("gameplayDomain") or "",
+                "runtimeArgumentFlow": flow,
+                "ownershipKind": "APP_OR_GAME", "trustBoundary": "local",
+                "patchReady": False, "automationExcluded": True,
+                "runtimeConfirmed": False, "runtimeTruth": "not-observed-by-static-analysis",
+                "evidenceRole": "il2cpp-runtime-argument-register-correlation",
+            })
+            if len(findings) >= MAX_FINDINGS:
+                break
 
         for chain_no, chain in enumerate(lookup_chains):
             domains = chain.get("gameplayDomains") or []
@@ -784,6 +1060,8 @@ def _scan_library(apk: Path, entry: str, extracted: Path, cb: Any | None = None)
             "architectureProfile": architecture,
             "runtimeLookupChainCount": len(lookup_chains),
             "runtimeLookupChains": lookup_chains,
+            "runtimeArgumentFlowCount": len(argument_flows),
+            "runtimeArgumentFlows": argument_flows,
             "functionSymbolCount": len(functions),
             "functions": function_rows,
             "directCallCount": len(calls),
