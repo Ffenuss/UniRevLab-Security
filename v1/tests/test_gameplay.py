@@ -140,3 +140,64 @@ def test_compact_gameplay_summary_keeps_related_xref_methods_visible():
     assert "'relatedMethodCount':len(card.get('bridges') or [])" in block
     assert "'fieldCount':len(card.get('fields') or [])" in block
     assert "'methodCount':len(card.get('methods') or [])" in block
+
+
+def test_ambiguous_app_owned_accessors_are_review_only_domains():
+    from modkit.mobile.gameplay import _accessor_review_domains
+
+    assert _accessor_review_domains("GetLevel", "query", owner="a.b.C", application_owned=True) == ["progression"]
+    assert _accessor_review_domains("SetBalance", "setter", owner="a.b.C", application_owned=True) == ["currency"]
+    assert _accessor_review_domains("GetMP", "query", owner="a.b.C", application_owned=True) == ["resource"]
+    assert _accessor_review_domains("SetCD", "setter", owner="a.b.C", application_owned=True) == ["cooldown"]
+    assert _accessor_review_domains("GetLife", "query", owner="a.b.C", application_owned=True) == ["health"]
+
+    assert _accessor_review_domains("GetLevel", "query", owner="a.b.C", application_owned=False) == []
+    assert _accessor_review_domains("GetLevel", "action", owner="a.b.C", application_owned=True) == []
+    assert _accessor_review_domains("GetLevel", "query", owner="Game.Logger", application_owned=True) == []
+
+
+def test_accessor_review_domain_reaches_coverage_without_confirmation(tmp_path):
+    import json
+    from modkit.mobile.gameplay import build_gameplay_coverage
+
+    graph = tmp_path / "analysis.evidence-graph.jsonl"
+    fields = tmp_path / "analysis.fields.jsonl"
+    fields.write_text("", encoding="utf-8")
+    graph.write_text(json.dumps({
+        "metadataMethodId": 41,
+        "label": "a.b.C::GetLevel",
+        "class": "a.b.C",
+        "name": "GetLevel",
+        "rva": 0x4100,
+        "isStatic": False,
+        "typedFieldAccesses": [],
+        "callers": [],
+        "callees": [],
+        "applicationOwned": True,
+        "domains": [],
+        "bridgeDomains": [],
+        "semanticDomains": [],
+        "accessorReviewDomains": ["progression"],
+        "reviewDomains": ["progression"],
+        "methodRole": "query",
+    }) + "\n", encoding="utf-8")
+
+    report = build_gameplay_coverage(graph, fields)
+    progression = next(card for card in report["cards"] if card["domain"] == "progression")
+    assert progression["status"] == "REVIEW"
+    assert [row["metadataMethodId"] for row in progression["methods"]] == [41]
+    assert progression["methods"][0]["accessorReviewDomains"] == ["progression"]
+    assert progression["methods"][0]["typedFieldAccesses"] == []
+
+
+def test_accessor_review_domains_stay_out_of_automatic_binding_seed():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "modkit/mobile/gameplay.py").read_text(encoding="utf-8")
+    graph_block = source.split("def build_evidence_graph", 1)[1].split("\ndef graph_method", 1)[0]
+    assert 'review_domains = sorted(set(node.get("accessorReviewDomains") or []))' in graph_block
+    assert '"reviewDomains": review_domains' in graph_block
+    assert 'semantic_domains = sorted(set(node.get("domains") or []) | set(field_domains) | set(bridge_domains.get(mid, [])))' in graph_block
+    assert 'and semantic_domains' in graph_block
+    assert 'semantic_domains | review_domains' not in graph_block
