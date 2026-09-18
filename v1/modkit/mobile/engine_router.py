@@ -1,0 +1,190 @@
+"""Runtime-aware engine router.
+
+Consumes runtime_profiler output and builds a deterministic multi-engine plan.
+A target may route to several engines simultaneously. Missing specialized backends
+are reported explicitly instead of being hidden behind a generic "supported" flag.
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+SCHEMA = "modkit-engine-router-1.0"
+
+_ROUTES: dict[str, dict[str, Any]] = {
+    "android_dex": {
+        "engines": ["apktool.android", "dex.structural", "jadx.android", "security.passive"],
+        "coverage": "FULL_BUNDLED",
+    },
+    "native_elf": {
+        "engines": ["elf.static", "native.deep-embedded", "security.passive"],
+        "coverage": "FULL_BUNDLED",
+    },
+    "unity_il2cpp": {
+        "engines": ["unity.discovery", "il2cpp.rodroid", "native.deep-embedded", "semantic.gameplay"],
+        "coverage": "FULL_BUNDLED",
+    },
+    "unity_mono": {
+        "engines": ["apktool.android", "dex.structural", "jadx.android", "security.passive"],
+        "coverage": "PARTIAL_BUNDLED",
+        "missing": ["managed CIL/assembly reconstruction for Unity Mono"],
+    },
+    "unreal": {
+        "engines": ["elf.static", "native.deep-embedded", "security.passive"],
+        "coverage": "PARTIAL_BUNDLED",
+        "missing": ["Unreal UObject/UClass/FName reflection", "PAK/IoStore cooked-asset backend"],
+    },
+    "flutter": {
+        "engines": ["flutter.static", "flutter.aot-embedded", "native.deep-embedded", "security.passive"],
+        "coverage": "FULL_BUNDLED",
+    },
+    "react_native_hermes": {
+        "engines": ["hermes.static", "hermes.deep-embedded", "javascript.static", "dex.structural", "native.deep-embedded"],
+        "coverage": "FULL_BUNDLED",
+    },
+    "react_native_jsc": {
+        "engines": ["javascript.static", "dex.structural", "native.deep-embedded", "security.passive"],
+        "coverage": "PARTIAL_BUNDLED",
+        "missing": ["JavaScriptCore bytecode/version-specific structural decoder"],
+    },
+    "dotnet_android": {
+        "engines": ["apktool.android", "dex.structural", "elf.static", "native.deep-embedded", "security.passive"],
+        "coverage": "PARTIAL_BUNDLED",
+        "missing": [".NET metadata/CIL/Mono/CoreCLR/NativeAOT reconstructor"],
+    },
+    "cordova": {
+        "engines": ["javascript.static", "apktool.android", "dex.structural", "security.passive"],
+        "coverage": "FULL_BUNDLED",
+    },
+    "capacitor": {
+        "engines": ["javascript.static", "apktool.android", "dex.structural", "security.passive"],
+        "coverage": "FULL_BUNDLED",
+    },
+    "cocos": {
+        "engines": ["cocos.static", "cocos.deep-embedded", "javascript.static", "lua.static", "lua.bytecode-embedded", "native.deep-embedded"],
+        "coverage": "FULL_BUNDLED",
+    },
+    "godot": {
+        "engines": ["elf.static", "native.deep-embedded", "security.passive"],
+        "coverage": "PARTIAL_BUNDLED",
+        "missing": ["Godot PCK/scene/GDScript structural backend"],
+    },
+    "defold": {
+        "engines": ["elf.static", "native.deep-embedded", "lua.static", "lua.bytecode-embedded"],
+        "coverage": "PARTIAL_BUNDLED",
+        "missing": ["Defold archive/resource graph backend"],
+    },
+    "qt_qml": {
+        "engines": ["elf.static", "native.deep-embedded", "apktool.android", "security.passive"],
+        "coverage": "PARTIAL_BUNDLED",
+        "missing": ["QML/QML-cache structural backend"],
+    },
+    "libgdx": {
+        "engines": ["apktool.android", "dex.structural", "jadx.android", "elf.static", "native.deep-embedded"],
+        "coverage": "FULL_BUNDLED",
+    },
+    "lua_runtime": {
+        "engines": ["lua.static", "lua.bytecode-embedded", "native.deep-embedded"],
+        "coverage": "FULL_BUNDLED",
+    },
+    "webview_hybrid": {
+        "engines": ["javascript.static", "apktool.android", "dex.structural", "security.passive"],
+        "coverage": "FULL_BUNDLED",
+    },
+    "unknown": {
+        "engines": ["apktool.android", "dex.structural", "jadx.android", "elf.static", "native.deep-embedded", "security.passive"],
+        "coverage": "GENERIC_FALLBACK",
+        "missing": ["specialized runtime decoder not identified"],
+    },
+}
+
+
+def route(profile_report: dict[str, Any], output_path: str | Path | None = None) -> dict[str, Any]:
+    profiles = profile_report.get("profiles") if isinstance(profile_report, dict) else []
+    abis = {str(x) for x in (profile_report.get("abis") or [])} if isinstance(profile_report, dict) else set()
+    routes: list[dict[str, Any]] = []
+    selected: list[str] = []
+    selected_set: set[str] = set()
+    missing: list[str] = []
+
+    for row in profiles if isinstance(profiles, list) else []:
+        if not isinstance(row, dict):
+            continue
+        runtime_id = str(row.get("runtimeId") or "unknown")
+        spec = dict(_ROUTES.get(runtime_id) or _ROUTES["unknown"])
+        coverage = str(spec.get("coverage") or "GENERIC_FALLBACK")
+        route_missing = [str(x) for x in (spec.get("missing") or [])]
+
+        # native.deep-embedded currently has its deepest instruction/data-flow
+        # implementation on AArch64. Other Android ABIs still receive ELF inventory.
+        if runtime_id == "native_elf" and any(abi != "arm64-v8a" for abi in abis):
+            coverage = "PARTIAL_BUNDLED"
+            for abi in sorted(abi for abi in abis if abi != "arm64-v8a"):
+                route_missing.append(f"deep native instruction/data-flow backend for {abi}")
+
+        engines = [str(x) for x in spec.get("engines") or []]
+        for engine_id in engines:
+            if engine_id not in selected_set:
+                selected_set.add(engine_id)
+                selected.append(engine_id)
+        for item in route_missing:
+            if item not in missing:
+                missing.append(item)
+
+        routes.append({
+            "id": "route:" + runtime_id,
+            "runtimeId": runtime_id,
+            "title": str(row.get("title") or runtime_id),
+            "kind": "ENGINE_ROUTE",
+            "category": "Engine/Router",
+            "status": coverage,
+            "coverage": coverage,
+            "engines": engines,
+            "missingBackends": route_missing,
+            "evidence": row.get("evidence") or [],
+            "patchReady": False,
+            "automationExcluded": True,
+            "ownershipKind": "ENGINE",
+        })
+
+    if not routes:
+        spec = _ROUTES["unknown"]
+        routes.append({
+            "id": "route:unknown",
+            "runtimeId": "unknown",
+            "title": "Unknown / custom runtime fallback",
+            "kind": "ENGINE_ROUTE",
+            "category": "Engine/Router",
+            "status": "GENERIC_FALLBACK",
+            "coverage": "GENERIC_FALLBACK",
+            "engines": list(spec["engines"]),
+            "missingBackends": list(spec["missing"]),
+            "patchReady": False,
+            "automationExcluded": True,
+            "ownershipKind": "ENGINE",
+        })
+        selected = list(spec["engines"])
+        missing = list(spec["missing"])
+
+    counts: dict[str, int] = {}
+    for row in routes:
+        key = str(row["coverage"])
+        counts[key] = counts.get(key, 0) + 1
+
+    out = {
+        "schema": SCHEMA,
+        "passive": True,
+        "executesTargetCode": False,
+        "runtimeProfileSchema": profile_report.get("schema") if isinstance(profile_report, dict) else None,
+        "routeCount": len(routes),
+        "coverageCounts": counts,
+        "selectedEngineCount": len(selected),
+        "selectedEngines": selected,
+        "missingBackendCount": len(missing),
+        "missingBackends": missing,
+        "routes": routes,
+    }
+    if output_path:
+        Path(output_path).write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+    return out
