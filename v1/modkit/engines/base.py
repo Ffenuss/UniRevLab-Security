@@ -38,6 +38,12 @@ class ArtifactKind(str, Enum):
     LUA = "lua"
     JAVASCRIPT = "javascript"
     COCOS = "cocos"
+    DOTNET = "dotnet"
+    UNREAL = "unreal"
+    GODOT = "godot"
+    DEFOLD = "defold"
+    QML = "qml"
+    WEBASSEMBLY = "webassembly"
     PROCESS = "process"
     EVIDENCE = "evidence"
 
