@@ -13,6 +13,9 @@ def test_required_builtin_engines_are_registered():
     registry = build_default_registry()
     required = {
         "apkset.inventory",
+        "runtime.profiler",
+        "runtime.engine-router",
+        "protection.deobfuscator",
         "apktool.android",
         "dex.structural",
         "jadx.android",
@@ -61,3 +64,14 @@ def test_catalog_json_has_stable_schema():
     assert '"apktool.android"' in payload
     assert '"hermes.deep-embedded"' in payload
     assert '"frida.external"' in payload
+
+
+def test_universal_runtime_and_deobfuscation_engines_are_bundled():
+    registry = build_default_registry()
+    profiler = registry.get("runtime.profiler")
+    router = registry.get("runtime.engine-router")
+    deob = registry.get("protection.deobfuscator")
+    assert profiler.bundled and "multi-runtime" in profiler.capabilities
+    assert router.bundled and "coverage-gaps" in router.capabilities
+    assert deob.bundled and "stable-aliases" in deob.capabilities
+    assert "packer-markers" in deob.capabilities
