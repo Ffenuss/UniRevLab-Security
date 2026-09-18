@@ -64,6 +64,7 @@ def test_runtime_profiler_is_multi_label_for_mixed_android_stack(tmp_path: Path)
     assert "flutter.aot-embedded" in routed["selectedEngines"]
     assert "hermes.deep-embedded" in routed["selectedEngines"]
     assert "cocos.deep-embedded" in routed["selectedEngines"]
+    assert "native.portable-embedded" in routed["selectedEngines"]
     assert "jsc.deep-embedded" in routed["selectedEngines"]
     assert "webassembly.deep-embedded" in routed["selectedEngines"]
 
@@ -118,4 +119,4 @@ def test_embedded_pipeline_publishes_universal_reports():
     assert 'root / "runtime-profiler.json"' in source
     assert 'root / "engine-router.json"' in source
     assert 'root / "deobfuscation.json"' in source
-    assert '"Embedded 18/18 · gameplay semantic correlation…"' in source
+    assert '"Embedded 19/19 · gameplay semantic correlation…"' in source
