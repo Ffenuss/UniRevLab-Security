@@ -42,3 +42,24 @@ def test_complete_il2cpp_target_requires_patch_owner():
     src = read("TargetResolver.java")
     assert 'fullIl2cppPair=target.manifest.optBoolean("fullIl2cppPair",false)' in src
     assert "fullIl2cppPair&&patchOwnerIndex<0" in src
+
+
+def test_target_resolver_rejects_malformed_manifest_identity_before_use():
+    src = read("TargetResolver.java")
+    resolve = src.split("static Target resolve(App app)", 1)[1].split("static JSONObject verify", 1)[0]
+
+    assert '"modkit-target-selection-1.1".equals(schema)' in resolve
+    assert '"modkit-package-target-1.1".equals(schema)' in resolve
+    assert 'requireNonNegativeInt(manifest,"expectedApkCount")' in resolve
+    assert 'requireNonNegativeInt(manifest,"copiedApkCount")' in resolve
+    assert 'requireNonNegativeInt(row,"index")' in resolve
+    assert 'requireSha256(row,"sha256")' in resolve
+    assert 'validateMemberName(name)' in resolve
+    assert 'canonical.startsWith(installedRoot)' in resolve
+    assert '"COMPLETE".equals(manifest.optString("scanCompleteness",""))' in resolve
+    assert 'copyErrors==null||copyErrors.length()!=0' in resolve
+    assert 'manifestFingerprint(packageName,versionCode,splits)' in resolve
+    assert 'actualFingerprint.substring(0,24).equals(targetId)' in resolve
+
+    assert 'row.optInt("index",i)' not in resolve
+    assert 'manifest.optInt("expectedApkCount"' not in resolve
