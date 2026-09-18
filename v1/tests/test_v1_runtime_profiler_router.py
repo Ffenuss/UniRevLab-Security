@@ -29,6 +29,8 @@ def test_runtime_profiler_is_multi_label_for_mixed_android_stack(tmp_path: Path)
         "lib/arm64-v8a/libapp.so": b"\x7fELF",
         "assets/flutter_assets/AssetManifest.json": b"{}",
         "lib/arm64-v8a/libhermes.so": b"\x7fELF",
+        "lib/arm64-v8a/libjsc.so": b"\x7fELF",
+        "assets/module.wasm": b"\x00asm\x01\x00\x00\x00",
         "assemblies/App.dll": b"MZ",
         "assets/public/index.html": b"<html></html>",
         "lib/arm64-v8a/libcocos2dcpp.so": b"\x7fELF",
@@ -46,9 +48,9 @@ def test_runtime_profiler_is_multi_label_for_mixed_android_stack(tmp_path: Path)
     detected = set(report["detected"])
     assert {
         "android_dex", "native_elf", "unity_il2cpp", "unity_mono", "unreal",
-        "flutter", "react_native_hermes", "dotnet_android", "capacitor",
+        "flutter", "react_native_hermes", "react_native_jsc", "dotnet_android", "capacitor",
         "webview_hybrid", "cocos", "godot", "defold", "qt_qml", "libgdx",
-        "lua_runtime",
+        "lua_runtime", "webassembly",
     }.issubset(detected)
     assert report["abis"] == ["arm64-v8a"]
     assert report["profileCount"] == len(report["profiles"])
@@ -62,6 +64,8 @@ def test_runtime_profiler_is_multi_label_for_mixed_android_stack(tmp_path: Path)
     assert "flutter.aot-embedded" in routed["selectedEngines"]
     assert "hermes.deep-embedded" in routed["selectedEngines"]
     assert "cocos.deep-embedded" in routed["selectedEngines"]
+    assert "jsc.deep-embedded" in routed["selectedEngines"]
+    assert "webassembly.deep-embedded" in routed["selectedEngines"]
 
     routes = {row["runtimeId"]: row for row in routed["routes"]}
     assert routes["unity_il2cpp"]["coverage"] == "FULL_BUNDLED"
@@ -75,6 +79,10 @@ def test_runtime_profiler_is_multi_label_for_mixed_android_stack(tmp_path: Path)
     assert routes["qt_qml"]["coverage"] == "PARTIAL_BUNDLED"
     assert "qt.qml-deep-embedded" in routes["qt_qml"]["engines"]
     assert routes["libgdx"]["coverage"] == "FULL_BUNDLED"
+    assert routes["react_native_jsc"]["coverage"] == "PARTIAL_BUNDLED"
+    assert "jsc.deep-embedded" in routes["react_native_jsc"]["engines"]
+    assert routes["webassembly"]["coverage"] == "PARTIAL_BUNDLED"
+    assert "webassembly.deep-embedded" in routes["webassembly"]["engines"]
 
 
 def test_router_marks_non_arm64_native_deep_backend_partial(tmp_path: Path):
@@ -110,4 +118,4 @@ def test_embedded_pipeline_publishes_universal_reports():
     assert 'root / "runtime-profiler.json"' in source
     assert 'root / "engine-router.json"' in source
     assert 'root / "deobfuscation.json"' in source
-    assert '"Embedded 16/16 · gameplay semantic correlation…"' in source
+    assert '"Embedded 18/18 · gameplay semantic correlation…"' in source
