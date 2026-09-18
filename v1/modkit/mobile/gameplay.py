@@ -137,6 +137,17 @@ _OBFUSCATION_SAFE_FIELD_WORDS = {
     "inventory": {"inventory", "ammo", "ammunition"},
 }
 
+_ACCESSOR_REVIEW_WORDS = {
+    # Ambiguous short/state words are useful for discovery only when they are
+    # exact Get/Set-style application-owned accessors. They never enter the
+    # automatic binding queue without independent stronger evidence.
+    "health": {"life"},
+    "currency": {"balance"},
+    "progression": {"level", "lvl", "exp"},
+    "resource": {"mp"},
+    "cooldown": {"cd"},
+}
+
 
 def _tokens(text):
     text = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", str(text or ""))
@@ -158,6 +169,28 @@ def _noise(text):
 def _owner_gameplay(text):
     t = set(_tokens(text))
     return bool(t & _GAME_OWNER_PARTS) and not bool(t & _NOISE_PARTS)
+
+
+def _accessor_review_domains(name, role, *, owner="", application_owned=False):
+    """Return low-confidence semantic domains for exact app-owned accessors.
+
+    This exists for ambiguous names such as GetLevel/SetBalance/GetMP. The
+    result is reporting/discovery evidence only and is deliberately kept out
+    of the automatic binding seed set.
+    """
+    if not application_owned or str(role or "") not in {"query", "setter"}:
+        return []
+    label = (str(owner or "") + " " + str(name or "")).strip()
+    if _noise(label):
+        return []
+    tokens = set(_tokens(name))
+    if not tokens:
+        return []
+    out = set()
+    for domain, words in _ACCESSOR_REVIEW_WORDS.items():
+        if tokens & words:
+            out.add(domain)
+    return sorted(out)
 
 
 def domains_for(text, *, owner=None, field=False, application_owned=False):
@@ -245,6 +278,8 @@ def _method_domain_relevant(row, domain):
     # an application-owned method sits between same-domain native neighbors.
     # Coverage keeps bridges out of CONFIRMED, so this cannot create a binding.
     if bool(row.get("applicationOwned")) and domain in (row.get("bridgeDomains") or []):
+        return True
+    if bool(row.get("applicationOwned")) and domain in (row.get("accessorReviewDomains") or []):
         return True
     owner_tokens = set(_tokens(row.get("class") or ""))
     gameplay_owner = _owner_gameplay(row.get("class") or "")
@@ -341,6 +376,10 @@ def _catalog_compact(catalog_path, cb=None):
                 "bindingSuggestion": row.get("binding_suggestion"),
                 "bindingBlocker": row.get("binding_blocker"),
                 "domains": domains_for(label, owner=cls),
+                "accessorReviewDomains": _accessor_review_domains(
+                    row.get("name") or (label.split("::", 1)[1] if "::" in label else label),
+                    row.get("method_role"), owner=cls, application_owned=bool(row.get("application_owned")),
+                ),
             }
     return nodes, rva_to_mid, max_mid
 
@@ -781,6 +820,7 @@ def build_evidence_graph(metadata_path, library_path, catalog_path, graph_path, 
                 exact_fields = field_access_by_mid.get(mid) or []
                 field_domains = sorted({d for x in exact_fields for d in (x.get("domains") or [])})
                 semantic_domains = sorted(set(node.get("domains") or []) | set(field_domains) | set(bridge_domains.get(mid, [])))
+                review_domains = sorted(set(node.get("accessorReviewDomains") or []))
                 row = {
                     **node,
                     "callers": callers.get(mid, [])[:48],
@@ -789,6 +829,7 @@ def build_evidence_graph(metadata_path, library_path, catalog_path, graph_path, 
                     "fieldDomains": field_domains,
                     "bridgeDomains": bridge_domains.get(mid, []),
                     "semanticDomains": semantic_domains,
+                    "reviewDomains": review_domains,
                     "runtimeStatus": "not-observed",
                 }
                 encoded = (json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
@@ -847,6 +888,7 @@ def build_evidence_graph(metadata_path, library_path, catalog_path, graph_path, 
                 and not _owner_gameplay(x.get("declaringType") or "")
             ),
             "bridgeMethods": len(bridge_domains),
+            "accessorReviewMethods": sum(1 for x in nodes.values() if x.get("accessorReviewDomains")),
             "fieldScanMethods": len(ranked),
             "resolverTargetTypes": len(resolver_by_type),
             "resolverCandidates": sum(len(v) for v in resolver_by_type.values()),
@@ -1030,7 +1072,8 @@ def build_gameplay_coverage(graph_path, fields_path=None, package_evidence=None,
                 script_content_layer = True
             if _noise((row.get("class") or "") + " " + (row.get("name") or "")):
                 continue
-            for d in row.get("semanticDomains") or []:
+            candidate_domains = sorted(set(row.get("semanticDomains") or []) | set(row.get("reviewDomains") or []))
+            for d in candidate_domains:
                 if d not in domains or not _method_domain_relevant(row, d):
                     continue
                 evidence = {
@@ -1041,6 +1084,8 @@ def build_gameplay_coverage(graph_path, fields_path=None, package_evidence=None,
                     "applicationOwned": row.get("applicationOwned"),
                     "methodRole": row.get("methodRole"),
                     "bridgeDomains": row.get("bridgeDomains") or [],
+                    "accessorReviewDomains": row.get("accessorReviewDomains") or [],
+                    "reviewDomains": row.get("reviewDomains") or [],
                 }
                 bucket = "bridges" if d in (row.get("bridgeDomains") or []) and d not in (row.get("domains") or []) else "methods"
                 if len(domains[d][bucket]) < 512:
