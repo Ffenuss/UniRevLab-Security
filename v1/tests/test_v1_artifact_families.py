@@ -63,3 +63,38 @@ def test_security_workspace_contract_records_artifact_family_report():
     assert 'root / "artifact-families.json"' in source
     assert "artifact_families.scan_apk_paths" in source
     assert 'out["artifactFamilies"]' in source
+
+
+def test_artifact_family_scanner_inventories_cross_platform_runtime_assets(tmp_path: Path):
+    apk = _apk(tmp_path / "multi-runtime.apk", {
+        "assemblies/App.dll": b"MZ managed assembly",
+        "assets/pakchunk0-Android.pak": b"PAK" * 128,
+        "assets/Hero.uasset": b"UE4 asset",
+        "assets/game.pck": b"GDPC",
+        "assets/player.gd": b"extends Node\nfunc take_damage(v):\n    return v\n",
+        "assets/scene.tscn": b"[gd_scene]\n",
+        "assets/game.arcd": b"defold archive",
+        "assets/qml/Main.qml": b"Item { function setHealth(v) { return v } }",
+        "assets/qml/cache.qmlc": b"QMLC bytecode",
+        "assets/module.wasm": b"\x00asm\x01\x00\x00\x00",
+    })
+    report = scan_apk_paths([apk])
+    counts = report["familyCounts"]
+    assert counts["dotnet"] >= 1
+    assert counts["unreal"] >= 2
+    assert counts["godot"] >= 3
+    assert counts["defold"] >= 1
+    assert counts["qt_qml"] >= 2
+    assert counts["webassembly"] >= 1
+
+    artifacts = [row for row in report["artifacts"] if row["kind"] == "ARTIFACT_FAMILY"]
+    by_entry = {row["entry"]: row for row in artifacts}
+    assert by_entry["assemblies/App.dll"]["recoveryLevel"] == "MANAGED_ASSEMBLY"
+    assert by_entry["assets/pakchunk0-Android.pak"]["recoveryLevel"] == "CONTAINER_INVENTORY"
+    assert by_entry["assets/player.gd"]["representation"] == "gdscript-source"
+    assert by_entry["assets/qml/Main.qml"]["representation"] == "qml-source"
+    assert by_entry["assets/module.wasm"]["representation"] == "wasm-bytecode"
+
+    symbols = [row for row in report["artifacts"] if row["kind"] == "SCRIPT_SYMBOL"]
+    assert any(row["title"] == "take_damage" and row["family"] == "godot" for row in symbols)
+    assert any(row["title"] == "setHealth" and row["family"] == "qt_qml" for row in symbols)
