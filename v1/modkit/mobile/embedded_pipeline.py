@@ -11,11 +11,11 @@ from typing import Any
 
 from modkit.mobile import (
     artifact_families, cocos_deep, deep_gameplay, deobfuscator, defold_deep, dotnet_deep, engine_router,
-    flutter_deep, godot_deep, hermes_deep, lua_deep, lua_deep_cancellable, native_deep,
-    native_inventory, qml_deep, runtime_profiler, unreal_deep,
+    flutter_deep, godot_deep, hermes_deep, jsc_deep, lua_deep, lua_deep_cancellable, native_deep,
+    native_inventory, qml_deep, runtime_profiler, unreal_deep, wasm_deep,
 )
 
-SCHEMA = "modkit-embedded-analysis-1.7"
+SCHEMA = "modkit-embedded-analysis-1.8"
 
 
 class Cancelled(Exception):
@@ -91,7 +91,7 @@ def run_workspace(
     router_report: dict[str, Any] = {}
     deob_report: dict[str, Any] = {}
 
-    _check(cb, "Embedded 1/16 · runtime / engine profiler…")
+    _check(cb, "Embedded 1/18 · runtime / engine profiler…")
     try:
         profile_report = runtime_profiler.scan_workspace(root, root / "runtime-profiler.json", cb)
         runs.append({
@@ -109,7 +109,7 @@ def run_workspace(
         runs.append({"engineId": "runtime.profiler", "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 2/16 · multi-runtime engine routing…")
+    _check(cb, "Embedded 2/18 · multi-runtime engine routing…")
     try:
         router_report = engine_router.route(profile_report, root / "engine-router.json")
         runs.append({
@@ -125,7 +125,7 @@ def run_workspace(
         runs.append({"engineId": "runtime.engine-router", "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 3/16 · deobfuscation / protection profile…")
+    _check(cb, "Embedded 3/18 · deobfuscation / protection profile…")
     try:
         deob_report = deobfuscator.scan_workspace(root, root / "deobfuscation.json", cb)
         runs.append({
@@ -142,7 +142,7 @@ def run_workspace(
         runs.append({"engineId": deobfuscator.ENGINE_ID, "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 4/16 · artifact families…")
+    _check(cb, "Embedded 4/18 · artifact families…")
     try:
         static_report = artifact_families.scan_workspace(root, None, cb)
         runs.append({
@@ -192,7 +192,7 @@ def run_workspace(
         "missingBackends": router_report.get("missingBackends") or [],
     }
 
-    _check(cb, "Embedded 5/16 · universal ELF / Android ABI inventory…")
+    _check(cb, "Embedded 5/18 · universal ELF / Android ABI inventory…")
     try:
         native_inventory_report = native_inventory.scan_workspace(root, root / "native-inventory.json", cb)
         runs.append({
@@ -214,7 +214,7 @@ def run_workspace(
         runs.append({"engineId": native_inventory.ENGINE_ID, "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 6/16 · .NET / Mono CLI metadata…")
+    _check(cb, "Embedded 6/18 · .NET / Mono CLI metadata…")
     try:
         dotnet_report = dotnet_deep.scan_workspace(root, root / "dotnet-deep.json", cb)
         runs.append({
@@ -237,7 +237,7 @@ def run_workspace(
         runs.append({"engineId": dotnet_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 7/16 · Unreal cooked assets / reflection…")
+    _check(cb, "Embedded 7/18 · Unreal cooked assets / reflection…")
     try:
         unreal_report = unreal_deep.scan_workspace(root, root / "unreal-deep.json", cb)
         runs.append({
@@ -264,7 +264,7 @@ def run_workspace(
         runs.append({"engineId": unreal_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 8/16 · Godot PCK / scene graph…")
+    _check(cb, "Embedded 8/18 · Godot PCK / scene graph…")
     try:
         godot_report = godot_deep.scan_workspace(root, root / "godot-deep.json", cb)
         runs.append({
@@ -290,7 +290,7 @@ def run_workspace(
         runs.append({"engineId": godot_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 9/16 · Defold archive / resources…")
+    _check(cb, "Embedded 9/18 · Defold archive / resources…")
     try:
         defold_report = defold_deep.scan_workspace(root, root / "defold-deep.json", cb)
         runs.append({
@@ -314,7 +314,7 @@ def run_workspace(
         runs.append({"engineId": defold_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 10/16 · Qt / QML structure…")
+    _check(cb, "Embedded 10/18 · Qt / QML structure…")
     try:
         qml_report = qml_deep.scan_workspace(root, root / "qml-deep.json", cb)
         runs.append({
@@ -340,7 +340,55 @@ def run_workspace(
         runs.append({"engineId": qml_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 11/16 · Lua bytecode…")
+    _check(cb, "Embedded 11/18 · JavaScriptCore / React Native…")
+    try:
+        jsc_report = jsc_deep.scan_workspace(root, root / "jsc-deep.json", cb)
+        runs.append({
+            "engineId": jsc_deep.ENGINE_ID,
+            "status": "SUCCESS" if (
+                jsc_report.get("artifactCount") or jsc_report.get("nativeLibraryCount")
+            ) else "UNAVAILABLE",
+            "artifactCount": int(jsc_report.get("artifactCount") or 0),
+            "sourceLikeCount": int(jsc_report.get("sourceLikeCount") or 0),
+            "binaryBytecodeCount": int(jsc_report.get("binaryBytecodeCount") or 0),
+            "findingCount": int(jsc_report.get("findingCount") or 0),
+        })
+        _merge_findings(static_report, jsc_report, summary_key="deepJsc",
+                        default_engine=jsc_deep.ENGINE_ID,
+                        default_kind="JSC_EVIDENCE",
+                        default_category="Runtime/JavaScriptCore")
+    except jsc_deep.JscScanCancelled as exc:
+        raise Cancelled(str(exc)) from exc
+    except Cancelled:
+        raise
+    except Exception as exc:
+        runs.append({"engineId": jsc_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
+    _check(cb)
+
+    _check(cb, "Embedded 12/18 · WebAssembly sections / exports…")
+    try:
+        wasm_report = wasm_deep.scan_workspace(root, root / "wasm-deep.json", cb)
+        runs.append({
+            "engineId": wasm_deep.ENGINE_ID,
+            "status": "SUCCESS" if wasm_report.get("moduleCount") else "UNAVAILABLE",
+            "moduleCount": int(wasm_report.get("moduleCount") or 0),
+            "validModuleCount": int(wasm_report.get("validModuleCount") or 0),
+            "exportCount": int(wasm_report.get("exportCount") or 0),
+            "findingCount": int(wasm_report.get("findingCount") or 0),
+        })
+        _merge_findings(static_report, wasm_report, summary_key="deepWasm",
+                        default_engine=wasm_deep.ENGINE_ID,
+                        default_kind="WEBASSEMBLY_EVIDENCE",
+                        default_category="Runtime/WebAssembly")
+    except wasm_deep.WasmScanCancelled as exc:
+        raise Cancelled(str(exc)) from exc
+    except Cancelled:
+        raise
+    except Exception as exc:
+        runs.append({"engineId": wasm_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
+    _check(cb)
+
+    _check(cb, "Embedded 13/18 · Lua bytecode…")
     try:
         lua_report = lua_deep_cancellable.scan_workspace(root, root / "lua-deep.json", cb)
         runs.append({
@@ -361,7 +409,7 @@ def run_workspace(
         runs.append({"engineId": lua_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 12/16 · Hermes HBC…")
+    _check(cb, "Embedded 14/18 · Hermes HBC…")
     try:
         deep = hermes_deep.scan_workspace(root, root / "hermes-deep.json", cb)
         runs.append({
@@ -383,7 +431,7 @@ def run_workspace(
     _check(cb)
 
     native_report: dict[str, Any] = {}
-    _check(cb, "Embedded 13/16 · native ELF/ARM64…")
+    _check(cb, "Embedded 15/18 · native ELF/ARM64…")
     try:
         native_report = native_deep.scan_workspace(root, root / "native-deep.json", cb)
         runs.append({
@@ -404,7 +452,7 @@ def run_workspace(
         runs.append({"engineId": native_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 14/16 · Cocos correlation…")
+    _check(cb, "Embedded 16/18 · Cocos correlation…")
     try:
         cocos_report = cocos_deep.scan_workspace(root, static_report, native_report, root / "cocos-deep.json", cb)
         runs.append({
@@ -426,7 +474,7 @@ def run_workspace(
         runs.append({"engineId": cocos_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 15/16 · Flutter/Dart AOT…")
+    _check(cb, "Embedded 17/18 · Flutter/Dart AOT…")
     try:
         flutter_report = flutter_deep.scan_workspace(root, native_report, root / "flutter-deep.json", cb)
         runs.append({
@@ -447,7 +495,7 @@ def run_workspace(
         runs.append({"engineId": flutter_deep.ENGINE_ID, "status": "FAILED", "error": str(exc)})
     _check(cb)
 
-    _check(cb, "Embedded 16/16 · gameplay semantic correlation…")
+    _check(cb, "Embedded 18/18 · gameplay semantic correlation…")
     try:
         gameplay_report = deep_gameplay.scan_workspace(root, static_report, native_report, root / "deep-gameplay.json", cb)
         runs.append({
@@ -490,6 +538,8 @@ def run_workspace(
         "godotReport": "godot-deep.json",
         "defoldReport": "defold-deep.json",
         "qmlReport": "qml-deep.json",
+        "jscReport": "jsc-deep.json",
+        "wasmReport": "wasm-deep.json",
         "luaReport": "lua-deep.json",
         "nativeReport": "native-deep.json",
         "cocosReport": "cocos-deep.json",
