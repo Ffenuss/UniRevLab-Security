@@ -126,7 +126,7 @@ def route(profile_report: dict[str, Any], output_path: str | Path | None = None)
         if runtime_id == "native_elf" and any(abi != "arm64-v8a" for abi in abis):
             coverage = "PARTIAL_BUNDLED"
             for abi in sorted(abi for abi in abis if abi != "arm64-v8a"):
-                route_missing.append(f"deep native instruction/data-flow backend for {abi}")
+                route_missing.append(f"instruction-level CFG/data-flow backend for {abi}; portable symbols/relocations are bundled")
 
         engines = [str(x) for x in spec.get("engines") or []]
         for engine_id in engines:
