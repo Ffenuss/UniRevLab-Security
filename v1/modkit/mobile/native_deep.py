@@ -1246,6 +1246,42 @@ def _dlsym_il2cpp_pointer_flow(elf: ElfFile, functions: list[Any],
             row["functionPointerTableEntryCount"] = value.get("tableEntryCount")
     return out
 
+def _dlsym_pointer_table_summary(flows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[int, dict[int, dict[str, Any]]] = {}
+    for row in flows:
+        base = row.get("functionPointerTableBaseRva")
+        offset = row.get("functionPointerTableOffset")
+        if not isinstance(base, int) or not isinstance(offset, int):
+            continue
+        grouped.setdefault(base, {})[offset] = {
+            "offset": offset,
+            "slotRva": row.get("functionPointerSlotRva"),
+            "apiName": row.get("apiName") or row.get("dlsymResolvedName"),
+            "sourceRva": row.get("sourceRva"),
+            "sourceFunction": row.get("sourceFunction"),
+            "callRva": row.get("callRva"),
+            "gameplayDomain": row.get("gameplayDomain") or "",
+        }
+    out = []
+    for base in sorted(grouped):
+        entries = [grouped[base][off] for off in sorted(grouped[base])]
+        api_names = {str(x.get("apiName") or "") for x in entries if x.get("apiName")}
+        if len(entries) < 2 or len(api_names) < 2:
+            continue
+        out.append({
+            "baseRva": base,
+            "entryCount": len(entries),
+            "apiNames": sorted(api_names),
+            "entries": entries[:64],
+            "confidence": "HIGH",
+            "associationStatus": "same-static-base-multi-dlsym-table-confirmed",
+            "automationExcluded": True,
+        })
+        if len(out) >= 64:
+            break
+    return out
+
+
 def _architecture_profile(symbol_names: list[str], strings: list[dict[str, Any]], needed: list[str]) -> dict[str, Any]:
     marker_evidence: dict[str, list[str]] = {}
     def add(tag: str, value: str) -> None:
@@ -1445,6 +1481,7 @@ def _scan_library(apk: Path, entry: str, extracted: Path, cb: Any | None = None)
         lookup_chains = _runtime_lookup_chains(strings, xrefs, calls)
         argument_flows = _il2cpp_argument_register_flow(elf, functions, strings, calls, cb)
         dlsym_argument_flows = _dlsym_il2cpp_pointer_flow(elf, functions, strings, calls, cb)
+        dlsym_pointer_tables = _dlsym_pointer_table_summary(dlsym_argument_flows)
 
         callers: dict[int, list[dict[str, Any]]] = {}
         callees: dict[int, list[dict[str, Any]]] = {}
@@ -1487,6 +1524,27 @@ def _scan_library(apk: Path, entry: str, extracted: Path, cb: Any | None = None)
                 "patchReady": False, "automationExcluded": True,
                 "runtimeConfirmed": False, "evidenceRole": "native-architecture-profile",
             })
+
+        for table_no, table in enumerate(dlsym_pointer_tables):
+            findings.append({
+                "id": "il2cpp-pointer-table:" + hashlib.sha256(
+                    f"{apk.name}!{entry}!{table.get('baseRva')}!{table_no}".encode()
+                ).hexdigest()[:20],
+                "kind": "IL2CPP_FUNCTION_POINTER_TABLE",
+                "title": f"IL2CPP function-pointer table ({table.get('entryCount')} entries)",
+                "category": "RE/IL2CPP Runtime Lookup",
+                "status": "CORRELATED_EVIDENCE",
+                "family": "native", "engineId": ENGINE_ID,
+                "apk": apk.name, "entry": entry, "library": entry, "abi": effective_abi,
+                "tableBaseRva": table.get("baseRva"),
+                "functionPointerTable": table,
+                "ownershipKind": "ENGINE", "trustBoundary": "local",
+                "patchReady": False, "automationExcluded": True,
+                "runtimeConfirmed": False, "runtimeTruth": "not-observed-by-static-analysis",
+                "evidenceRole": "il2cpp-dlsym-function-pointer-table",
+            })
+            if len(findings) >= MAX_FINDINGS:
+                break
 
         for flow_no, flow in enumerate(dlsym_argument_flows):
             title_bits = [str(x) for x in (flow.get("assembly"), flow.get("namespace"),
@@ -1646,6 +1704,8 @@ def _scan_library(apk: Path, entry: str, extracted: Path, cb: Any | None = None)
             "runtimeArgumentFlows": argument_flows,
             "dlsymArgumentFlowCount": len(dlsym_argument_flows),
             "dlsymArgumentFlows": dlsym_argument_flows,
+            "dlsymFunctionPointerTableCount": len(dlsym_pointer_tables),
+            "dlsymFunctionPointerTables": dlsym_pointer_tables,
             "functionSymbolCount": len(functions),
             "functions": function_rows,
             "directCallCount": len(calls),
