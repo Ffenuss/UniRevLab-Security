@@ -17,6 +17,7 @@ def test_required_builtin_engines_are_registered():
         "runtime.engine-router",
         "protection.deobfuscator",
         "elf.universal-inventory",
+        "native.portable-embedded",
         "dotnet.static",
         "dotnet.metadata-embedded",
         "unreal.static",
@@ -127,3 +128,11 @@ def test_jsc_and_webassembly_deep_engines_are_bundled():
     wasm = registry.get("webassembly.deep-embedded")
     assert jsc.bundled and "jsc-binary-inventory" in jsc.capabilities
     assert wasm.bundled and "exports" in wasm.capabilities
+
+
+def test_portable_native_engine_is_bundled():
+    registry = build_default_registry()
+    engine = registry.get("native.portable-embedded")
+    assert engine.bundled
+    assert "elf32" in engine.capabilities
+    assert "relocation-symbol-refs" in engine.capabilities
