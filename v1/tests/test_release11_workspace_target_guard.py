@@ -166,3 +166,42 @@ def test_workspace_patch_zip_validation_is_bounded_and_cancellable():
 def test_manifest_registers_workspace_guard():
     manifest = (ROOT / "android" / "app" / "src" / "main" / "AndroidManifest.xml").read_text(encoding="utf-8")
     assert '.WorkspaceBuildGuardService' in manifest
+
+
+def test_workspace_worker_reverifies_exact_guard_handoff_before_apply_and_export():
+    guard = read("WorkspaceBuildGuardService.java")
+    worker = read("WorkerService.java")
+
+    for extra in (
+        '"workspaceGuardTargetId"',
+        '"workspaceGuardTargetFingerprint"',
+        '"workspaceGuardTargetDigest"',
+        '"workspaceGuardSplitIndex"',
+        '"workspaceGuardSplitName"',
+        '"workspaceGuardPatchSha256"',
+    ):
+        assert f"putExtra({extra}" in guard
+
+    verify = worker.split("private TargetResolver.Member verifyWorkspaceHandoff", 1)[1].split("private void workspaceBuild", 1)[0]
+    assert "TargetResolver.resolve(app)" in verify
+    assert "TargetResolver.requireVerified(target,app.cancelled)" in verify
+    assert '"workspaceGuardTargetDigest"' in verify
+    assert '"workspaceGuardPatchSha256"' in verify
+    assert "currentTargetDigest" in verify
+    assert "found.index!=expectedIndex" in verify
+    assert "!found.name.equals(expectedName)" in verify
+    assert "sha256WorkspaceArtifact(pack,WORKSPACE_PATCH_MAX_BYTES)" in verify
+    assert "check();total+=n" in verify
+
+    build = worker.split("private void workspaceBuild(Intent request,Uri uri)", 1)[1].split("private long simpleStartedAt", 1)[0]
+    first = build.index("verifyWorkspaceHandoff(request,src,pack)")
+    apply = build.index('callAttr("patchpack_apply_unsigned"', first)
+    second = build.index("verifyWorkspaceHandoff(request,src,pack)", first + 1)
+    export = build.index("exportSignedTargetForSource", second)
+    assert first < apply < second < export
+
+    signed = worker.split("private void exportSignedTargetForSource", 1)[1].split("private void splitDiscovery", 1)[0]
+    assert "guardedSource=verifyWorkspaceHandoff" in signed
+    assert "ownerIndex!=guardedSource.index" in signed
+    assert "guardedSource.name.equals" in signed
+    assert signed.count("verifyWorkspaceHandoff(guardRequest,sourceApk") >= 3
