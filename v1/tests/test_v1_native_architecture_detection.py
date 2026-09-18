@@ -879,3 +879,146 @@ def test_consumer_overwrite_invalidates_cached_global_pointer_before_load():
     }]
 
     assert native_deep._dlsym_il2cpp_pointer_flow(FakeElf(), functions, strings, calls) == []
+
+
+def test_dlsym_multi_api_static_table_preserves_base_and_offsets():
+    import struct
+    from types import SimpleNamespace
+
+    def adrp(rd, pc, target):
+        delta = (target & ~0xFFF) - (pc & ~0xFFF)
+        imm21 = (delta >> 12) & ((1 << 21) - 1)
+        return 0x90000000 | ((imm21 & 0x3) << 29) | (((imm21 >> 2) & 0x7FFFF) << 5) | rd
+
+    def add(rd, rn, imm):
+        return 0x91000000 | ((imm & 0xFFF) << 10) | (rn << 5) | rd
+
+    def mov(rd, rm):
+        return 0xAA0003E0 | (rm << 16) | rd
+
+    def str_x(rt, rn, imm):
+        return 0xF9000000 | (((imm // 8) & 0xFFF) << 10) | (rn << 5) | rt
+
+    def ldr_x(rt, rn, imm):
+        return 0xF9400000 | (((imm // 8) & 0xFFF) << 10) | (rn << 5) | rt
+
+    def blr(rn):
+        return 0xD63F0000 | (rn << 5)
+
+    BL = 0x94000000
+    resolver = 0x1000
+    consumer = 0x2000
+    rwords = []
+    calls = []
+
+    def remit(word):
+        rwords.append(word)
+        return resolver + (len(rwords) - 1) * 4
+
+    # Table entry +0x00 -> il2cpp_class_from_name
+    remit(adrp(1, resolver + len(rwords) * 4, 0x3000))
+    remit(add(1, 1, 0x000))
+    pc = remit(BL)
+    calls.append({"sourceRva": resolver, "sourceFunction": "init_api", "callRva": pc,
+                  "targetFunction": "dlsym", "targetRva": 0x5000})
+    remit(adrp(9, resolver + len(rwords) * 4, 0x7000))
+    remit(str_x(0, 9, 0x00))
+
+    # Table entry +0x08 -> il2cpp_class_get_field_from_name
+    remit(adrp(1, resolver + len(rwords) * 4, 0x3000))
+    remit(add(1, 1, 0x040))
+    pc = remit(BL)
+    calls.append({"sourceRva": resolver, "sourceFunction": "init_api", "callRva": pc,
+                  "targetFunction": "dlsym", "targetRva": 0x5000})
+    remit(adrp(9, resolver + len(rwords) * 4, 0x7000))
+    remit(str_x(0, 9, 0x08))
+
+    cwords = []
+    def cemit(word):
+        cwords.append(word)
+        return consumer + (len(cwords) - 1) * 4
+
+    # Resolve type through table[0].
+    cemit(adrp(9, consumer + len(cwords) * 4, 0x7000))
+    cemit(ldr_x(22, 9, 0x00))
+    cemit(adrp(2, consumer + len(cwords) * 4, 0x3000))
+    cemit(add(2, 2, 0x080))
+    cemit(blr(22))
+    cemit(mov(21, 0))
+
+    # Resolve field through table[1].
+    cemit(adrp(9, consumer + len(cwords) * 4, 0x7000))
+    cemit(ldr_x(23, 9, 0x08))
+    cemit(adrp(1, consumer + len(cwords) * 4, 0x3000))
+    cemit(add(1, 1, 0x0C0))
+    cemit(mov(0, 21))
+    cemit(blr(23))
+
+    rblob = b"".join(struct.pack("<I", word) for word in rwords)
+    cblob = b"".join(struct.pack("<I", word) for word in cwords)
+
+    class FakeElf:
+        def is_arm64(self):
+            return True
+        def read_at_rva(self, rva, size):
+            if rva == resolver:
+                return rblob[:size]
+            if rva == consumer:
+                return cblob[:size]
+            raise ValueError(rva)
+
+    strings = [
+        {"rva": 0x3000, "text": "il2cpp_class_from_name", "domain": "", "lookupRole": None},
+        {"rva": 0x3040, "text": "il2cpp_class_get_field_from_name", "domain": "", "lookupRole": None},
+        {"rva": 0x3080, "text": "PlayerStats", "domain": "", "lookupRole": "type"},
+        {"rva": 0x30C0, "text": "m_Health", "domain": "health", "lookupRole": "field"},
+    ]
+    functions = [
+        SimpleNamespace(value=resolver, size=len(rblob), name="init_api", shndx=1),
+        SimpleNamespace(value=consumer, size=len(cblob), name="use_api", shndx=1),
+    ]
+
+    flows = native_deep._dlsym_il2cpp_pointer_flow(FakeElf(), functions, strings, calls)
+    assert [row["lookupKind"] for row in flows] == ["type", "field"]
+    assert {row["functionPointerTableBaseRva"] for row in flows} == {0x7000}
+    assert {row["functionPointerTableOffset"] for row in flows} == {0, 8}
+    assert {row["functionPointerTableEntryCount"] for row in flows} == {2}
+    assert all(row["functionPointerStorage"] == "global" for row in flows)
+
+    tables = native_deep._dlsym_pointer_table_summary(flows)
+    assert len(tables) == 1
+    table = tables[0]
+    assert table["baseRva"] == 0x7000
+    assert table["entryCount"] == 2
+    assert table["apiNames"] == [
+        "il2cpp_class_from_name",
+        "il2cpp_class_get_field_from_name",
+    ]
+    assert [entry["offset"] for entry in table["entries"]] == [0, 8]
+    assert table["associationStatus"] == "same-static-base-multi-dlsym-table-confirmed"
+    assert table["automationExcluded"] is True
+
+
+def test_single_global_dlsym_pointer_is_not_promoted_to_table():
+    flows = [{
+        "functionPointerTableBaseRva": 0x7000,
+        "functionPointerTableOffset": 0,
+        "functionPointerSlotRva": 0x7000,
+        "apiName": "il2cpp_class_from_name",
+        "sourceRva": 0x2000,
+        "sourceFunction": "use_api",
+        "callRva": 0x2020,
+    }]
+    assert native_deep._dlsym_pointer_table_summary(flows) == []
+
+
+def test_native_deep_source_keeps_pointer_table_non_buildable():
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "modkit/mobile/native_deep.py").read_text(encoding="utf-8")
+    block = source.split('"kind": "IL2CPP_FUNCTION_POINTER_TABLE"', 1)[1].split(
+        "for flow_no, flow in enumerate(dlsym_argument_flows)", 1
+    )[0]
+    assert '"status": "CORRELATED_EVIDENCE"' in block
+    assert '"patchReady": False' in block
+    assert '"automationExcluded": True' in block
+    assert '"ownershipKind": "ENGINE"' in block
