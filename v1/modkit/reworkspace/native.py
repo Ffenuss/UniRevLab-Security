@@ -41,7 +41,8 @@ def _check_cancel(cb: Any | None) -> None:
 
 
 def direct_bl_calls(elf: ElfFile, target_rvas: list[int] | set[int] | None = None, *, limit: int = 4000,
-                    max_scan_bytes: int = 256 * 1024 * 1024, cb: Any | None = None) -> list[dict]:
+                    max_scan_bytes: int = 256 * 1024 * 1024, cb: Any | None = None,
+                    extra_target_names: dict[int, str] | None = None) -> list[dict]:
     """Bounded static ARM64 direct-call references for an already parsed ELF."""
     if not elf.is_arm64():
         return []
@@ -53,6 +54,9 @@ def direct_bl_calls(elf: ElfFile, target_rvas: list[int] | set[int] | None = Non
     target_names: dict[int, str] = {}
     for sym in funcs:
         target_names.setdefault(sym.value, sym.name)
+    imported_targets = {int(k): str(v) for k, v in (extra_target_names or {}).items() if int(k) > 0 and str(v)}
+    for rva, name in imported_targets.items():
+        target_names.setdefault(rva, name)
 
     def caller_for(rva: int):
         if not starts:
@@ -118,6 +122,8 @@ def direct_bl_calls(elf: ElfFile, target_rvas: list[int] | set[int] | None = Non
                     'targetRva': target,
                     'targetFunction': target_name,
                     'kind': 'arm64-direct-bl',
+                    'targetResolution': 'ELF64_RELA_PLT' if target in imported_targets else 'STATIC_SYMBOL',
+                    'imported': target in imported_targets,
                 })
                 if len(out) >= max(1, int(limit)):
                     return out
