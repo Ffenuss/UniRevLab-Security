@@ -18,6 +18,7 @@ def test_required_builtin_engines_are_registered():
         "protection.deobfuscator",
         "elf.universal-inventory",
         "native.portable-embedded",
+        "native.arm32-deep-embedded",
         "dotnet.static",
         "dotnet.metadata-embedded",
         "unreal.static",
@@ -136,3 +137,11 @@ def test_portable_native_engine_is_bundled():
     assert engine.bundled
     assert "elf32" in engine.capabilities
     assert "relocation-symbol-refs" in engine.capabilities
+
+
+def test_arm32_thumb_engine_is_bundled():
+    registry = build_default_registry()
+    engine = registry.get("native.arm32-deep-embedded")
+    assert engine.bundled
+    assert "thumb2" in engine.capabilities
+    assert "direct-calls" in engine.capabilities
