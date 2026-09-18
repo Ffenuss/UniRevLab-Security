@@ -231,8 +231,11 @@ def _string_review_domains(value):
         out.add("resource")
     if tokens & {"cooldown"} or compact in {"cd", "skillcd", "abilitycd"}:
         out.add("cooldown")
-    if tokens & {"speed"} and not tokens & {"network", "download", "upload", "bandwidth", "throughput"}:
-        out.add("movement")
+    if tokens & {"speed"}:
+        if tokens & {"network", "download", "upload", "bandwidth", "throughput", "latency"}:
+            out.discard("movement")
+        else:
+            out.add("movement")
     if "balance" in tokens and tokens & {"wallet", "currency", "gold", "coin", "coins", "money", "cash"}:
         out.add("currency")
     if any(x in low for x in ("log level", "quality level", "mip level", "grid level", "patch level")):
