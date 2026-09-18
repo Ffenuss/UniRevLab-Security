@@ -224,6 +224,49 @@ def _finding_from_native(lib: dict[str, Any], fn: dict[str, Any]) -> dict[str, A
     }
 
 
+def _findings_from_runtime_argument_flow(row: dict[str, Any]) -> list[dict[str, Any]]:
+    if str(row.get("kind") or "") != "IL2CPP_RUNTIME_ARGUMENT_FLOW":
+        return []
+    flow = row.get("runtimeArgumentFlow") if isinstance(row.get("runtimeArgumentFlow"), dict) else {}
+    identifier = str(flow.get("identifier") or "")
+    domain = str(row.get("gameplayDomain") or flow.get("gameplayDomain") or "")
+    if not domain and identifier:
+        domain, _aliases = classify(identifier)
+    if not domain:
+        return []
+    exact = bool(flow.get("exactManagedIdentityConfirmed"))
+    return [{
+        "id": "deep-il2cpp-argument-flow:" + _id(row.get("id"), domain),
+        "kind": "IL2CPP_RUNTIME_ARGUMENT_FLOW_EVIDENCE",
+        "title": str(row.get("title") or "IL2CPP argument-register flow"),
+        "category": "Gameplay/IL2CPP Runtime Lookup",
+        "status": "CORRELATED_EVIDENCE",
+        "family": "native",
+        "engineId": ENGINE_ID,
+        "sourceEngineId": row.get("engineId") or "native.deep-embedded",
+        "sourceFindingId": row.get("id"),
+        "entry": row.get("entry"),
+        "library": row.get("library") or row.get("entry"),
+        "abi": row.get("abi"),
+        "sourceRva": row.get("sourceRva"),
+        "sourceFunction": row.get("sourceFunction"),
+        "callRva": row.get("callRva"),
+        "gameplayDomain": domain,
+        "semanticAliases": [identifier] if identifier else [],
+        "semanticConfidence": "VERY_HIGH" if exact else "HIGH",
+        "runtimeArgumentFlow": flow,
+        "argumentFlowConfirmed": bool(flow.get("argumentFlowConfirmed")),
+        "exactManagedIdentityConfirmed": exact,
+        "ownershipKind": row.get("ownershipKind") or "APP_OR_GAME",
+        "trustBoundary": row.get("trustBoundary") or "local",
+        "patchReady": False,
+        "automationExcluded": True,
+        "runtimeConfirmed": False,
+        "runtimeTruth": "not-observed-by-static-analysis",
+        "evidenceRole": "deep-gameplay-il2cpp-argument-register-flow",
+    }]
+
+
 def _findings_from_runtime_lookup(row: dict[str, Any]) -> list[dict[str, Any]]:
     """Convert same-function IL2CPP runtime lookup correlation into REVIEW evidence.
 
@@ -369,14 +412,23 @@ def analyze(artifact_report: dict[str, Any], native_report: dict[str, Any],
             add(_finding_from_native(lib, fn))
 
     lookup_count = 0
+    argument_flow_count = 0
     for row in native_report.get("findings", []) if isinstance(native_report, dict) else []:
-        if not isinstance(row, dict) or str(row.get("kind") or "") != "IL2CPP_RUNTIME_LOOKUP_CHAIN":
+        if not isinstance(row, dict):
             continue
-        lookup_count += 1
-        if (lookup_count & 0x3F) == 0:
-            _check(cb)
-        for finding in _findings_from_runtime_lookup(row):
-            add(finding)
+        kind = str(row.get("kind") or "")
+        if kind == "IL2CPP_RUNTIME_LOOKUP_CHAIN":
+            lookup_count += 1
+            if (lookup_count & 0x3F) == 0:
+                _check(cb)
+            for finding in _findings_from_runtime_lookup(row):
+                add(finding)
+        elif kind == "IL2CPP_RUNTIME_ARGUMENT_FLOW":
+            argument_flow_count += 1
+            if (argument_flow_count & 0x3F) == 0:
+                _check(cb)
+            for finding in _findings_from_runtime_argument_flow(row):
+                add(finding)
 
     for row_no, row in enumerate(artifacts if isinstance(artifacts, list) else []):
         if (row_no & 0xFF) == 0:
@@ -401,6 +453,9 @@ def analyze(artifact_report: dict[str, Any], native_report: dict[str, Any],
         "coverage": dict(sorted(coverage.items())),
         "runtimeLookupSourceCount": lookup_count,
         "runtimeLookupGameplayCount": sum(1 for row in findings if row.get("kind") == "IL2CPP_RUNTIME_LOOKUP_CORRELATION"),
+        "runtimeArgumentFlowSourceCount": argument_flow_count,
+        "runtimeArgumentFlowGameplayCount": sum(1 for row in findings if row.get("kind") == "IL2CPP_RUNTIME_ARGUMENT_FLOW_EVIDENCE"),
+        "exactManagedIdentityCount": sum(1 for row in findings if row.get("exactManagedIdentityConfirmed")),
         "findings": findings,
         "truncated": len(findings) >= MAX_FINDINGS,
     }
