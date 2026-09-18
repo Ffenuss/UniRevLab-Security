@@ -70,7 +70,10 @@ def test_runtime_profiler_is_multi_label_for_mixed_android_stack(tmp_path: Path)
     assert routes["dotnet_android"]["coverage"] == "PARTIAL_BUNDLED"
     assert routes["godot"]["coverage"] == "PARTIAL_BUNDLED"
     assert "godot.deep-embedded" in routes["godot"]["engines"]
+    assert routes["defold"]["coverage"] == "PARTIAL_BUNDLED"
+    assert "defold.deep-embedded" in routes["defold"]["engines"]
     assert routes["qt_qml"]["coverage"] == "PARTIAL_BUNDLED"
+    assert "qt.qml-deep-embedded" in routes["qt_qml"]["engines"]
     assert routes["libgdx"]["coverage"] == "FULL_BUNDLED"
 
 
@@ -107,4 +110,4 @@ def test_embedded_pipeline_publishes_universal_reports():
     assert 'root / "runtime-profiler.json"' in source
     assert 'root / "engine-router.json"' in source
     assert 'root / "deobfuscation.json"' in source
-    assert '"Embedded 14/14 · gameplay semantic correlation…"' in source
+    assert '"Embedded 16/16 · gameplay semantic correlation…"' in source
