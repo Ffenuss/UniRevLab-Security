@@ -1095,18 +1095,25 @@ def build_gameplay_coverage(graph_path, fields_path=None, package_evidence=None,
             for d in candidate_domains:
                 if d not in domains or not _method_domain_relevant(row, d):
                     continue
+                exact_accesses = [x for x in (row.get("typedFieldAccesses") or []) if d in (x.get("domains") or [])][:8]
+                bucket = "bridges" if d in (row.get("bridgeDomains") or []) and d not in (row.get("domains") or []) else "methods"
+                accessor_only = d in (row.get("reviewDomains") or []) and d not in (row.get("semanticDomains") or [])
+                bridge_only = bucket == "bridges" and not exact_accesses
+                review_only_semantic = bool(accessor_only or bridge_only)
                 evidence = {
                     "metadataMethodId": row.get("metadataMethodId"), "label": row.get("label"),
                     "rva": row.get("rva"), "isStatic": row.get("isStatic"),
-                    "typedFieldAccesses": [x for x in (row.get("typedFieldAccesses") or []) if d in (x.get("domains") or [])][:8],
+                    "typedFieldAccesses": exact_accesses,
                     "callers": row.get("callers") or [], "callees": row.get("callees") or [],
                     "applicationOwned": row.get("applicationOwned"),
                     "methodRole": row.get("methodRole"),
                     "bridgeDomains": row.get("bridgeDomains") or [],
                     "accessorReviewDomains": row.get("accessorReviewDomains") or [],
                     "reviewDomains": row.get("reviewDomains") or [],
+                    "reviewOnlySemantic": review_only_semantic,
+                    "automationExcluded": review_only_semantic,
+                    "semanticEvidenceRole": "ambiguous-accessor" if accessor_only else ("xref-bridge" if bridge_only else "direct-or-field"),
                 }
-                bucket = "bridges" if d in (row.get("bridgeDomains") or []) and d not in (row.get("domains") or []) else "methods"
                 if len(domains[d][bucket]) < 512:
                     domains[d][bucket].append(evidence)
     for item in package_evidence or []:
