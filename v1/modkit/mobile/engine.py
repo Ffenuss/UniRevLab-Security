@@ -4367,9 +4367,12 @@ def build_gameplay_discovery(metadata_path, library_path, catalog_path, graph_pa
     for card in coverage.get('cards') or []:
         fields=[f"{x.get('declaringType')}.{x.get('name')} @ 0x{int(x.get('runtimeOffset') or 0):x}" for x in (card.get('fields') or [])[:4]]
         methods=[str(x.get('label') or '') for x in (card.get('methods') or [])[:5] if x.get('label')]
+        related=[str(x.get('label') or '') for x in (card.get('bridges') or [])[:5] if x.get('label')]
         compact_cards.append({
             'domain':card.get('domain'),'title':card.get('title'),'status':card.get('status'),
-            'fields':fields,'methods':methods,'packageCount':len(card.get('package') or []),
+            'fields':fields,'methods':methods,'relatedMethods':related,
+            'fieldCount':len(card.get('fields') or []),'methodCount':len(card.get('methods') or []),
+            'relatedMethodCount':len(card.get('bridges') or []),'packageCount':len(card.get('package') or []),
             **({'numericHpSetterAttributed':bool(card.get('numericHpSetterAttributed'))} if card.get('domain')=='health' else {}),
         })
     compact={
