@@ -40,3 +40,32 @@ def test_target_reset_clears_visible_target_preferences_immediately():
     reset = source.split("private void clearTargetDependentOutputs", 1)[1].split("private void cleanupFailedPreparation", 1)[0]
     assert '.remove("installed.package")' in reset
     assert '.remove("game.apk")' in reset
+
+
+def test_prepared_installed_manifest_carries_exact_identity_contract():
+    source = SOURCE.read_text(encoding="utf-8")
+    method = source.split("private void prepareInstalled", 1)[1].split("@SuppressWarnings", 1)[0]
+    assert "selectionFingerprint(packageName,code,splits)" in method
+    for field in (
+        '"targetId"',
+        '"fingerprintSha256"',
+        '"scanCompleteness","COMPLETE"',
+        '"expectedApkCount"',
+        '"copiedApkCount"',
+        '"copyErrors"',
+        '"buildMode"',
+        '"requiresWholeSetSigning"',
+        '"fullIl2cppPair",false',
+        '"pairConfidence","UNSCANNED"',
+    ):
+        assert field in method
+    assert 'boolean apkSet=sources.size()>1' in method
+    assert '.put("buildMode",apkSet?"apk-set":"single-apk")' in method
+    assert '.put("requiresWholeSetSigning",apkSet)' in method
+
+
+def test_archive_selection_build_mode_tracks_actual_member_count():
+    importer = (ROOT / "android/app/src/main/java/dev/modkit/mobile/TargetArchiveImporter.java").read_text(encoding="utf-8")
+    assert "requiresWholeSetSigning=ordered.size()>1" in importer
+    assert '.put("buildMode",requiresWholeSetSigning?"apk-set":"single-apk")' in importer
+    assert '.put("requiresWholeSetSigning",requiresWholeSetSigning)' in importer
