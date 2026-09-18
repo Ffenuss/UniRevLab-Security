@@ -321,6 +321,24 @@ def _decode_ldr_x_unsigned(word: int) -> tuple[int, int, int] | None:
     return rt, rn, ((word >> 10) & 0xFFF) * 8
 
 
+def _decode_str_x_unsigned(word: int) -> tuple[int, int, int] | None:
+    if word & 0xFFC00000 != 0xF9000000:
+        return None
+    rt = word & 0x1F
+    rn = (word >> 5) & 0x1F
+    return rt, rn, ((word >> 10) & 0xFFF) * 8
+
+
+def _decode_sub_imm(word: int) -> tuple[int, int, int] | None:
+    if word & 0x7F000000 != 0x51000000:
+        return None
+    rd = word & 0x1F
+    rn = (word >> 5) & 0x1F
+    imm12 = (word >> 10) & 0xFFF
+    shift = 12 if ((word >> 22) & 1) else 0
+    return rd, rn, imm12 << shift
+
+
 def _scan_control_flow(elf: ElfFile, functions: list[Any], *, limit: int = MAX_CONTROL_FLOW,
                        max_scan_bytes: int = 128 * 1024 * 1024,
                        cb: Any | None = None) -> list[dict[str, Any]]:
@@ -800,10 +818,13 @@ def _dlsym_il2cpp_pointer_flow(elf: ElfFile, functions: list[Any],
                                cb: Any | None = None,
                                *, max_function_bytes: int = 64 * 1024,
                                max_total_bytes: int = 8 * 1024 * 1024) -> list[dict[str, Any]]:
-    """Trace dlsym("il2cpp_*") results into later ARM64 BLR calls.
+    """Trace dlsym("il2cpp_*") pointers through registers, stack and global slots.
 
-    Only register-resident flow is modeled. Values stored to memory or crossing
-    unsupported instructions are deliberately not reconstructed.
+    Phase one scans functions that call dlsym, proving pointer creation and any
+    stores to local stack or statically-addressed data slots. Phase two scans
+    other known functions for loads from those proven global slots followed by
+    BLR. Only explicit ARM64 data flow is accepted; unsupported memory flow is
+    not guessed.
     """
     if not elf.is_arm64():
         return []
@@ -828,9 +849,11 @@ def _dlsym_il2cpp_pointer_flow(elf: ElfFile, functions: list[Any],
     funcs = [fn for fn in functions if isinstance(getattr(fn, "value", None), int) and fn.value > 0]
     funcs.sort(key=lambda fn: fn.value)
     by_start = {int(fn.value): (idx, fn) for idx, fn in enumerate(funcs)}
-    sources = sorted({int(row["sourceRva"]) for row in dlsym_calls})
-    total = 0
+    dlsym_sources = sorted({int(row["sourceRva"]) for row in dlsym_calls})
+    global_slots: dict[int, dict[str, Any]] = {}
     out: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+    total = 0
 
     def string_value(target: int) -> dict[str, Any] | None:
         row = strings_by_rva.get(int(target))
@@ -919,21 +942,25 @@ def _dlsym_il2cpp_pointer_flow(elf: ElfFile, functions: list[Any],
                 "dlsymCallRva": pointer.get("dlsymCallRva"),
                 "dlsymNameArgumentRva": pointer.get("nameArgumentRva"),
                 "dlsymResolvedName": pointer.get("apiName"),
+                "functionPointerStorage": pointer.get("storage"),
+                "functionPointerSlotRva": pointer.get("slotRva"),
+                "functionPointerStackOffset": pointer.get("stackOffset"),
                 "gameplayDomain": "" if domain == "security" else domain,
                 "argumentFlowConfirmed": True,
                 "functionPointerFlowConfirmed": True,
-                "associationStatus": "dlsym-pointer-to-blr-argument-confirmed",
+                "associationStatus": "dlsym-memory-pointer-to-blr-argument-confirmed"
+                                     if pointer.get("storage") else "dlsym-pointer-to-blr-argument-confirmed",
                 "exactManagedIdentityConfirmed": exact,
                 "automationExcluded": True,
-                "flowModel": "dlsym+adr-adrp-add-mov+blr+abi-clobber",
+                "flowModel": "dlsym+adr-adrp-add-mov+str-ldr+blr+abi-clobber"
+                             if pointer.get("storage") else "dlsym+adr-adrp-add-mov+blr+abi-clobber",
             }
         return evidence, return_value
 
-    for source_rva in sources:
-        _check(cb)
+    def bounds(source_rva: int) -> tuple[Any, int] | None:
         pair = by_start.get(source_rva)
         if not pair:
-            continue
+            return None
         idx, fn = pair
         next_start = int(funcs[idx + 1].value) if idx + 1 < len(funcs) else None
         if int(getattr(fn, "size", 0) or 0) > 0:
@@ -943,16 +970,53 @@ def _dlsym_il2cpp_pointer_flow(elf: ElfFile, functions: list[Any],
         else:
             end = next_start or source_rva
         size = end - source_rva
-        if size < 4 or size > int(max_function_bytes) or total + size > int(max_total_bytes):
-            continue
+        if size < 4 or size > int(max_function_bytes):
+            return None
+        return fn, size
+
+    def scan(source_rva: int, *, allow_dlsym: bool, allow_global_loads: bool) -> int:
+        nonlocal total
+        _check(cb)
+        bounded = bounds(source_rva)
+        if not bounded:
+            return 0
+        fn, size = bounded
+        if total + size > int(max_total_bytes):
+            return 0
         try:
             raw = elf.read_at_rva(source_rva, size)
         except ValueError:
-            continue
+            return 0
         total += size
         state: dict[int, dict[str, Any]] = {}
         page_state: dict[int, int] = {}
+        stack_slots: dict[int, dict[str, Any]] = {}
+        sp_delta = 0
         function_calls = calls_by_source.get(source_rva, {})
+
+        def memory_key(rn: int, offset: int) -> tuple[str, int] | None:
+            if rn == 31:
+                return "stack", sp_delta + offset
+            base = state.get(rn)
+            if base and base.get("kind") == "address" and isinstance(base.get("targetRva"), int):
+                return "global", int(base["targetRva"]) + offset
+            if rn in page_state:
+                return "global", int(page_state[rn]) + offset
+            return None
+
+        def load_slot(rt: int, key: tuple[str, int]) -> None:
+            kind, slot = key
+            value = stack_slots.get(slot) if kind == "stack" else global_slots.get(slot)
+            if value:
+                loaded = dict(value)
+                loaded["storage"] = kind
+                if kind == "global":
+                    loaded["slotRva"] = slot
+                else:
+                    loaded["stackOffset"] = slot
+                state[rt] = loaded
+            else:
+                state.pop(rt, None)
 
         for rel in range(0, len(raw) & ~3, 4):
             if (rel & 0x3FFF) == 0:
@@ -963,7 +1027,7 @@ def _dlsym_il2cpp_pointer_flow(elf: ElfFile, functions: list[Any],
             if word & 0xFC000000 == 0x94000000:
                 edge = function_calls.get(pc)
                 target_name = str(edge.get("targetFunction") or "") if edge else ""
-                if target_name in {"dlsym", "__loader_dlsym"}:
+                if allow_dlsym and target_name in {"dlsym", "__loader_dlsym"}:
                     name = state.get(1)
                     result = None
                     if name and name.get("kind") == "string":
@@ -991,14 +1055,17 @@ def _dlsym_il2cpp_pointer_flow(elf: ElfFile, functions: list[Any],
                         str(pointer.get("apiName") or ""), state, pc, rn, pointer
                     )
                     if evidence:
-                        out.append({
-                            "sourceRva": source_rva,
-                            "sourceFunction": getattr(fn, "name", None),
-                            "callRva": pc,
-                            **evidence,
-                        })
-                        if len(out) >= 320:
-                            return out
+                        key = (pc, evidence.get("apiName"), evidence.get("identifier"))
+                        if key not in seen:
+                            seen.add(key)
+                            out.append({
+                                "sourceRva": source_rva,
+                                "sourceFunction": getattr(fn, "name", None),
+                                "callRva": pc,
+                                **evidence,
+                            })
+                            if len(out) >= 320:
+                                return size
                     clear_caller_saved(state)
                     page_state = {r: v for r, v in page_state.items() if r >= 19}
                     if return_value:
@@ -1006,6 +1073,39 @@ def _dlsym_il2cpp_pointer_flow(elf: ElfFile, functions: list[Any],
                     continue
                 clear_caller_saved(state)
                 page_state = {r: v for r, v in page_state.items() if r >= 19}
+                continue
+
+            store = _decode_str_x_unsigned(word)
+            if store:
+                rt, rn, off = store
+                key = memory_key(rn, off)
+                if key:
+                    kind, slot = key
+                    value = state.get(rt)
+                    if kind == "stack":
+                        if value:
+                            stack_slots[slot] = dict(value)
+                        else:
+                            stack_slots.pop(slot, None)
+                    elif allow_dlsym:
+                        if value and value.get("kind") == "il2cpp-api-pointer":
+                            stored = dict(value)
+                            stored["storage"] = "global"
+                            stored["slotRva"] = slot
+                            global_slots[slot] = stored
+                        else:
+                            global_slots.pop(slot, None)
+                continue
+
+            load = _decode_ldr_x_unsigned(word)
+            if load:
+                rt, rn, off = load
+                key = memory_key(rn, off)
+                if key and (key[0] == "stack" or allow_global_loads):
+                    load_slot(rt, key)
+                else:
+                    state.pop(rt, None)
+                page_state.pop(rt, None)
                 continue
 
             adrp = _decode_adrp(word, pc)
@@ -1018,28 +1118,39 @@ def _dlsym_il2cpp_pointer_flow(elf: ElfFile, functions: list[Any],
                 rd, target = adr
                 page_state.pop(rd, None)
                 value = string_value(target)
-                if value:
-                    state[rd] = value
-                else:
-                    state.pop(rd, None)
+                state[rd] = value if value else {"kind": "address", "targetRva": target}
                 continue
+
             add = _decode_add_imm(word)
             if add:
                 rd, rn, imm = add
+                if rd == 31 and rn == 31:
+                    sp_delta += imm
+                    continue
                 base_page = page_state.get(rn)
                 source_value = state.get(rn)
                 page_state.pop(rd, None)
                 if base_page is not None:
-                    value = string_value(base_page + imm)
-                    if value:
-                        state[rd] = value
-                    else:
-                        state.pop(rd, None)
+                    target = base_page + imm
+                    value = string_value(target)
+                    state[rd] = value if value else {"kind": "address", "targetRva": target}
+                elif source_value and source_value.get("kind") == "address":
+                    state[rd] = {"kind": "address", "targetRva": int(source_value["targetRva"]) + imm}
                 elif source_value and imm == 0:
                     state[rd] = dict(source_value)
                 else:
                     state.pop(rd, None)
                 continue
+
+            sub = _decode_sub_imm(word)
+            if sub:
+                rd, rn, imm = sub
+                if rd == 31 and rn == 31:
+                    sp_delta -= imm
+                else:
+                    state.pop(rd, None); page_state.pop(rd, None)
+                continue
+
             mov = _decode_mov_x_register(word)
             if mov:
                 rd, rm = mov
@@ -1049,14 +1160,29 @@ def _dlsym_il2cpp_pointer_flow(elf: ElfFile, functions: list[Any],
                 else:
                     state.pop(rd, None)
                 continue
-            load = _decode_ldr_x_unsigned(word)
-            if load:
-                rt, _rn, _off = load
-                state.pop(rt, None); page_state.pop(rt, None)
+
+        return size
+
+    # Resolve and store dlsym pointers first. This also captures same-function
+    # register/stack flows without requiring a second scan of those functions.
+    for source_rva in dlsym_sources:
+        if total >= int(max_total_bytes) or len(out) >= 320:
+            break
+        scan(source_rva, allow_dlsym=True, allow_global_loads=True)
+
+    # Once a global slot has a proven dlsym origin, scan other known functions
+    # for exact LDR(slot) -> BLR flow. Functions already scanned above are skipped.
+    if global_slots and total < int(max_total_bytes) and len(out) < 320:
+        scanned_sources = set(dlsym_sources)
+        for fn in funcs:
+            source_rva = int(fn.value)
+            if source_rva in scanned_sources:
                 continue
+            if total >= int(max_total_bytes) or len(out) >= 320:
+                break
+            scan(source_rva, allow_dlsym=False, allow_global_loads=True)
 
     return out
-
 
 def _architecture_profile(symbol_names: list[str], strings: list[dict[str, Any]], needed: list[str]) -> dict[str, Any]:
     marker_evidence: dict[str, list[str]] = {}
