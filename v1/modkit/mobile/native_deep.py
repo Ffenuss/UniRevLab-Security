@@ -991,6 +991,8 @@ def _dlsym_il2cpp_pointer_flow(elf: ElfFile, functions: list[Any],
         state: dict[int, dict[str, Any]] = {}
         page_state: dict[int, int] = {}
         stack_slots: dict[int, dict[str, Any]] = {}
+        local_global_slots: dict[int, dict[str, Any]] = {}
+        invalid_global_slots: set[int] = set()
         sp_delta = 0
         function_calls = calls_by_source.get(source_rva, {})
 
@@ -1006,7 +1008,12 @@ def _dlsym_il2cpp_pointer_flow(elf: ElfFile, functions: list[Any],
 
         def load_slot(rt: int, key: tuple[str, int]) -> None:
             kind, slot = key
-            value = stack_slots.get(slot) if kind == "stack" else global_slots.get(slot)
+            if kind == "stack":
+                value = stack_slots.get(slot)
+            elif slot in invalid_global_slots:
+                value = None
+            else:
+                value = local_global_slots.get(slot) or global_slots.get(slot)
             if value:
                 loaded = dict(value)
                 loaded["storage"] = kind
@@ -1095,6 +1102,20 @@ def _dlsym_il2cpp_pointer_flow(elf: ElfFile, functions: list[Any],
                             global_slots[slot] = stored
                         else:
                             global_slots.pop(slot, None)
+                    else:
+                        # Phase-two consumer functions may overwrite a cached
+                        # pointer before loading it. Keep that effect local to
+                        # this function instead of mutating initializer truth
+                        # for unrelated functions.
+                        if value and value.get("kind") == "il2cpp-api-pointer":
+                            stored = dict(value)
+                            stored["storage"] = "global"
+                            stored["slotRva"] = slot
+                            local_global_slots[slot] = stored
+                            invalid_global_slots.discard(slot)
+                        else:
+                            local_global_slots.pop(slot, None)
+                            invalid_global_slots.add(slot)
                 continue
 
             load = _decode_ldr_x_unsigned(word)
