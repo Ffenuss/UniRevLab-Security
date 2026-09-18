@@ -224,7 +224,65 @@ def _finding_from_native(lib: dict[str, Any], fn: dict[str, Any]) -> dict[str, A
     }
 
 
+def _findings_from_runtime_lookup(row: dict[str, Any]) -> list[dict[str, Any]]:
+    """Convert same-function IL2CPP runtime lookup correlation into REVIEW evidence.
+
+    The native backend only proves that lookup APIs and candidate managed
+    identifiers are referenced by the same native function.  It does not prove
+    exact argument flow, so these rows are explicitly automation-excluded.
+    """
+    if str(row.get("kind") or "") != "IL2CPP_RUNTIME_LOOKUP_CHAIN":
+        return []
+    lookup = row.get("runtimeLookup") if isinstance(row.get("runtimeLookup"), dict) else {}
+    domains = {str(x) for x in (row.get("gameplayDomains") or []) if x}
+    identifiers = lookup.get("candidateIdentifiers") if isinstance(lookup.get("candidateIdentifiers"), list) else []
+    semantic_hits: dict[str, list[str]] = {}
+    for ident in identifiers:
+        if not isinstance(ident, dict):
+            continue
+        value = str(ident.get("value") or "")
+        domain, aliases = classify(value)
+        if domain:
+            domains.add(domain)
+            semantic_hits.setdefault(domain, [])
+            for alias in aliases:
+                if alias not in semantic_hits[domain]:
+                    semantic_hits[domain].append(alias)
+    out = []
+    for domain in sorted(domains):
+        out.append({
+            "id": "deep-il2cpp-runtime-lookup:" + _id(row.get("id"), domain),
+            "kind": "IL2CPP_RUNTIME_LOOKUP_CORRELATION",
+            "title": str(row.get("title") or "IL2CPP runtime lookup"),
+            "category": "Gameplay/IL2CPP Runtime Lookup",
+            "status": "REVIEW",
+            "family": "native",
+            "engineId": ENGINE_ID,
+            "sourceEngineId": row.get("engineId") or "native.deep-embedded",
+            "sourceFindingId": row.get("id"),
+            "entry": row.get("entry"),
+            "library": row.get("library") or row.get("entry"),
+            "abi": row.get("abi"),
+            "sourceRva": row.get("sourceRva"),
+            "sourceFunction": row.get("sourceFunction"),
+            "gameplayDomain": domain,
+            "semanticAliases": semantic_hits.get(domain, []),
+            "semanticConfidence": lookup.get("confidence") or row.get("confidence") or "MEDIUM",
+            "runtimeLookup": lookup,
+            "ownershipKind": row.get("ownershipKind") or "APP_OR_GAME",
+            "trustBoundary": row.get("trustBoundary") or "local",
+            "patchReady": False,
+            "automationExcluded": True,
+            "runtimeConfirmed": False,
+            "runtimeTruth": "not-observed-by-static-analysis",
+            "evidenceRole": "deep-gameplay-il2cpp-runtime-lookup-review",
+        })
+    return out
+
+
 def _finding_from_artifact(row: dict[str, Any]) -> dict[str, Any] | None:
+    if str(row.get("kind") or "") == "IL2CPP_RUNTIME_LOOKUP_CHAIN":
+        return None
     if row.get("gameplayDomain"):
         return None
     semantic_text = _semantic_text(row)
@@ -310,6 +368,16 @@ def analyze(artifact_report: dict[str, Any], native_report: dict[str, Any],
                 continue
             add(_finding_from_native(lib, fn))
 
+    lookup_count = 0
+    for row in native_report.get("findings", []) if isinstance(native_report, dict) else []:
+        if not isinstance(row, dict) or str(row.get("kind") or "") != "IL2CPP_RUNTIME_LOOKUP_CHAIN":
+            continue
+        lookup_count += 1
+        if (lookup_count & 0x3F) == 0:
+            _check(cb)
+        for finding in _findings_from_runtime_lookup(row):
+            add(finding)
+
     for row_no, row in enumerate(artifacts if isinstance(artifacts, list) else []):
         if (row_no & 0xFF) == 0:
             _check(cb)
@@ -331,6 +399,8 @@ def analyze(artifact_report: dict[str, Any], native_report: dict[str, Any],
         "findingCount": len(findings),
         "locatorCount": locator_count,
         "coverage": dict(sorted(coverage.items())),
+        "runtimeLookupSourceCount": lookup_count,
+        "runtimeLookupGameplayCount": sum(1 for row in findings if row.get("kind") == "IL2CPP_RUNTIME_LOOKUP_CORRELATION"),
         "findings": findings,
         "truncated": len(findings) >= MAX_FINDINGS,
     }
