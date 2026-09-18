@@ -205,8 +205,8 @@ def test_workspace_worker_reverifies_exact_guard_handoff_before_apply_and_export
 
     signed = worker.split("private void exportSignedTargetForSource", 1)[1].split("private void splitDiscovery", 1)[0]
     assert "guardedSource=verifyWorkspaceHandoff" in signed
-    assert "ownerIndex!=guardedSource.index" in signed
-    assert "guardedSource.name.equals" in signed
+    assert "currentSource.index!=guardedSource.index" in signed
+    assert "!currentSource.name.equals(guardedSource.name)" in signed
     assert signed.count("verifyWorkspaceHandoff(guardRequest,sourceApk") >= 3
 
 
