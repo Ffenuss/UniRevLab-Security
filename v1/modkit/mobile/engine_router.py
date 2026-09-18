@@ -26,7 +26,7 @@ _ROUTES: dict[str, dict[str, Any]] = {
         "coverage": "FULL_BUNDLED",
     },
     "unity_mono": {
-        "engines": ["dotnet.static", "apktool.android", "dex.structural", "jadx.android", "security.passive"],
+        "engines": ["dotnet.static", "dotnet.metadata-embedded", "apktool.android", "dex.structural", "jadx.android", "security.passive"],
         "coverage": "PARTIAL_BUNDLED",
         "missing": ["managed CIL/assembly reconstruction for Unity Mono"],
     },
@@ -49,7 +49,7 @@ _ROUTES: dict[str, dict[str, Any]] = {
         "missing": ["JavaScriptCore bytecode/version-specific structural decoder"],
     },
     "dotnet_android": {
-        "engines": ["dotnet.static", "apktool.android", "dex.structural", "elf.static", "native.deep-embedded", "security.passive"],
+        "engines": ["dotnet.static", "dotnet.metadata-embedded", "apktool.android", "dex.structural", "elf.static", "native.deep-embedded", "security.passive"],
         "coverage": "PARTIAL_BUNDLED",
         "missing": [".NET metadata/CIL/Mono/CoreCLR/NativeAOT reconstructor"],
     },
