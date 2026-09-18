@@ -82,7 +82,7 @@ def _marker_tags(text: str) -> list[str]:
     low = str(text or "").casefold()
     out = []
     for tag, needles in _NATIVE_MARKERS:
-        if any(needle in low for needle in needles):
+        if any(str(needle).casefold() in low for needle in needles):
             out.append(tag)
     return out
 
@@ -592,7 +592,7 @@ def _container_marker_profile(zf: zipfile.ZipFile, apk: Path, cb: Any | None = N
                 data = tail + chunk
                 for tag, needles in _DEX_MARKERS:
                     for marker in needles:
-                        if marker.casefold() in data.casefold():
+                        if marker.lower() in data.lower():
                             note(tag, marker, info.filename)
                 tail = data[-max_marker:] if len(data) > max_marker else data
     features = []
@@ -737,6 +737,8 @@ def _scan_library(apk: Path, entry: str, extracted: Path, cb: Any | None = None)
             for no, row in enumerate(strings):
                 if (no & 0x7F) == 0:
                     _check(cb)
+                if not row.get("domain"):
+                    continue
                 refs = string_xrefs.get(int(row["rva"]), [])[:60]
                 finding_id = hashlib.sha256(f"{apk.name}!{entry}!str!{row['rva']:x}!{row['text']}".encode("utf-8", "replace")).hexdigest()[:20]
                 findings.append({
