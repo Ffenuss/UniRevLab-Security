@@ -18,6 +18,7 @@ def test_required_builtin_engines_are_registered():
         "protection.deobfuscator",
         "elf.universal-inventory",
         "dotnet.static",
+        "dotnet.metadata-embedded",
         "unreal.static",
         "godot.static",
         "defold.static",
