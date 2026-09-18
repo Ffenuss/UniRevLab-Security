@@ -71,14 +71,14 @@ _ROUTES: dict[str, dict[str, Any]] = {
         "missing": ["binary/encrypted PCK file-table and binary resource semantic decoder"],
     },
     "defold": {
-        "engines": ["defold.static", "elf.static", "native.deep-embedded", "lua.static", "lua.bytecode-embedded"],
+        "engines": ["defold.static", "defold.deep-embedded", "elf.static", "native.deep-embedded", "lua.static", "lua.bytecode-embedded"],
         "coverage": "PARTIAL_BUNDLED",
-        "missing": ["Defold archive/resource semantic graph backend"],
+        "missing": ["compiled Defold archive payload decoder and original-source recovery"],
     },
     "qt_qml": {
-        "engines": ["qt.qml-static", "elf.static", "native.deep-embedded", "apktool.android", "security.passive"],
+        "engines": ["qt.qml-static", "qt.qml-deep-embedded", "elf.static", "native.deep-embedded", "apktool.android", "security.passive"],
         "coverage": "PARTIAL_BUNDLED",
-        "missing": ["QML cache/version-specific bytecode semantic backend"],
+        "missing": ["version-specific QML cache bytecode decoder and RCC payload extraction"],
     },
     "libgdx": {
         "engines": ["apktool.android", "dex.structural", "jadx.android", "elf.static", "native.deep-embedded"],
