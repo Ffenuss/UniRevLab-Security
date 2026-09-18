@@ -298,6 +298,12 @@ def _quality(card: dict) -> dict:
         priority = 88
     elif source == "NativeDeep" and str(card.get("category") or "").startswith("Runtime/Architecture"):
         priority = 82
+    elif source == "RuntimeProfiler":
+        priority = 74
+    elif source == "EngineRouter":
+        priority = 70
+    elif source == "Deobfuscation":
+        priority = 72
     elif source == "NativeDeep" and "IL2CPP Runtime Lookup" in str(card.get("category") or ""):
         priority = 78
     elif card.get("serverAudit") and ownership not in {"FRAMEWORK"}:
@@ -563,10 +569,14 @@ def build_catalog(workdir: str | Path, output_path: str | Path | None = None) ->
         ("re-analysis.menu.json", "RE"),
         ("installed-scan.json", "InstalledScan"),
         ("security-surfaces.json", "SecuritySurface"),
+        ("runtime-profiler.json", "RuntimeProfiler"),
+        ("engine-router.json", "EngineRouter"),
+        ("deobfuscation.json", "Deobfuscation"),
         ("native-deep.json", "NativeDeep"),
         ("deep-gameplay.json", "Gameplay"),
     ]
-    wanted = {"candidates", "discoveries", "cards", "findings", "controlCandidates", "controls", "methods", "surfaces"}
+    wanted = {"candidates", "discoveries", "cards", "findings", "profiles", "routes",
+              "controlCandidates", "controls", "methods", "surfaces"}
     for name, source in sources:
         obj = _json(root / name)
         if not isinstance(obj, (dict, list)):
@@ -574,20 +584,34 @@ def build_catalog(workdir: str | Path, output_path: str | Path | None = None) ->
         for key, row in _iter_rows(obj, wanted):
             add(_generic_card(row, source, key))
 
-    engine = detect_engines(_apk_paths(root))
-    pretty = {
-        "unity_il2cpp": "Unity / IL2CPP", "unity_mono": "Unity runtime", "cocos2dx_cpp": "Cocos2d-x C++",
-        "cocos2dx_lua": "Cocos2d-x Lua", "cocos2dx_js": "Cocos2d-x JavaScript", "cocos_creator": "Cocos Creator",
-        "lua_runtime": "Lua/xLua/SLua runtime", "android_dex": "Android DEX", "native": "Native ELF/.so",
-    }
-    for key in engine["detected"]:
-        ev = engine["evidence"].get(key, [])
-        add(_quality({
-            "id": f"engine:{key}", "title": pretty.get(key, key), "category": "Engine/Runtime", "source": "EngineDetection",
-            "status": "CONFIRMED", "buildable": False, "selectable": False, "actionable": False, "locator": None,
-            "menuControlId": None, "description": "Автоматически обнаруженный runtime/движок; используется для выбора анализатора.",
-            "serverAudit": False, "ownership": "ENGINE", "evidence": {"markers": ev},
-        }))
+    profiler = _json(root / "runtime-profiler.json")
+    if isinstance(profiler, dict) and isinstance(profiler.get("profiles"), list):
+        engine = {
+            "schema": profiler.get("schema"),
+            "detected": [str(x) for x in (profiler.get("detected") or [])],
+            "evidence": {
+                str(row.get("runtimeId")): list(row.get("evidence") or [])
+                for row in profiler.get("profiles") if isinstance(row, dict) and row.get("runtimeId")
+            },
+            "abis": profiler.get("abis") or [],
+            "splitAware": bool(profiler.get("splitAware")),
+            "universalProfiler": True,
+        }
+    else:
+        engine = detect_engines(_apk_paths(root))
+        pretty = {
+            "unity_il2cpp": "Unity / IL2CPP", "unity_mono": "Unity runtime", "cocos2dx_cpp": "Cocos2d-x C++",
+            "cocos2dx_lua": "Cocos2d-x Lua", "cocos2dx_js": "Cocos2d-x JavaScript", "cocos_creator": "Cocos Creator",
+            "lua_runtime": "Lua/xLua/SLua runtime", "android_dex": "Android DEX", "native": "Native ELF/.so",
+        }
+        for key in engine["detected"]:
+            ev = engine["evidence"].get(key, [])
+            add(_quality({
+                "id": f"engine:{key}", "title": pretty.get(key, key), "category": "Engine/Runtime", "source": "EngineDetection",
+                "status": "CONFIRMED", "buildable": False, "selectable": False, "actionable": False, "locator": None,
+                "menuControlId": None, "description": "Автоматически обнаруженный runtime/движок; используется для выбора анализатора.",
+                "serverAudit": False, "ownership": "ENGINE", "evidence": {"markers": ev},
+            }))
 
     cards.sort(key=lambda c: (-int(c.get("priority", 0)), str(c.get("category", "")).casefold(), str(c.get("title", "")).casefold()))
     counts: dict[str, int] = {}
