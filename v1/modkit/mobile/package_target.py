@@ -45,6 +45,11 @@ def _safe_int(value: Any, default: int = 0) -> int:
     return _parse_int(value, default)[0]
 
 
+def _is_sha256(value: Any) -> bool:
+    text = str(value or "")
+    return len(text) == 64 and all(ch in "0123456789abcdefABCDEF" for ch in text)
+
+
 def _split_sort_key(row: dict[str, Any]) -> tuple[int, int, str]:
     value, valid = _parse_int(row.get("index", 0), 0)
     return (0 if valid else 1, value, str(row.get("index") or ""))
@@ -201,21 +206,45 @@ def verify_target_manifest(target_json: str | dict[str, Any]) -> str:
     ok = schema_ok
     seen_indexes: set[int] = set()
     seen_paths: set[str] = set()
-    raw_splits = target.get("splits") if isinstance(target.get("splits"), list) else []
+    seen_names: set[str] = set()
+    raw_splits_value = target.get("splits")
+    splits_valid = isinstance(raw_splits_value, list)
+    raw_splits = raw_splits_value if splits_valid else []
+    if not splits_valid:
+        ok = False
+
     for position, split in enumerate(raw_splits):
         if not isinstance(split, dict):
             rows.append({"index": -1, "name": "", "path": "", "ok": False, "reason": "invalid-split-record"})
             ok = False
             continue
         index, index_valid = _parse_int(split.get("index", -1), -1)
-        path = Path(str(split.get("path") or ""))
+        name = str(split.get("name") or "")
+        path_text = str(split.get("path") or "")
         expected = str(split.get("sha256") or "")
-        row = {"index": index, "name": str(split.get("name") or ""), "path": str(path)}
+        row = {"index": index, "name": name, "path": path_text}
         if not index_valid or index < 0:
             row.update({"ok": False, "reason": "invalid-index"})
             ok = False
             rows.append(row)
             continue
+        if not name:
+            row.update({"ok": False, "reason": "invalid-name"})
+            ok = False
+            rows.append(row)
+            continue
+        if name in seen_names:
+            row.update({"ok": False, "reason": "duplicate-name"})
+            ok = False
+            rows.append(row)
+            continue
+        seen_names.add(name)
+        if not path_text:
+            row.update({"ok": False, "reason": "invalid-path"})
+            ok = False
+            rows.append(row)
+            continue
+        path = Path(path_text)
         canonical = str(path.resolve(strict=False))
         if index in seen_indexes:
             row.update({"ok": False, "reason": "duplicate-or-invalid-index"})
@@ -229,7 +258,10 @@ def verify_target_manifest(target_json: str | dict[str, Any]) -> str:
             rows.append(row)
             continue
         seen_paths.add(canonical)
-        if not path.is_file():
+        if not _is_sha256(expected):
+            row.update({"ok": False, "reason": "invalid-fingerprint", "expectedSha256": expected})
+            ok = False
+        elif not path.is_file():
             row.update({"ok": False, "reason": "missing"})
             ok = False
         else:
@@ -238,16 +270,22 @@ def verify_target_manifest(target_json: str | dict[str, Any]) -> str:
                 for chunk in iter(lambda: stream.read(1024 * 1024), b""):
                     h.update(chunk)
             actual = h.hexdigest()
-            row.update({"actualSha256": actual, "expectedSha256": expected, "ok": bool(expected and actual == expected)})
+            row.update({"actualSha256": actual, "expectedSha256": expected, "ok": actual == expected})
             if not row["ok"]:
-                row["reason"] = "sha256-mismatch" if expected else "missing-fingerprint"
+                row["reason"] = "sha256-mismatch"
                 ok = False
         rows.append(row)
 
     scan_complete = target.get("scanCompleteness") == "COMPLETE"
-    normalization_errors = target.get("normalizationErrors") if isinstance(target.get("normalizationErrors"), list) else []
-    if not scan_complete or normalization_errors:
+    normalization_raw = target.get("normalizationErrors", [])
+    normalization_errors_valid = isinstance(normalization_raw, list)
+    normalization_errors = normalization_raw if normalization_errors_valid else []
+    copy_errors_raw = target.get("copyErrors", [])
+    copy_errors_valid = isinstance(copy_errors_raw, list)
+    copy_errors = copy_errors_raw if copy_errors_valid else []
+    if not scan_complete or not normalization_errors_valid or normalization_errors or not copy_errors_valid or copy_errors:
         ok = False
+
     expected_count, expected_valid = _parse_int(target.get("expectedApkCount"), -1)
     copied_count, copied_valid = _parse_int(target.get("copiedApkCount"), -1)
     count_ok = (
@@ -257,6 +295,14 @@ def verify_target_manifest(target_json: str | dict[str, Any]) -> str:
         and len(rows) == expected_count
     )
     if not count_ok:
+        ok = False
+
+    expected_mode = "apk-set" if len(rows) > 1 else "single-apk"
+    build_mode_ok = target.get("buildMode") == expected_mode
+    expected_whole_set = len(rows) > 1
+    signing_flag = target.get("requiresWholeSetSigning")
+    signing_mode_ok = isinstance(signing_flag, bool) and signing_flag == expected_whole_set
+    if not build_mode_ok or not signing_mode_ok:
         ok = False
 
     owner = target.get("patchOwner") if isinstance(target.get("patchOwner"), dict) else None
@@ -276,8 +322,6 @@ def verify_target_manifest(target_json: str | dict[str, Any]) -> str:
             if not owner_ok:
                 ok = False
             else:
-                owner_path = str(owner.get("path") or "")
-                owner_sha = str(owner.get("sha256") or "")
                 matched_split = None
                 for split in raw_splits:
                     if not isinstance(split, dict):
@@ -290,9 +334,10 @@ def verify_target_manifest(target_json: str | dict[str, Any]) -> str:
                     owner_ok = False
                 else:
                     owner_ok = (
-                        owner_path == str(matched_split.get("path") or "")
-                        and bool(owner_sha)
-                        and owner_sha == str(matched_split.get("sha256") or "")
+                        str(owner.get("path") or "") == str(matched_split.get("path") or "")
+                        and str(owner.get("split") or "") == str(matched_split.get("name") or "")
+                        and _is_sha256(owner.get("sha256"))
+                        and str(owner.get("sha256") or "") == str(matched_split.get("sha256") or "")
                     )
                 if not owner_ok:
                     ok = False
@@ -305,21 +350,31 @@ def verify_target_manifest(target_json: str | dict[str, Any]) -> str:
     split_rows = [x for x in raw_splits if isinstance(x, dict)]
     actual_fingerprint = _fingerprint(package_name, version_code, split_rows)
     expected_fingerprint = str(target.get("fingerprintSha256") or "")
-    fingerprint_ok = bool(expected_fingerprint and actual_fingerprint == expected_fingerprint)
-    if not fingerprint_ok:
+    fingerprint_ok = _is_sha256(expected_fingerprint) and actual_fingerprint == expected_fingerprint
+    expected_target_id = actual_fingerprint[:24]
+    target_id_ok = str(target.get("targetId") or "") == expected_target_id
+    if not fingerprint_ok or not target_id_ok:
         ok = False
+
     return json.dumps({
         "schema": "modkit-package-target-verify-1.1",
         "ok": ok and bool(rows),
         "schemaOk": schema_ok,
+        "splitsValid": splits_valid,
         "targetId": target.get("targetId"),
+        "targetIdOk": target_id_ok,
         "scanCompleteness": target.get("scanCompleteness", "PARTIAL"),
         "scanComplete": scan_complete,
         "normalizationErrors": normalization_errors,
+        "normalizationErrorsValid": normalization_errors_valid,
+        "copyErrors": copy_errors,
+        "copyErrorsValid": copy_errors_valid,
         "expectedApkCount": expected_count,
         "copiedApkCount": copied_count,
         "memberCount": len(rows),
         "countOk": count_ok,
+        "buildModeOk": build_mode_ok,
+        "signingModeOk": signing_mode_ok,
         "fullIl2cppPair": full_pair,
         "patchOwnerOk": owner_ok,
         "fingerprintOk": fingerprint_ok,
@@ -328,25 +383,77 @@ def verify_target_manifest(target_json: str | dict[str, Any]) -> str:
         "splits": rows,
     }, ensure_ascii=False, separators=(",", ":"))
 
-
 def build_output_plan(target_json: str | dict[str, Any]) -> str:
     """Return the deterministic APK/APK-set build plan used by Android.
 
     This makes the owning-split contract independently testable without an
     Android device or signer and keeps PARTIAL or malformed targets fail-closed.
+    The plan performs structural checks only; byte re-hashing remains in
+    verify_target_manifest so callers do not scan large APK members twice here.
     """
     target = _load(target_json)
-    splits = [x for x in (target.get("splits") or []) if isinstance(x, dict)] if isinstance(target.get("splits"), list) else []
+    raw_splits_value = target.get("splits")
+    raw_splits = raw_splits_value if isinstance(raw_splits_value, list) else []
+    splits = [x for x in raw_splits if isinstance(x, dict)]
     owner = target.get("patchOwner") if isinstance(target.get("patchOwner"), dict) else None
     blockers: list[str] = []
+
     if target.get("schema") != SCHEMA:
         blockers.append("invalid-schema")
+    if not isinstance(raw_splits_value, list):
+        blockers.append("invalid-splits")
+    if len(splits) != len(raw_splits):
+        blockers.append("invalid-split-record")
     if not splits:
         blockers.append("no-splits")
     if target.get("scanCompleteness") != "COMPLETE":
         blockers.append("partial-scan")
-    if target.get("normalizationErrors"):
+
+    normalization_errors = target.get("normalizationErrors", [])
+    if not isinstance(normalization_errors, list):
+        blockers.append("invalid-normalization-errors")
+    elif normalization_errors:
         blockers.append("normalization-errors")
+    copy_errors = target.get("copyErrors", [])
+    if not isinstance(copy_errors, list):
+        blockers.append("invalid-copy-errors")
+    elif copy_errors:
+        blockers.append("copy-errors")
+
+    expected_count, expected_valid = _parse_int(target.get("expectedApkCount"), -1)
+    copied_count, copied_valid = _parse_int(target.get("copiedApkCount"), -1)
+    if not expected_valid or expected_count <= 0:
+        blockers.append("invalid-expected-apk-count")
+    if not copied_valid or copied_count < 0:
+        blockers.append("invalid-copied-apk-count")
+    if expected_valid and copied_valid and (
+        expected_count <= 0 or copied_count != expected_count or len(raw_splits) != expected_count
+    ):
+        blockers.append("apk-count-mismatch")
+
+    expected_mode = "apk-set" if len(raw_splits) > 1 else "single-apk"
+    if target.get("buildMode") != expected_mode:
+        blockers.append("build-mode-mismatch")
+    expected_whole_set = len(raw_splits) > 1
+    signing_flag = target.get("requiresWholeSetSigning")
+    if not isinstance(signing_flag, bool) or signing_flag != expected_whole_set:
+        blockers.append("signing-mode-mismatch")
+
+    version_code, version_code_valid = _parse_int(target.get("versionCode", 0), 0)
+    if not version_code_valid or version_code < 0:
+        blockers.append("invalid-version-code")
+        version_code = 0
+    actual_fingerprint = _fingerprint(
+        str(target.get("packageName") or ""),
+        version_code,
+        splits,
+    )
+    expected_fingerprint = str(target.get("fingerprintSha256") or "")
+    if not _is_sha256(expected_fingerprint) or expected_fingerprint != actual_fingerprint:
+        blockers.append("fingerprint-mismatch")
+    if str(target.get("targetId") or "") != actual_fingerprint[:24]:
+        blockers.append("target-id-mismatch")
+
     if target.get("fullIl2cppPair") and owner is None:
         blockers.append("missing-patch-owner")
 
@@ -359,6 +466,8 @@ def build_output_plan(target_json: str | dict[str, Any]) -> str:
 
     normalized: list[tuple[int, dict[str, Any]]] = []
     seen_indexes: set[int] = set()
+    seen_paths: set[str] = set()
+    seen_names: set[str] = set()
     for row in splits:
         idx, idx_valid = _parse_int(row.get("index", -1), -1)
         if not idx_valid or idx < 0:
@@ -368,10 +477,47 @@ def build_output_plan(target_json: str | dict[str, Any]) -> str:
             blockers.append("duplicate-split-index")
             continue
         seen_indexes.add(idx)
-        normalized.append((idx, row))
 
-    if owner is not None and owner_index >= 0 and owner_index not in seen_indexes:
-        blockers.append("patch-owner-not-member")
+        name = str(row.get("name") or "")
+        path = str(row.get("path") or "")
+        sha = str(row.get("sha256") or "")
+        identity_ok = True
+        if not name:
+            blockers.append("invalid-split-name")
+            identity_ok = False
+        elif name in seen_names:
+            blockers.append("duplicate-split-name")
+            identity_ok = False
+        else:
+            seen_names.add(name)
+        if not path:
+            blockers.append("invalid-split-path")
+            identity_ok = False
+        else:
+            canonical = str(Path(path).resolve(strict=False))
+            if canonical in seen_paths:
+                blockers.append("duplicate-split-path")
+                identity_ok = False
+            else:
+                seen_paths.add(canonical)
+        if not _is_sha256(sha):
+            blockers.append("invalid-split-sha256")
+            identity_ok = False
+        if identity_ok:
+            normalized.append((idx, row))
+
+    if owner is not None and owner_index >= 0:
+        owner_row = next((row for idx, row in normalized if idx == owner_index), None)
+        if owner_row is None:
+            blockers.append("patch-owner-not-member")
+        else:
+            if (
+                str(owner.get("path") or "") != str(owner_row.get("path") or "")
+                or str(owner.get("split") or "") != str(owner_row.get("name") or "")
+                or not _is_sha256(owner.get("sha256"))
+                or str(owner.get("sha256") or "") != str(owner_row.get("sha256") or "")
+            ):
+                blockers.append("patch-owner-identity-mismatch")
 
     entries = []
     for idx, row in sorted(normalized, key=lambda pair: pair[0]):
@@ -379,15 +525,19 @@ def build_output_plan(target_json: str | dict[str, Any]) -> str:
             "index": idx,
             "name": str(row.get("name") or ""),
             "path": str(row.get("path") or ""),
+            "sha256": str(row.get("sha256") or ""),
             "role": "patched-owner" if idx == owner_index else "unchanged-resign",
         })
+
     blockers = list(dict.fromkeys(blockers))
     return json.dumps({
-        "schema": "modkit-package-build-plan-1.0",
+        "schema": "modkit-package-build-plan-1.1",
         "ready": not blockers,
         "blockers": blockers,
-        "mode": "apk-set" if len(entries) > 1 else "single-apk",
-        "requiresWholeSetSigning": len(entries) > 1,
+        "mode": expected_mode,
+        "requiresWholeSetSigning": expected_whole_set,
         "patchOwnerIndex": owner_index,
+        "actualFingerprintSha256": actual_fingerprint,
         "entries": entries,
     }, ensure_ascii=False, separators=(",", ":"))
+
