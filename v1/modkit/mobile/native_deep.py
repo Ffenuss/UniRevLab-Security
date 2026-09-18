@@ -61,7 +61,11 @@ _NATIVE_MARKERS: tuple[tuple[str, tuple[str, ...]], ...] = (
                          "/proc/%d/maps", "/proc/%d/cmdline", "/proc/self/maps", "remote_dlopen")),
     ("dynamic-loader", ("dlopen", "dlsym", "android_dlopen_ext")),
     ("dobby-hook", ("dobbyhook", "dobbyinstrument", "dobbycodepatch", "dobbysymbolresolver")),
-    ("imgui-overlay", ("dear imgui", "imgui::", "imgui_impl_opengl3", "imgui_impl_android")),
+    ("imgui-overlay", (
+        "dear imgui", "imgui::",
+        "imgui_implopengl3", "imgui_impl_opengl3",
+        "imgui_implandroid", "imgui_impl_android",
+    )),
     ("egl-overlay", ("eglswapbuffers", "eglmakecurrent", "eglgetcurrentcontext", "anativewindow")),
     ("il2cpp-runtime-api", tuple(sorted(_IL2CPP_LOOKUP_APIS))),
     ("virtual-container-native", ("virtualapp", "sandhook", "nativeengine", "virtualcore")),
