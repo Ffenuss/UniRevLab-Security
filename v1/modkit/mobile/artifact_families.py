@@ -12,7 +12,7 @@ import re
 from typing import Any, Iterable
 import zipfile
 
-SCHEMA = "modkit-artifact-families-1.1"
+SCHEMA = "modkit-artifact-families-1.2"
 MAX_ENTRY_BYTES = 64 * 1024 * 1024
 MAX_TEXT_BYTES = 8 * 1024 * 1024
 MAX_ITEMS = 5000
@@ -20,6 +20,8 @@ READ_CHUNK_BYTES = 1024 * 1024
 PRINTABLE = re.compile(rb"[\x20-\x7e]{5,}")
 LUA_FN = re.compile(r"(?:^|\s)(?:local\s+)?function\s+([A-Za-z_][\w.:]*)\s*\(", re.M)
 JS_FN = re.compile(r"(?:function\s+([A-Za-z_$][\w$]*)\s*\(|(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>)")
+GDSCRIPT_FN = re.compile(r"(?:^|\s)func\s+([A-Za-z_][\w]*)\s*\(", re.M)
+QML_FN = re.compile(r"(?:^|\s)function\s+([A-Za-z_][\w]*)\s*\(", re.M)
 
 
 class ArtifactScanCancelled(RuntimeError):
@@ -119,6 +121,32 @@ def _classify(name: str, data: bytes) -> tuple[str | None, str, str, list[str]]:
         return "cocos", "native-engine", "NATIVE_ENGINE", markers
     if "cocos" in low or (low.endswith(("project.js", "settings.js")) and "assets/" in low):
         return "cocos", "engine-or-script", "RECONSTRUCTED_METADATA", markers
+    if low.endswith(".dll") and (
+        low.startswith("assemblies/") or "/managed/" in low or "/assemblies/" in low
+        or low.startswith("assets/bin/data/managed/")
+    ):
+        extra = ["unity-managed"] if "/managed/" in low or "assets/bin/data/managed/" in low else []
+        return "dotnet", "managed-pe", "MANAGED_ASSEMBLY", extra
+    if low.endswith((".pak", ".ucas", ".utoc")) or "pakchunk" in low:
+        return "unreal", "cooked-container", "CONTAINER_INVENTORY", markers
+    if low.endswith((".uasset", ".uexp", ".ubulk")):
+        return "unreal", "cooked-asset", "CONTAINER_INVENTORY", markers
+    if low.endswith(".pck"):
+        return "godot", "pck-container", "CONTAINER_INVENTORY", markers
+    if low.endswith(".gd"):
+        return "godot", "gdscript-source", "DECOMPILED_SOURCE", markers
+    if low.endswith((".tscn", ".tres")):
+        return "godot", "text-resource", "DECOMPILED_SOURCE", markers
+    if low.endswith(("game.arcd", "game.arci", "game.dmanifest", "game.projectc")):
+        return "defold", "archive-or-manifest", "CONTAINER_INVENTORY", markers
+    if low.endswith(".qml"):
+        return "qt_qml", "qml-source", "DECOMPILED_SOURCE", markers
+    if low.endswith((".qmlc", ".jsc")) and "/qml" in low:
+        return "qt_qml", "qml-bytecode", "DISASSEMBLED_METADATA", markers
+    if low.endswith(".rcc"):
+        return "qt_qml", "qt-resource-container", "CONTAINER_INVENTORY", markers
+    if low.endswith(".wasm") or data.startswith(b"\x00asm"):
+        return "webassembly", "wasm-bytecode", "DISASSEMBLED_METADATA", markers
     return None, "", "", markers
 
 
@@ -133,13 +161,19 @@ def _source_symbols(family: str, data: bytes, cb: Any | None = None) -> list[dic
     seen: set[str] = set()
     line_no = 1
     line_scan_pos = 0
-    regex = LUA_FN if family == "lua" else JS_FN if family == "javascript" else None
+    regex = (
+        LUA_FN if family == "lua"
+        else JS_FN if family == "javascript"
+        else GDSCRIPT_FN if family == "godot"
+        else QML_FN if family == "qt_qml"
+        else None
+    )
     if regex is None:
         return out
     for no, match in enumerate(regex.finditer(text)):
         if (no & 0x7F) == 0:
             _check(cb)
-        if family == "lua":
+        if family in {"lua", "godot", "qt_qml"}:
             value = match.group(1)
             offset = match.start(1)
         else:
@@ -161,15 +195,22 @@ def _source_symbols(family: str, data: bytes, cb: Any | None = None) -> list[dic
     return out
 
 
-def _read_entry(zf: zipfile.ZipFile, info: zipfile.ZipInfo, cb: Any | None = None) -> bytes:
+def _read_entry(zf: zipfile.ZipFile, info: zipfile.ZipInfo, cb: Any | None = None,
+                limit: int | None = None) -> bytes:
     chunks: list[bytes] = []
+    remaining = max(0, int(limit)) if limit is not None else None
     with zf.open(info, "r") as source:
         while True:
             _check(cb)
-            chunk = source.read(READ_CHUNK_BYTES)
+            if remaining is not None and remaining <= 0:
+                break
+            size = READ_CHUNK_BYTES if remaining is None else min(READ_CHUNK_BYTES, remaining)
+            chunk = source.read(size)
             if not chunk:
                 break
             chunks.append(chunk)
+            if remaining is not None:
+                remaining -= len(chunk)
     _check(cb)
     return b"".join(chunks)
 
@@ -196,11 +237,17 @@ def scan_apk_paths(paths: Iterable[str | Path], output_path: str | Path | None =
                     if info.is_dir() or info.file_size <= 0 or info.file_size > MAX_ENTRY_BYTES:
                         continue
                     low = info.filename.lower()
-                    likely = any(x in low for x in (".lua", ".js", ".jsc", ".hbc", ".bundle", "hermes", "flutter", "cocos", "snapshot", "libapp.so"))
+                    likely = any(x in low for x in (
+                        ".lua", ".js", ".jsc", ".hbc", ".bundle", "hermes", "flutter", "cocos", "snapshot", "libapp.so",
+                        ".dll", ".pak", ".ucas", ".utoc", ".uasset", ".uexp", ".ubulk", ".pck", ".gd", ".tscn", ".tres",
+                        "game.arcd", "game.arci", "game.dmanifest", "game.projectc", ".qml", ".qmlc", ".rcc", ".wasm",
+                    ))
                     if not likely:
                         continue
+                    pre_family, pre_representation, pre_recovery, _pre_markers = _classify(info.filename, b"")
+                    bounded_container = pre_recovery in {"CONTAINER_INVENTORY", "MANAGED_ASSEMBLY", "DISASSEMBLED_METADATA"}
                     try:
-                        data = _read_entry(z, info, cb)
+                        data = _read_entry(z, info, cb, 1024 * 1024 if bounded_container else None)
                     except ArtifactScanCancelled:
                         raise
                     except Exception:
@@ -210,7 +257,9 @@ def scan_apk_paths(paths: Iterable[str | Path], output_path: str | Path | None =
                     family, representation, recovery, markers = _classify(info.filename, data)
                     if not family:
                         continue
-                    symbol_locs = _source_symbols(family, data, cb) if representation in ("source", "source-or-bundle") else []
+                    symbol_locs = _source_symbols(family, data, cb) if representation in (
+                        "source", "source-or-bundle", "gdscript-source", "qml-source"
+                    ) else []
                     symbols = [item["name"] for item in symbol_locs]
                     strings = _strings(data, 80, cb) if recovery != "DECOMPILED_SOURCE" else []
                     row = {
