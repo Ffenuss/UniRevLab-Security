@@ -91,11 +91,13 @@ def test_asset_elf_is_included_in_native_candidate_inventory(tmp_path: Path):
     with zipfile.ZipFile(apk, "w") as zf:
         zf.writestr("classes.dex", b"/data/local/tmp/\0chmod 755\0libsuperuser")
         zf.writestr("assets/execML", b"\x7fELF" + b"not-a-real-elf")
+        zf.writestr("assets/libPayload.so", b"\x7fELF" + b"also-not-a-real-elf")
     report = native_deep.scan_apk_paths([apk], tmp_path / "cache")
-    assert report["candidateElfCount"] == 1
-    assert report["candidateLibraryCount"] == 1
+    assert report["candidateElfCount"] == 2
+    assert report["candidateLibraryCount"] == 2
     assert report["analyzedLibraryCount"] == 0
-    assert any(row.get("entry") == "assets/execML" for row in report["errors"])
+    error_entries = {row.get("entry") for row in report["errors"]}
+    assert {"assets/execML", "assets/libPayload.so"} <= error_entries
     assert any(
         feature.get("kind") == "ROOT_INJECTOR_ORCHESTRATOR"
         for profile in report["containerProfiles"]
