@@ -20,13 +20,11 @@ jobs:
       - name: Checkout build branch
         uses: actions/checkout@v4
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install Android NDK r22b
         shell: bash
         run: |
           set -euo pipefail
+          command -v sdkmanager
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "ndk;22.1.7171670"
           test -x "$ANDROID_SDK_ROOT/ndk/22.1.7171670/ndk-build"
