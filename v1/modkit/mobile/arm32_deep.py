@@ -782,6 +782,12 @@ def analyze_elf(
             "apk": apk_name,
             "entry": entry,
             **edge,
+            "nativeEdgeKind": edge.get("kind"),
+            "kind": (
+                "ARM32_DYNAMIC_LOOKUP_FLOW"
+                if edge.get("targetResolution") == "DLSYM_RESULT_FLOW"
+                else "ARM32_CONTROL_FLOW_EDGE"
+            ),
             "instructionBoundaryConfirmed": True,
             "functionBoundarySource": "ELF_FUNCTION_SYMBOL",
             "patchReady": False,
