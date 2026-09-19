@@ -103,6 +103,7 @@ def test_router_marks_non_arm64_native_deep_backend_partial(tmp_path: Path):
     assert any(
         "x86_64" in item
         and "without usable unwind metadata" in item
+        and "without decoded direct-call/entry seeds" in item
         and ".eh_frame_hdr" in item
         for item in row["missingBackends"]
     )
