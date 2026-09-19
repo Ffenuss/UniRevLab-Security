@@ -129,7 +129,8 @@ def route(profile_report: dict[str, Any], output_path: str | Path | None = None)
                 if abi == "armeabi-v7a":
                     route_missing.append(
                         "stripped-function boundary recovery, indirect branch/table target recovery and "
-                        "interprocedural/PLT veneer value propagation; symbol-bounded basic-block CFG, "
+                        "interprocedural propagation beyond relocation-backed PLT veneers; "
+                        "symbol-bounded basic-block CFG, "
                         "cross-block identical-fact propagation, PC-relative literal flow, register/stack "
                         "arguments, portable relocations and dlsym result tracking are bundled"
                     )
