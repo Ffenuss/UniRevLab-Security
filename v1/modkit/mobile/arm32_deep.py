@@ -14,9 +14,9 @@ import struct
 from typing import Any, Callable, Iterable
 import zipfile
 
-from modkit.mobile.native_portable import ElfView, EM_ARM
+from modkit.mobile.cfg_flow import build_cfg, clone_token_map, merge_token_maps\nfrom modkit.mobile.native_portable import ElfView, EM_ARM
 
-SCHEMA = "modkit-arm32-deep-1.1"
+SCHEMA = "modkit-arm32-deep-1.2"
 ENGINE_ID = "native.arm32-deep-embedded"
 MAX_LIBRARY_BYTES = 256 * 1024 * 1024
 MAX_FUNCTION_BYTES = 512 * 1024
@@ -476,19 +476,26 @@ def _operand_token(
     )
 
 
-def _capstone_call_flow(
+def _run_capstone_block(
     instructions: list[dict[str, Any]],
     *,
+    block_start: int,
     row: dict[str, Any],
     file_start: int,
     view: ElfView,
     targets: dict[int, str],
     relocations: dict[int, str],
+    initial_state: dict[str, dict[str, Any]],
+    initial_stack_slots: dict[str, dict[str, Any]],
     cb: Any | None,
-) -> list[dict[str, Any]]:
+) -> tuple[
+    dict[str, dict[str, Any]],
+    dict[str, dict[str, Any]],
+    list[dict[str, Any]],
+]:
     thumb = bool(row["thumb"])
-    state: dict[str, dict[str, Any]] = {}
-    stack_slots: dict[int, dict[str, Any]] = {}
+    state = clone_token_map(initial_state)
+    stack_slots = clone_token_map(initial_stack_slots)
     out: list[dict[str, Any]] = []
 
     for index, insn in enumerate(instructions):
@@ -504,8 +511,9 @@ def _capstone_call_flow(
             dest = _arm_reg(ops[0].get("reg"))
             if dest:
                 token = _operand_token(
-                    ops[1], state=state, stack_slots=stack_slots, insn=insn,
-                    view=view, thumb=thumb, relocations=relocations,
+                    ops[1], state=state,
+                    stack_slots={int(k): v for k, v in stack_slots.items()},
+                    insn=insn, view=view, thumb=thumb, relocations=relocations,
                 )
                 if token is None:
                     state.pop(dest, None)
@@ -517,8 +525,9 @@ def _capstone_call_flow(
             dest = _arm_reg(ops[0].get("reg"))
             if dest:
                 token = _operand_token(
-                    ops[1], state=state, stack_slots=stack_slots, insn=insn,
-                    view=view, thumb=thumb, relocations=relocations,
+                    ops[1], state=state,
+                    stack_slots={int(k): v for k, v in stack_slots.items()},
+                    insn=insn, view=view, thumb=thumb, relocations=relocations,
                 )
                 if token is None:
                     state.pop(dest, None)
@@ -530,8 +539,9 @@ def _capstone_call_flow(
             dest = _arm_reg(ops[0].get("reg"))
             if dest:
                 token = _operand_token(
-                    ops[1], state=state, stack_slots=stack_slots, insn=insn,
-                    view=view, thumb=thumb, relocations=relocations,
+                    ops[1], state=state,
+                    stack_slots={int(k): v for k, v in stack_slots.items()},
+                    insn=insn, view=view, thumb=thumb, relocations=relocations,
                 )
                 if token is None:
                     state.pop(dest, None)
@@ -545,13 +555,15 @@ def _capstone_call_flow(
                 if _arm_reg(mem.get("index")) is None:
                     disp = int(mem.get("disp") or 0)
                     token = _operand_token(
-                        ops[0], state=state, stack_slots=stack_slots, insn=insn,
-                        view=view, thumb=thumb, relocations=relocations,
+                        ops[0], state=state,
+                        stack_slots={int(k): v for k, v in stack_slots.items()},
+                        insn=insn, view=view, thumb=thumb, relocations=relocations,
                     )
+                    key = str(disp)
                     if token is None:
-                        stack_slots.pop(disp, None)
+                        stack_slots.pop(key, None)
                     else:
-                        stack_slots[disp] = token
+                        stack_slots[key] = token
 
         is_call = bool(insn.get("isCall"))
         if is_call:
@@ -583,8 +595,11 @@ def _capstone_call_flow(
                 dict(state[reg]) if reg in state else None
                 for reg in ("r0", "r1", "r2", "r3")
             ]
-            for disp in sorted(key for key in stack_slots if key >= 0):
-                args.append(dict(stack_slots[disp]))
+            for key in sorted(
+                (k for k in stack_slots if int(k) >= 0),
+                key=lambda value: int(value),
+            ):
+                args.append(dict(stack_slots[key]))
 
             edge: dict[str, Any] = {
                 "sourceRva": int(row["rva"]),
@@ -600,6 +615,8 @@ def _capstone_call_flow(
                 "instructionWidth": size,
                 "mode": "THUMB" if thumb else "A32",
                 "decoder": "capstone",
+                "basicBlockRva": block_start,
+                "cfgReachable": True,
             }
             if any(arg is not None for arg in args):
                 edge["argumentEvidence"] = args
@@ -631,8 +648,106 @@ def _capstone_call_flow(
             if reg and reg not in handled and not is_call:
                 state.pop(reg, None)
 
-    return out
+    return state, stack_slots, out
 
+
+def _capstone_call_flow(
+    instructions: list[dict[str, Any]],
+    *,
+    row: dict[str, Any],
+    file_start: int,
+    view: ElfView,
+    targets: dict[int, str],
+    relocations: dict[int, str],
+    cb: Any | None,
+) -> dict[str, Any]:
+    cfg = build_cfg(instructions, arch="arm")
+    blocks = cfg.get("blocks") or []
+    entry = cfg.get("entry")
+    if entry is None or not blocks:
+        return {
+            "edges": [],
+            "basicBlockCount": 0,
+            "reachableBlockCount": 0,
+            "cfgEdgeCount": 0,
+            "cfgConverged": True,
+        }
+
+    by_start = {int(block["start"]): block for block in blocks}
+    incoming_state: dict[int, dict[str, dict[str, Any]]] = {int(entry): {}}
+    incoming_stack: dict[int, dict[str, dict[str, Any]]] = {int(entry): {}}
+    worklist: list[int] = [int(entry)]
+    queued: set[int] = {int(entry)}
+    block_edges: dict[int, list[dict[str, Any]]] = {}
+    reached: set[int] = set()
+    iterations = 0
+    max_iterations = max(64, len(blocks) * 64)
+
+    while worklist and iterations < max_iterations:
+        _check(cb)
+        block_start = worklist.pop(0)
+        queued.discard(block_start)
+        block = by_start.get(block_start)
+        if block is None:
+            continue
+        reached.add(block_start)
+        iterations += 1
+
+        state, stack_slots, produced = _run_capstone_block(
+            block.get("instructions") or [],
+            block_start=block_start,
+            row=row,
+            file_start=file_start,
+            view=view,
+            targets=targets,
+            relocations=relocations,
+            initial_state=incoming_state.get(block_start, {}),
+            initial_stack_slots=incoming_stack.get(block_start, {}),
+            cb=cb,
+        )
+        block_edges[block_start] = produced
+
+        for raw_successor in block.get("successors") or []:
+            successor = int(raw_successor)
+            if successor not in by_start:
+                continue
+            candidate_state = clone_token_map(state)
+            candidate_stack = clone_token_map(stack_slots)
+            if successor not in incoming_state:
+                incoming_state[successor] = candidate_state
+                incoming_stack[successor] = candidate_stack
+                changed = True
+            else:
+                merged_state = merge_token_maps(
+                    incoming_state[successor], candidate_state
+                )
+                merged_stack = merge_token_maps(
+                    incoming_stack.get(successor, {}), candidate_stack
+                )
+                changed = (
+                    merged_state != incoming_state[successor]
+                    or merged_stack != incoming_stack.get(successor, {})
+                )
+                if changed:
+                    incoming_state[successor] = merged_state
+                    incoming_stack[successor] = merged_stack
+            if changed and successor not in queued:
+                worklist.append(successor)
+                queued.add(successor)
+
+    edges: list[dict[str, Any]] = []
+    for block in blocks:
+        block_start = int(block["start"])
+        if block_start in reached:
+            edges.extend(block_edges.get(block_start, []))
+
+    return {
+        "edges": edges,
+        "basicBlockCount": len(blocks),
+        "reachableBlockCount": len(reached),
+        "cfgEdgeCount": int(cfg.get("edgeCount") or 0),
+        "cfgConverged": not worklist,
+    }
 
 def _merge_capstone_flow(
     base_edges: list[dict[str, Any]],
@@ -691,6 +806,10 @@ def analyze_elf(
     a32_count = 0
     capstone_function_count = 0
     operand_detail_available = False
+    basic_block_count = 0
+    reachable_block_count = 0
+    cfg_edge_count = 0
+    cfg_converged = True
 
     for row in regions:
         _check(cb)
@@ -730,7 +849,7 @@ def analyze_elf(
                     for insn in instructions
                 ):
                     operand_detail_available = True
-                flow_edges = _capstone_call_flow(
+                flow = _capstone_call_flow(
                     instructions,
                     row=row,
                     file_start=file_start,
@@ -739,6 +858,11 @@ def analyze_elf(
                     relocations=relocations,
                     cb=cb,
                 )
+                basic_block_count += int(flow.get("basicBlockCount") or 0)
+                reachable_block_count += int(flow.get("reachableBlockCount") or 0)
+                cfg_edge_count += int(flow.get("cfgEdgeCount") or 0)
+                cfg_converged = cfg_converged and bool(flow.get("cfgConverged", True))
+                flow_edges = flow.get("edges") or []
             else:
                 errors.append({
                     "function": row["name"],
@@ -810,6 +934,10 @@ def analyze_elf(
         "a32FunctionCount": a32_count,
         "scannedCodeBytes": total,
         "relocationSymbolCount": len(relocations),
+        "basicBlockCount": basic_block_count,
+        "reachableBasicBlockCount": reachable_block_count,
+        "cfgEdgeCount": cfg_edge_count,
+        "cfgConverged": cfg_converged,
         "edgeCount": len(edges),
         "edges": edges,
         "findingCount": len(findings),
@@ -824,6 +952,9 @@ def analyze_elf(
             "stackSlotFlow": True,
             "pcRelativeLiteralFlow": True,
             "dlsymReturnFlow": True,
+            "basicBlockCfg": True,
+            "crossBasicBlockValuePropagation": True,
+            "joinPolicy": "IDENTICAL_FACTS_ONLY",
             "indirectRegisterTargetsResolvedWithoutProof": False,
             "patchReadyFromControlFlow": False,
         },
