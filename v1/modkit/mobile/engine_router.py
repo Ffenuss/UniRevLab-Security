@@ -128,18 +128,19 @@ def route(profile_report: dict[str, Any], output_path: str | Path | None = None)
             for abi in sorted(abi for abi in abis if abi != "arm64-v8a"):
                 if abi == "armeabi-v7a":
                     route_missing.append(
-                        "stripped-function boundary recovery, indirect branch/table target recovery and "
-                        "interprocedural propagation beyond relocation-backed PLT veneers; "
-                        "symbol-bounded basic-block CFG, "
+                        "stripped binaries without usable unwind metadata, indirect branch/table target "
+                        "recovery and interprocedural propagation beyond relocation-backed PLT veneers; "
+                        "ELF symbols + ARM.exidx/.eh_frame_hdr exact function recovery, basic-block CFG, "
                         "cross-block identical-fact propagation, PC-relative literal flow, register/stack "
                         "arguments, portable relocations and dlsym result tracking are bundled"
                     )
                 elif abi in {"x86", "x86_64"}:
                     route_missing.append(
-                        f"stripped-function boundary recovery, indirect jump-table target recovery and "
-                        f"interprocedural propagation for {abi}; Capstone basic-block CFG, cross-block "
-                        "identical-fact propagation, register/stack argument flow, RIP/GOT relocation "
-                        "flow and dlsym result tracking are bundled"
+                        f"stripped binaries without usable unwind metadata, indirect jump-table target "
+                        f"recovery and interprocedural propagation for {abi}; ELF symbols + .eh_frame_hdr "
+                        "exact function recovery, Capstone basic-block CFG, cross-block identical-fact "
+                        "propagation, register/stack argument flow, RIP/GOT relocation flow and dlsym "
+                        "result tracking are bundled"
                     )
                 else:
                     route_missing.append(
