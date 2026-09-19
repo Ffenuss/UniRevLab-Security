@@ -111,6 +111,41 @@ void append_registers(std::ostringstream &out, csh handle, const cs_insn &insn,
     out << "]";
 }
 
+
+void append_x86_operands(std::ostringstream &out, csh handle, const cs_insn &insn) {
+    out << "[";
+    if (insn.detail) {
+        const cs_x86 &detail = insn.detail->x86;
+        for (uint8_t i = 0; i < detail.op_count; ++i) {
+            if (i) out << ",";
+            const cs_x86_op &op = detail.operands[i];
+            out << "{\"size\":" << static_cast<unsigned>(op.size)
+                << ",\"access\":" << static_cast<unsigned>(op.access);
+            if (op.type == X86_OP_REG) {
+                const char *name = cs_reg_name(handle, op.reg);
+                out << ",\"type\":\"REG\",\"reg\":\""
+                    << json_escape(name ? name : "") << "\"";
+            } else if (op.type == X86_OP_IMM) {
+                out << ",\"type\":\"IMM\",\"imm\":" << op.imm;
+            } else if (op.type == X86_OP_MEM) {
+                const char *segment = cs_reg_name(handle, op.mem.segment);
+                const char *base = cs_reg_name(handle, op.mem.base);
+                const char *index = cs_reg_name(handle, op.mem.index);
+                out << ",\"type\":\"MEM\",\"mem\":{"
+                    << "\"segment\":\"" << json_escape(segment ? segment : "") << "\","
+                    << "\"base\":\"" << json_escape(base ? base : "") << "\","
+                    << "\"index\":\"" << json_escape(index ? index : "") << "\","
+                    << "\"scale\":" << op.mem.scale << ","
+                    << "\"disp\":" << op.mem.disp << "}";
+            } else {
+                out << ",\"type\":\"INVALID\"";
+            }
+            out << "}";
+        }
+    }
+    out << "]";
+}
+
 jstring result(JNIEnv *env, const std::string &value) {
     return env->NewStringUTF(value.c_str());
 }
@@ -220,6 +255,10 @@ Java_dev_modkit_mobile_NativeDisasmBridge_disassemble(
         append_registers(out, handle, insn, true);
         out << ",\"regsWrite\":";
         append_registers(out, handle, insn, false);
+        if (arch == CS_ARCH_X86) {
+            out << ",\"operands\":";
+            append_x86_operands(out, handle, insn);
+        }
         out << "}";
     }
     out << "]}";
