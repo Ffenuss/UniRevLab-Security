@@ -909,8 +909,16 @@ def analyze_elf(
                 and bool(target_boundary.get("recoveredBoundary"))
                 and edge.get("targetResolution") == "STATIC_SYMBOL"
             ):
-                edge["targetResolution"] = "EXACT_UNWIND_START"
-                edge["targetBoundarySource"] = target_boundary.get("boundarySource")
+                source = str(target_boundary.get("boundarySource") or "")
+                if source == "EH_FRAME_HDR":
+                    edge["targetResolution"] = "EXACT_UNWIND_START"
+                elif source == "ELF_ENTRY_POINT":
+                    edge["targetResolution"] = "EXACT_ELF_ENTRY_POINT"
+                elif source == "CAPSTONE_DIRECT_CALL_TARGET":
+                    edge["targetResolution"] = "CORRELATED_DIRECT_CALL_START"
+                else:
+                    edge["targetResolution"] = "RECOVERED_FUNCTION_START"
+                edge["targetBoundarySource"] = source
         remaining = MAX_EDGES - len(edges)
         if remaining <= 0:
             break
@@ -984,7 +992,14 @@ def analyze_elf(
         "errors": errors,
         "policy": {
             "symbolBoundedOnly": recovered_function_count == 0,
-            "symbolOrExactUnwindBounded": True,
+            "symbolOrExactUnwindBounded": (
+                direct_call_recovered_count == 0
+                and all(
+                    not bool(row.get("recoveredBoundary"))
+                    or str(row.get("boundarySource") or "") == "EH_FRAME_HDR"
+                    for row in regions
+                )
+            ),
             "unwindFunctionRecovery": unwind_recovered_count > 0,
             "directCallSeededRecovery": direct_call_recovered_count > 0,
             "directCallSeedRequiresDecodedInstructionBoundary": True,
