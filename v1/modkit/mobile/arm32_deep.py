@@ -945,6 +945,7 @@ def analyze_elf(
 
     regions = _function_regions(view)
     targets = _target_names(regions)
+    boundary_rows = {int(row["rva"]): row for row in regions}
     relocations = _relocation_symbols(view)
     decode = decoder or _java_capstone_decode
     plt_targets = _plt_import_targets(view, decode, relocations)
@@ -1035,6 +1036,18 @@ def analyze_elf(
 
         new_edges = _merge_capstone_flow(base_edges, flow_edges)
         for edge in new_edges:
+            target_rva = edge.get("targetRva")
+            target_boundary = (
+                boundary_rows.get(int(target_rva))
+                if isinstance(target_rva, int) else None
+            )
+            if (
+                target_boundary
+                and bool(target_boundary.get("recoveredBoundary"))
+                and edge.get("targetResolution") == "STATIC_SYMBOL"
+            ):
+                edge["targetResolution"] = "EXACT_UNWIND_START"
+                edge["targetBoundarySource"] = target_boundary.get("boundarySource")
             edge.setdefault(
                 "functionBoundarySource",
                 str(row.get("boundarySource") or "ELF_FUNCTION_SYMBOL"),
