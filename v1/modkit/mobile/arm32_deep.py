@@ -322,7 +322,10 @@ def _java_capstone_decode(
 
 def _arm_reg(value: Any) -> str | None:
     low = str(value or "").casefold()
-    aliases = {"sp": "r13", "lr": "r14", "pc": "r15"}
+    aliases = {
+        "sb": "r9", "sl": "r10", "fp": "r11", "ip": "r12",
+        "sp": "r13", "lr": "r14", "pc": "r15",
+    }
     if low in aliases:
         return aliases[low]
     if low.startswith("r") and low[1:].isdigit() and 0 <= int(low[1:]) <= 15:
