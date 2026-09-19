@@ -146,6 +146,39 @@ void append_x86_operands(std::ostringstream &out, csh handle, const cs_insn &ins
     out << "]";
 }
 
+
+void append_arm_operands(std::ostringstream &out, csh handle, const cs_insn &insn) {
+    out << "[";
+    if (insn.detail) {
+        const cs_arm &detail = insn.detail->arm;
+        for (uint8_t i = 0; i < detail.op_count; ++i) {
+            if (i) out << ",";
+            const cs_arm_op &op = detail.operands[i];
+            out << "{\"access\":" << static_cast<unsigned>(op.access);
+            if (op.type == ARM_OP_REG) {
+                const char *name = cs_reg_name(handle, op.reg);
+                out << ",\"type\":\"REG\",\"reg\":\""
+                    << json_escape(name ? name : "") << "\"";
+            } else if (op.type == ARM_OP_IMM) {
+                out << ",\"type\":\"IMM\",\"imm\":" << op.imm;
+            } else if (op.type == ARM_OP_MEM) {
+                const char *base = cs_reg_name(handle, op.mem.base);
+                const char *index = cs_reg_name(handle, op.mem.index);
+                out << ",\"type\":\"MEM\",\"mem\":{"
+                    << "\"base\":\"" << json_escape(base ? base : "") << "\","
+                    << "\"index\":\"" << json_escape(index ? index : "") << "\","
+                    << "\"scale\":" << op.mem.scale << ","
+                    << "\"disp\":" << op.mem.disp << "}";
+            } else {
+                out << ",\"type\":\"INVALID\"";
+            }
+            out << ",\"subtracted\":" << (op.subtracted ? "true" : "false")
+                << "}";
+        }
+    }
+    out << "]";
+}
+
 jstring result(JNIEnv *env, const std::string &value) {
     return env->NewStringUTF(value.c_str());
 }
@@ -258,6 +291,9 @@ Java_dev_modkit_mobile_NativeDisasmBridge_disassemble(
         if (arch == CS_ARCH_X86) {
             out << ",\"operands\":";
             append_x86_operands(out, handle, insn);
+        } else if (arch == CS_ARCH_ARM) {
+            out << ",\"operands\":";
+            append_arm_operands(out, handle, insn);
         }
         out << "}";
     }
