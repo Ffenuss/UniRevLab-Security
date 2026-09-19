@@ -66,6 +66,7 @@ def test_runtime_profiler_is_multi_label_for_mixed_android_stack(tmp_path: Path)
     assert "cocos.deep-embedded" in routed["selectedEngines"]
     assert "native.portable-embedded" in routed["selectedEngines"]
     assert "native.arm32-deep-embedded" in routed["selectedEngines"]
+    assert "native.x86-deep-embedded" in routed["selectedEngines"]
     assert "jsc.deep-embedded" in routed["selectedEngines"]
     assert "webassembly.deep-embedded" in routed["selectedEngines"]
 
@@ -99,7 +100,10 @@ def test_router_marks_non_arm64_native_deep_backend_partial(tmp_path: Path):
     row = routed["routes"][0]
     assert row["runtimeId"] == "native_elf"
     assert row["coverage"] == "PARTIAL_BUNDLED"
-    assert any("x86_64" in item for item in row["missingBackends"])
+    assert any(
+        "x86_64" in item and "cross-basic-block" in item
+        for item in row["missingBackends"]
+    )
 
 
 def test_unknown_package_gets_generic_fallback_not_empty_support(tmp_path: Path):
@@ -120,4 +124,7 @@ def test_embedded_pipeline_publishes_universal_reports():
     assert 'root / "runtime-profiler.json"' in source
     assert 'root / "engine-router.json"' in source
     assert 'root / "deobfuscation.json"' in source
-    assert '"Embedded 20/20 · gameplay semantic correlation…"' in source
+    assert '"Embedded 17/21 · x86 / x86-64 Capstone data flow…"' in source
+    assert 'root / "x86-deep.json"' in source
+    assert '"x86Report": "x86-deep.json"' in source
+    assert '"Embedded 21/21 · gameplay semantic correlation…"' in source
