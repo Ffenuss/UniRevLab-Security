@@ -12,7 +12,10 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 import zipfile
 
-from modkit.mobile.cfg_flow import (\n    build_cfg, clone_token_list, clone_token_map, merge_token_lists, merge_token_maps,\n)\nfrom modkit.mobile.native_portable import ElfView, EM_386, EM_X86_64
+from modkit.mobile.cfg_flow import (
+    build_cfg, clone_token_list, clone_token_map, merge_token_lists, merge_token_maps,
+)
+from modkit.mobile.native_portable import ElfView, EM_386, EM_X86_64
 
 SCHEMA = "modkit-x86-deep-1.2"
 ENGINE_ID = "native.x86-deep-embedded"
