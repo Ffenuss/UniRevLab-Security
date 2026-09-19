@@ -15,6 +15,7 @@ from typing import Any, Callable, Iterable
 import zipfile
 
 from modkit.mobile.cfg_flow import build_cfg, clone_token_map, merge_token_maps
+from modkit.mobile.native_function_recovery import recovered_regions
 from modkit.mobile.native_portable import ElfView, EM_ARM
 
 SCHEMA = "modkit-arm32-deep-1.2"
@@ -112,7 +113,13 @@ def _function_regions(view: ElfView) -> list[dict[str, Any]]:
                 "size": end - start,
                 "thumb": bool(sym.value & 1),
                 "section": sec,
+                "boundarySource": "ELF_FUNCTION_SYMBOL",
+                "boundaryConfidence": "EXACT_SYMBOL",
+                "recoveredBoundary": False,
             })
+    rows.extend(
+        recovered_regions(view, rows, max_function_bytes=MAX_FUNCTION_BYTES)
+    )
     rows.sort(key=lambda row: (row["rva"], row["name"]))
     return rows
 
@@ -949,6 +956,10 @@ def analyze_elf(
     a32_count = 0
     capstone_function_count = 0
     operand_detail_available = False
+    recovered_function_count = sum(
+        1 for row in regions if bool(row.get("recoveredBoundary"))
+    )
+    symbol_function_count = len(regions) - recovered_function_count
     basic_block_count = 0
     reachable_block_count = 0
     cfg_edge_count = 0
@@ -1023,6 +1034,15 @@ def analyze_elf(
                 })
 
         new_edges = _merge_capstone_flow(base_edges, flow_edges)
+        for edge in new_edges:
+            edge.setdefault(
+                "functionBoundarySource",
+                str(row.get("boundarySource") or "ELF_FUNCTION_SYMBOL"),
+            )
+            edge.setdefault(
+                "recoveredFunctionBoundary",
+                bool(row.get("recoveredBoundary")),
+            )
         remaining = MAX_EDGES - len(edges)
         if remaining <= 0:
             break
@@ -1057,7 +1077,8 @@ def analyze_elf(
                 else "ARM32_CONTROL_FLOW_EDGE"
             ),
             "instructionBoundaryConfirmed": True,
-            "functionBoundarySource": "ELF_FUNCTION_SYMBOL",
+            "functionBoundarySource": edge.get("functionBoundarySource"),
+            "recoveredFunctionBoundary": bool(edge.get("recoveredFunctionBoundary")),
             "patchReady": False,
             "automationExcluded": True,
             "runtimeConfirmed": False,
@@ -1071,6 +1092,8 @@ def analyze_elf(
         "arch": "arm",
         "bits": 32,
         "functionCount": len(regions),
+        "symbolFunctionCount": symbol_function_count,
+        "recoveredFunctionCount": recovered_function_count,
         "analyzedFunctionCount": analyzed,
         "capstoneFunctionCount": capstone_function_count,
         "operandDetailAvailable": operand_detail_available,
@@ -1089,7 +1112,9 @@ def analyze_elf(
         "findings": findings,
         "errors": errors,
         "policy": {
-            "symbolBoundedOnly": True,
+            "symbolBoundedOnly": recovered_function_count == 0,
+            "symbolOrExactUnwindBounded": True,
+            "unwindFunctionRecovery": recovered_function_count > 0,
             "strippedRegionGuessing": False,
             "x86ByteHeuristicUsed": False,
             "capstoneOperandFlowOptional": True,
