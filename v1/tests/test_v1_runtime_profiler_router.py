@@ -101,7 +101,9 @@ def test_router_marks_non_arm64_native_deep_backend_partial(tmp_path: Path):
     assert row["runtimeId"] == "native_elf"
     assert row["coverage"] == "PARTIAL_BUNDLED"
     assert any(
-        "x86_64" in item and "stripped-function" in item
+        "x86_64" in item
+        and "without usable unwind metadata" in item
+        and ".eh_frame_hdr" in item
         for item in row["missingBackends"]
     )
 
@@ -116,8 +118,9 @@ def test_router_reports_arm32_remaining_cfg_gap(tmp_path: Path):
     row = routed["routes"][0]
     assert row["coverage"] == "PARTIAL_BUNDLED"
     assert any(
-        "stripped-function" in item
+        "without usable unwind metadata" in item
         and "indirect branch/table" in item
+        and "ARM.exidx/.eh_frame_hdr" in item
         and "relocation-backed PLT veneers" in item
         for item in row["missingBackends"]
     )
