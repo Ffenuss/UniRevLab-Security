@@ -42,8 +42,12 @@ jobs:
           cat .ci/modmenu/p* | base64 -d > /tmp/modmenu-custom.tar.xz
           echo "0dae2b05c87637513ed4033d4ab4e977a4f8718c966d17aba0ae91035cfb287a  /tmp/modmenu-custom.tar.xz" | sha256sum -c -
           tar -xJf /tmp/modmenu-custom.tar.xz -C /tmp/modmenu
+          cd /tmp/modmenu
+          git apply "$GITHUB_WORKSPACE/.ci/modmenu/aim-runtime.patch"
           test -f /tmp/modmenu/Main.cpp
           test -f /tmp/modmenu/Android.mk
+          grep -q "Aim / Weapon Runtime" /tmp/modmenu/Main.cpp
+          grep -q "Il2CppObjectIsClass" /tmp/modmenu/AutoHook/Il2Cpp.cpp
 
       - name: Fetch pinned native dependencies
         shell: bash
