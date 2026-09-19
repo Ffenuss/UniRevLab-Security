@@ -1,8 +1,8 @@
-"""Capstone-backed x86/x86-64 control-flow analysis for Android ELF targets.
+"""Capstone-backed x86/x86-64 control-flow and conservative data-flow analysis.
 
 Instruction decoding is delegated to the isolated Android JNI bridge. The backend
-only analyzes exact ELF STT_FUNC ranges and never byte-scans for call opcodes.
-Desktop tests can inject a deterministic decoder without requiring Android/JNI.
+analyzes exact ELF STT_FUNC ranges and never byte-scans for x86 opcodes. Operand
+semantics are consumed only when Capstone provided structured operands.
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ import zipfile
 
 from modkit.mobile.native_portable import ElfView, EM_386, EM_X86_64
 
-SCHEMA = "modkit-x86-deep-1.0"
+SCHEMA = "modkit-x86-deep-1.1"
 ENGINE_ID = "native.x86-deep-embedded"
 MAX_LIBRARY_BYTES = 256 * 1024 * 1024
 MAX_FUNCTION_BYTES = 512 * 1024
@@ -22,8 +22,37 @@ MAX_TOTAL_CODE_BYTES = 64 * 1024 * 1024
 MAX_INSTRUCTIONS_PER_FUNCTION = 8192
 MAX_EDGES = 16000
 MAX_FINDINGS = 2000
+MAX_STRING_BYTES = 512
 
 Decoder = Callable[[bytes, int, str, int], dict[str, Any]]
+
+_X64_ARG_REGS = ("rdi", "rsi", "rdx", "rcx", "r8", "r9")
+_X64_CALLER_SAVED = {
+    "rax", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11",
+}
+_X86_CALLER_SAVED = {"eax", "ecx", "edx"}
+_REG_ALIASES_X64 = {
+    "rax": "rax", "eax": "rax",
+    "rbx": "rbx", "ebx": "rbx",
+    "rcx": "rcx", "ecx": "rcx",
+    "rdx": "rdx", "edx": "rdx",
+    "rsi": "rsi", "esi": "rsi",
+    "rdi": "rdi", "edi": "rdi",
+    "rbp": "rbp", "ebp": "rbp",
+    "rsp": "rsp", "esp": "rsp",
+    "r8": "r8", "r8d": "r8",
+    "r9": "r9", "r9d": "r9",
+    "r10": "r10", "r10d": "r10",
+    "r11": "r11", "r11d": "r11",
+    "r12": "r12", "r12d": "r12",
+    "r13": "r13", "r13d": "r13",
+    "r14": "r14", "r14d": "r14",
+    "r15": "r15", "r15d": "r15",
+}
+_REG_ALIASES_X86 = {
+    "eax": "eax", "ebx": "ebx", "ecx": "ecx", "edx": "edx",
+    "esi": "esi", "edi": "edi", "ebp": "ebp", "esp": "esp",
+}
 
 
 class X86ScanCancelled(RuntimeError):
@@ -108,8 +137,12 @@ def _function_regions(view: ElfView) -> list[dict[str, Any]]:
     return rows
 
 
-def _java_capstone_decode(code: bytes, address: int, arch: str,
-                          max_instructions: int) -> dict[str, Any]:
+def _java_capstone_decode(
+    code: bytes,
+    address: int,
+    arch: str,
+    max_instructions: int,
+) -> dict[str, Any]:
     try:
         from java import jclass  # type: ignore
     except Exception as exc:
@@ -137,6 +170,112 @@ def _java_capstone_decode(code: bytes, address: int, arch: str,
         }
 
 
+def _canonical_reg(name: Any, arch: str) -> str | None:
+    low = str(name or "").casefold()
+    if arch == "x86_64":
+        return _REG_ALIASES_X64.get(low)
+    return _REG_ALIASES_X86.get(low)
+
+
+def _operands(insn: dict[str, Any]) -> list[dict[str, Any]]:
+    value = insn.get("operands") or []
+    return [row for row in value if isinstance(row, dict)] if isinstance(value, list) else []
+
+
+def _memory_address(insn: dict[str, Any], operand: dict[str, Any], arch: str) -> int | None:
+    if str(operand.get("type") or "") != "MEM":
+        return None
+    mem = operand.get("mem")
+    if not isinstance(mem, dict):
+        return None
+    base = str(mem.get("base") or "").casefold()
+    index = str(mem.get("index") or "").casefold()
+    disp = int(mem.get("disp") or 0)
+    address = int(insn.get("address") or 0)
+    size = int(insn.get("size") or 0)
+    if arch == "x86_64" and base == "rip" and not index:
+        return address + size + disp
+    if not base and not index and disp >= 0:
+        return disp
+    return None
+
+
+def _string_token(view: ElfView, address: int) -> dict[str, Any] | None:
+    for sec in view.sections:
+        if not sec.allocated or sec.executable or sec.size <= 0:
+            continue
+        if not (sec.addr <= address < sec.addr + sec.size):
+            continue
+        rel = address - sec.addr
+        start = sec.offset + rel
+        if start < 0 or start >= len(view.data):
+            return None
+        end = min(len(view.data), sec.offset + sec.size, start + MAX_STRING_BYTES)
+        raw = view.data[start:end]
+        zero = raw.find(b"\0")
+        if zero < 0:
+            return None
+        raw = raw[:zero]
+        if not raw or any(byte < 0x20 or byte > 0x7E for byte in raw):
+            return None
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return None
+        return {
+            "kind": "string",
+            "value": text,
+            "address": address,
+            "section": sec.name,
+        }
+    return None
+
+
+def _relocation_symbols(view: ElfView) -> dict[int, str]:
+    out: dict[int, str] = {}
+    for row in view.relocations:
+        symbol = str(row.get("symbol") or "")
+        offset = row.get("offset")
+        if not symbol or not isinstance(offset, int):
+            continue
+        out.setdefault(offset, symbol)
+    return out
+
+
+def _value_from_operand(
+    operand: dict[str, Any],
+    *,
+    state: dict[str, dict[str, Any]],
+    insn: dict[str, Any],
+    arch: str,
+    view: ElfView,
+    relocation_symbols: dict[int, str],
+    lea: bool = False,
+) -> dict[str, Any] | None:
+    kind = str(operand.get("type") or "")
+    if kind == "REG":
+        reg = _canonical_reg(operand.get("reg"), arch)
+        return dict(state[reg]) if reg and reg in state else None
+    if kind == "IMM":
+        return {"kind": "immediate", "value": int(operand.get("imm") or 0)}
+    if kind != "MEM":
+        return None
+
+    address = _memory_address(insn, operand, arch)
+    if address is None:
+        return None
+    symbol = relocation_symbols.get(address)
+    if symbol:
+        return {
+            "kind": "import-slot" if lea else "import-function",
+            "symbol": symbol,
+            "address": address,
+        }
+    if lea:
+        return _string_token(view, address) or {"kind": "address", "address": address}
+    return {"kind": "memory", "address": address}
+
+
 def _edge_from_instruction(
     insn: dict[str, Any],
     *,
@@ -152,7 +291,10 @@ def _edge_from_instruction(
 
     address = int(insn.get("address") or 0)
     size = int(insn.get("size") or 0)
-    has_target = bool(insn.get("hasImmediateTarget")) and insn.get("immediateTarget") is not None
+    has_target = (
+        bool(insn.get("hasImmediateTarget"))
+        and insn.get("immediateTarget") is not None
+    )
     target = int(insn["immediateTarget"]) if has_target else None
 
     if is_ret:
@@ -196,6 +338,205 @@ def _edge_from_instruction(
     }
 
 
+def _plt_import_targets(
+    view: ElfView,
+    arch: str,
+    decoder: Decoder,
+    relocation_symbols: dict[int, str],
+) -> dict[int, str]:
+    out: dict[int, str] = {}
+    if not relocation_symbols:
+        return out
+    for sec in view.sections:
+        if sec.name not in {".plt", ".plt.sec"} or not sec.executable or sec.size <= 0:
+            continue
+        raw = view._slice(sec)
+        if not raw or len(raw) > MAX_FUNCTION_BYTES:
+            continue
+        decoded = decoder(raw, sec.addr, arch, MAX_INSTRUCTIONS_PER_FUNCTION)
+        if not isinstance(decoded, dict) or not decoded.get("available"):
+            continue
+        instructions = decoded.get("instructions") or []
+        if not isinstance(instructions, list):
+            continue
+        for insn in instructions:
+            if not isinstance(insn, dict) or not insn.get("isJump"):
+                continue
+            ops = _operands(insn)
+            if not ops:
+                continue
+            slot = _memory_address(insn, ops[0], arch)
+            symbol = relocation_symbols.get(slot) if slot is not None else None
+            if symbol:
+                out[int(insn.get("address") or 0)] = symbol
+    return out
+
+
+def _capture_arguments(
+    arch: str,
+    state: dict[str, dict[str, Any]],
+    stack_args: list[dict[str, Any] | None],
+) -> list[dict[str, Any] | None]:
+    if arch == "x86_64":
+        return [dict(state[reg]) if reg in state else None for reg in _X64_ARG_REGS]
+    return [dict(row) if isinstance(row, dict) else None for row in stack_args[:8]]
+
+
+def _enrich_call_edge(
+    edge: dict[str, Any],
+    insn: dict[str, Any],
+    *,
+    arch: str,
+    state: dict[str, dict[str, Any]],
+    stack_args: list[dict[str, Any] | None],
+    relocation_symbols: dict[int, str],
+    plt_targets: dict[int, str],
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    item = dict(edge)
+    target = item.get("targetRva")
+    if isinstance(target, int) and target in plt_targets:
+        item["targetFunction"] = plt_targets[target]
+        item["targetResolution"] = "ELF_RELOCATION_PLT"
+
+    ops = _operands(insn)
+    if not item.get("targetFunction") and ops:
+        first = ops[0]
+        if str(first.get("type") or "") == "MEM":
+            slot = _memory_address(insn, first, arch)
+            symbol = relocation_symbols.get(slot) if slot is not None else None
+            if symbol:
+                item["targetFunction"] = symbol
+                item["targetResolution"] = "ELF_RELOCATION_MEMORY"
+                item["relocationSlotRva"] = slot
+        elif str(first.get("type") or "") == "REG":
+            reg = _canonical_reg(first.get("reg"), arch)
+            token = state.get(reg) if reg else None
+            if token and token.get("kind") == "dynamic-symbol":
+                item["targetFunction"] = token.get("symbol")
+                item["targetResolution"] = "DLSYM_RESULT_FLOW"
+                item["dynamicLookupCallRva"] = token.get("sourceCallRva")
+            elif token and token.get("kind") == "import-function":
+                item["targetFunction"] = token.get("symbol")
+                item["targetResolution"] = "ELF_RELOCATION_REGISTER_FLOW"
+                item["relocationSlotRva"] = token.get("address")
+
+    args = _capture_arguments(arch, state, stack_args)
+    if any(row is not None for row in args):
+        item["argumentEvidence"] = args
+
+    return_value: dict[str, Any] | None = None
+    target_name = str(item.get("targetFunction") or "")
+    if target_name == "dlsym" and len(args) >= 2:
+        symbol_arg = args[1]
+        if symbol_arg and symbol_arg.get("kind") == "string":
+            symbol_name = str(symbol_arg.get("value") or "")
+            if symbol_name:
+                item["lookupIdentifier"] = symbol_name
+                item["lookupIdentifierAddress"] = symbol_arg.get("address")
+                item["dynamicLookup"] = True
+                return_value = {
+                    "kind": "dynamic-symbol",
+                    "symbol": symbol_name,
+                    "sourceCallRva": item.get("instructionRva"),
+                }
+    return item, return_value
+
+
+def _function_flow(
+    instructions: list[dict[str, Any]],
+    *,
+    row: dict[str, Any],
+    arch: str,
+    view: ElfView,
+    targets: dict[int, str],
+    relocation_symbols: dict[int, str],
+    plt_targets: dict[int, str],
+    cb: Any | None,
+) -> list[dict[str, Any]]:
+    state: dict[str, dict[str, Any]] = {}
+    stack_args: list[dict[str, Any] | None] = []
+    edges: list[dict[str, Any]] = []
+
+    for index, insn in enumerate(instructions):
+        if (index & 0x3FF) == 0:
+            _check(cb)
+        if not isinstance(insn, dict):
+            continue
+        mnemonic = str(insn.get("mnemonic") or "").casefold()
+        ops = _operands(insn)
+        handled_writes: set[str] = set()
+
+        if mnemonic in {"mov", "movabs"} and len(ops) >= 2 and ops[0].get("type") == "REG":
+            dest = _canonical_reg(ops[0].get("reg"), arch)
+            if dest:
+                token = _value_from_operand(
+                    ops[1], state=state, insn=insn, arch=arch, view=view,
+                    relocation_symbols=relocation_symbols,
+                )
+                if token is None:
+                    state.pop(dest, None)
+                else:
+                    state[dest] = token
+                handled_writes.add(dest)
+
+        elif mnemonic == "lea" and len(ops) >= 2 and ops[0].get("type") == "REG":
+            dest = _canonical_reg(ops[0].get("reg"), arch)
+            if dest:
+                token = _value_from_operand(
+                    ops[1], state=state, insn=insn, arch=arch, view=view,
+                    relocation_symbols=relocation_symbols, lea=True,
+                )
+                if token is None:
+                    state.pop(dest, None)
+                else:
+                    state[dest] = token
+                handled_writes.add(dest)
+
+        elif mnemonic == "xor" and len(ops) >= 2:
+            left = _canonical_reg(ops[0].get("reg"), arch) if ops[0].get("type") == "REG" else None
+            right = _canonical_reg(ops[1].get("reg"), arch) if ops[1].get("type") == "REG" else None
+            if left and left == right:
+                state[left] = {"kind": "immediate", "value": 0}
+                handled_writes.add(left)
+
+        if arch == "x86" and mnemonic == "push" and ops:
+            token = _value_from_operand(
+                ops[0], state=state, insn=insn, arch=arch, view=view,
+                relocation_symbols=relocation_symbols,
+            )
+            stack_args.insert(0, token)
+            del stack_args[8:]
+
+        edge = _edge_from_instruction(
+            insn,
+            source_rva=int(row["rva"]),
+            source_function=str(row["name"]),
+            targets=targets,
+        )
+        return_value: dict[str, Any] | None = None
+        if edge and edge["edgeKind"] in {"call", "indirect-call"}:
+            edge, return_value = _enrich_call_edge(
+                edge, insn, arch=arch, state=state, stack_args=stack_args,
+                relocation_symbols=relocation_symbols, plt_targets=plt_targets,
+            )
+            caller_saved = _X64_CALLER_SAVED if arch == "x86_64" else _X86_CALLER_SAVED
+            for reg in caller_saved:
+                state.pop(reg, None)
+            if return_value is not None:
+                state["rax" if arch == "x86_64" else "eax"] = return_value
+            stack_args.clear()
+        if edge:
+            edges.append(edge)
+
+        for written in insn.get("regsWrite") or []:
+            reg = _canonical_reg(written, arch)
+            if reg and reg not in handled_writes:
+                if not (edge and edge["edgeKind"] in {"call", "indirect-call"}):
+                    state.pop(reg, None)
+
+    return edges
+
+
 def analyze_elf(
     data: bytes,
     *,
@@ -215,12 +556,16 @@ def analyze_elf(
     regions = _function_regions(view)
     targets = {int(row["rva"]): str(row["name"]) for row in regions}
     decode = decoder or _java_capstone_decode
+    relocation_symbols = _relocation_symbols(view)
+    plt_targets = _plt_import_targets(view, arch, decode, relocation_symbols)
+
     edges: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
     total = 0
     analyzed = 0
     decoder_available = False
     decoder_version: str | None = None
+    operand_detail_available = False
 
     for row in regions:
         _check(cb)
@@ -240,7 +585,10 @@ def analyze_elf(
             errors.append({
                 "function": row["name"],
                 "rva": row["rva"],
-                "error": str(decoded.get("error") if isinstance(decoded, dict) else "decoder-invalid"),
+                "error": str(
+                    decoded.get("error") if isinstance(decoded, dict)
+                    else "decoder-invalid"
+                ),
             })
             continue
 
@@ -254,31 +602,37 @@ def analyze_elf(
                 "error": "decoder-instructions-not-list",
             })
             continue
+        if any(isinstance(insn, dict) and "operands" in insn for insn in instructions):
+            operand_detail_available = True
 
         analyzed += 1
-        for insn in instructions:
-            if not isinstance(insn, dict):
-                continue
-            edge = _edge_from_instruction(
-                insn,
-                source_rva=int(row["rva"]),
-                source_function=str(row["name"]),
-                targets=targets,
-            )
-            if edge:
-                edges.append(edge)
-                if len(edges) >= MAX_EDGES:
-                    break
-        if len(edges) >= MAX_EDGES:
+        new_edges = _function_flow(
+            instructions,
+            row=row,
+            arch=arch,
+            view=view,
+            targets=targets,
+            relocation_symbols=relocation_symbols,
+            plt_targets=plt_targets,
+            cb=cb,
+        )
+        remaining = MAX_EDGES - len(edges)
+        if remaining <= 0:
             break
+        edges.extend(new_edges[:remaining])
 
     findings: list[dict[str, Any]] = []
     for idx, edge in enumerate(edges[:MAX_FINDINGS]):
         findings.append({
             "id": "x86-edge:" + hashlib.sha256(
-                f"{apk_name}!{entry}!{idx}!{edge.get('instructionRva')}!{edge.get('kind')}".encode()
+                f"{apk_name}!{entry}!{idx}!{edge.get('instructionRva')}!"
+                f"{edge.get('kind')}".encode()
             ).hexdigest()[:20],
-            "kind": "X86_CONTROL_FLOW_EDGE",
+            "kind": (
+                "X86_DYNAMIC_LOOKUP_FLOW"
+                if edge.get("targetResolution") == "DLSYM_RESULT_FLOW"
+                else "X86_CONTROL_FLOW_EDGE"
+            ),
             "title": (
                 f"{edge.get('sourceFunction') or 'function'} → "
                 f"{edge.get('targetFunction') or edge.get('targetResolution')}"
@@ -297,12 +651,13 @@ def analyze_elf(
             "runtimeConfirmed": False,
             "ownershipKind": "APP_OR_GAME",
             "trustBoundary": "local",
-            "evidenceRole": "capstone-x86-symbol-bounded-control-flow",
+            "evidenceRole": "capstone-x86-symbol-bounded-control-data-flow",
         })
 
     return {
         "available": bool(regions) and decoder_available,
         "decoderAvailable": decoder_available,
+        "operandDetailAvailable": operand_detail_available,
         "decoder": "capstone",
         "decoderVersion": decoder_version,
         "arch": arch,
@@ -310,6 +665,8 @@ def analyze_elf(
         "functionCount": len(regions),
         "analyzedFunctionCount": analyzed,
         "scannedCodeBytes": total,
+        "relocationSymbolCount": len(relocation_symbols),
+        "pltImportTargetCount": len(plt_targets),
         "edgeCount": len(edges),
         "edges": edges,
         "findingCount": len(findings),
@@ -320,6 +677,11 @@ def analyze_elf(
             "strippedRegionGuessing": False,
             "rawOpcodeByteScanning": False,
             "instructionBoundaryFromCapstone": True,
+            "structuredOperandsRequiredForDataFlow": True,
+            "x86_64SysVArgumentFlow": True,
+            "x86StackArgumentFlow": True,
+            "ripRelativeRelocationFlow": True,
+            "dlsymReturnFlow": True,
             "indirectTargetsResolvedWithoutProof": False,
             "patchReadyFromControlFlow": False,
         },
@@ -363,6 +725,8 @@ def scan_apk_paths(
                         report = analyze_elf(
                             data, apk_name=apk.name, entry=info.filename, cb=cb
                         )
+                    except X86ScanCancelled:
+                        raise
                     except Exception as exc:
                         libraries.append({
                             "apk": apk.name,
@@ -376,8 +740,8 @@ def scan_apk_paths(
                         "entry": info.filename,
                         "size": info.file_size,
                         **{
-                            k: v for k, v in report.items()
-                            if k not in {"edges", "findings", "errors"}
+                            key: value for key, value in report.items()
+                            if key not in {"edges", "findings", "errors"}
                         },
                         "errorCount": len(report.get("errors") or []),
                     })
@@ -408,6 +772,7 @@ def scan_apk_paths(
             "strippedRegionGuessing": False,
             "rawOpcodeByteScanning": False,
             "capstoneRequiredForInstructionLayer": True,
+            "operandDataFlowFailClosed": True,
         },
     }
     if output_path:
