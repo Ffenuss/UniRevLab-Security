@@ -576,3 +576,112 @@ def test_x86_cfg_join_drops_conflicting_register_fact_fail_closed():
     assert len(args) >= 2
     assert args[1] is None
     assert report["policy"]["joinPolicy"] == "IDENTICAL_FACTS_ONLY"
+
+
+def _x64_stripped_eh_frame_hdr_elf() -> bytes:
+    shstr, sh = _cstr_offsets([".shstrtab", ".eh_frame_hdr", ".text"])
+    raw = bytearray([1, 0x1B, 0x03, 0x3B])
+    raw += struct.pack("<i", 0x5000 - 0x4004)
+    raw += struct.pack("<I", 2)
+    raw += struct.pack("<ii", 0x1000 - 0x4000, 0x5000 - 0x4000)
+    raw += struct.pack("<ii", 0x1010 - 0x4000, 0x5040 - 0x4000)
+    text = b"\x90" * 0x20
+
+    payloads = [b"", shstr, bytes(raw), text]
+    offsets = [0] * len(payloads)
+    blob = bytearray(b"\0" * 64)
+    cursor = 64
+    for idx in range(1, len(payloads)):
+        cursor = (cursor + 7) & ~7
+        if len(blob) < cursor:
+            blob += b"\0" * (cursor - len(blob))
+        offsets[idx] = cursor
+        blob += payloads[idx]
+        cursor += len(payloads[idx])
+
+    shoff = (len(blob) + 7) & ~7
+    if len(blob) < shoff:
+        blob += b"\0" * (shoff - len(blob))
+    headers = [
+        (0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+        (sh[".shstrtab"], 3, 0, 0, offsets[1], len(shstr), 0, 0, 1, 0),
+        (sh[".eh_frame_hdr"], 1, 0x2, 0x4000, offsets[2], len(raw), 0, 0, 4, 0),
+        (sh[".text"], 1, 0x6, 0x1000, offsets[3], len(text), 0, 0, 16, 0),
+    ]
+    for row in headers:
+        blob += struct.pack("<IIQQQQIIQQ", *row)
+
+    ident = bytearray(16)
+    ident[:4] = b"\x7fELF"
+    ident[4] = 2
+    ident[5] = 1
+    ident[6] = 1
+    hdr = struct.pack(
+        "<16sHHIQQQIHHHHHH",
+        bytes(ident), 3, 62, 1, 0x1000, 0, shoff, 0,
+        64, 0, 0, 64, len(headers), 1,
+    )
+    blob[:64] = hdr
+    return bytes(blob)
+
+
+def test_x86_64_stripped_elf_recovers_functions_from_eh_frame_hdr():
+    def decoder(code: bytes, address: int, arch: str, max_instructions: int):
+        if address == 0x1000:
+            return {
+                "available": True,
+                "version": "5.0",
+                "instructions": [
+                    {
+                        "address": 0x1000, "size": 5, "mnemonic": "call",
+                        "opStr": "0x1010",
+                        "isCall": True, "isJump": False, "isRet": False,
+                        "hasImmediateTarget": True, "immediateTarget": 0x1010,
+                        "regsRead": [], "regsWrite": ["rsp"],
+                        "operands": [
+                            {"type": "IMM", "imm": 0x1010, "size": 8, "access": 1},
+                        ],
+                    },
+                    {
+                        "address": 0x1005, "size": 1, "mnemonic": "ret",
+                        "opStr": "",
+                        "isCall": False, "isJump": False, "isRet": True,
+                        "regsRead": ["rsp"], "regsWrite": ["rsp"],
+                        "operands": [],
+                    },
+                ],
+            }
+        return {
+            "available": True,
+            "version": "5.0",
+            "instructions": [
+                {
+                    "address": address, "size": 1, "mnemonic": "ret",
+                    "opStr": "",
+                    "isCall": False, "isJump": False, "isRet": True,
+                    "regsRead": ["rsp"], "regsWrite": ["rsp"],
+                    "operands": [],
+                },
+            ],
+        }
+
+    report = x86_deep.analyze_elf(
+        _x64_stripped_eh_frame_hdr_elf(),
+        apk_name="stripped.apk",
+        entry="lib/x86_64/libgame.so",
+        decoder=decoder,
+    )
+
+    assert report["symbolFunctionCount"] == 0
+    assert report["recoveredFunctionCount"] == 2
+    assert report["functionCount"] == 2
+    assert report["policy"]["symbolBoundedOnly"] is False
+    assert report["policy"]["symbolOrExactUnwindBounded"] is True
+    assert report["policy"]["unwindFunctionRecovery"] is True
+
+    call = next(row for row in report["edges"] if row["instructionRva"] == 0x1000)
+    assert call["targetRva"] == 0x1010
+    assert call["targetResolution"] == "EXACT_UNWIND_START"
+    assert call["targetBoundarySource"] == "EH_FRAME_HDR"
+    assert call["functionBoundarySource"] == "EH_FRAME_HDR"
+    assert call["recoveredFunctionBoundary"] is True
