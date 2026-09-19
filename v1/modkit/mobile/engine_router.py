@@ -128,15 +128,17 @@ def route(profile_report: dict[str, Any], output_path: str | Path | None = None)
             for abi in sorted(abi for abi in abis if abi != "arm64-v8a"):
                 if abi == "armeabi-v7a":
                     route_missing.append(
-                        "full ARMv7/Thumb CFG, cross-basic-block value propagation and PLT veneer mapping; "
-                        "symbol-bounded control-flow, PC-relative literal flow, register/stack arguments, "
-                        "portable relocations and dlsym result tracking are bundled"
+                        "stripped-function boundary recovery, indirect branch/table target recovery and "
+                        "interprocedural/PLT veneer value propagation; symbol-bounded basic-block CFG, "
+                        "cross-block identical-fact propagation, PC-relative literal flow, register/stack "
+                        "arguments, portable relocations and dlsym result tracking are bundled"
                     )
                 elif abi in {"x86", "x86_64"}:
                     route_missing.append(
-                        f"full {abi} CFG and cross-basic-block value propagation; "
-                        "Capstone control-flow, register/stack argument flow, RIP/GOT relocation flow "
-                        "and dlsym result tracking are bundled"
+                        f"stripped-function boundary recovery, indirect jump-table target recovery and "
+                        f"interprocedural propagation for {abi}; Capstone basic-block CFG, cross-block "
+                        "identical-fact propagation, register/stack argument flow, RIP/GOT relocation "
+                        "flow and dlsym result tracking are bundled"
                     )
                 else:
                     route_missing.append(
