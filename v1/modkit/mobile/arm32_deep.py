@@ -14,7 +14,8 @@ import struct
 from typing import Any, Callable, Iterable
 import zipfile
 
-from modkit.mobile.cfg_flow import build_cfg, clone_token_map, merge_token_maps\nfrom modkit.mobile.native_portable import ElfView, EM_ARM
+from modkit.mobile.cfg_flow import build_cfg, clone_token_map, merge_token_maps
+from modkit.mobile.native_portable import ElfView, EM_ARM
 
 SCHEMA = "modkit-arm32-deep-1.2"
 ENGINE_ID = "native.arm32-deep-embedded"
