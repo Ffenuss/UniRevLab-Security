@@ -859,6 +859,8 @@ def scan_apk_paths(paths: Iterable[str | Path], output_path: str | Path | None =
                         continue
                     try:
                         report = analyze_elf(data, apk_name=apk.name, entry=info.filename, cb=cb)
+                    except Arm32ScanCancelled:
+                        raise
                     except Exception as exc:
                         libraries.append({
                             "apk": apk.name, "entry": info.filename,
