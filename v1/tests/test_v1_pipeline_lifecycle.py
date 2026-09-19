@@ -116,7 +116,7 @@ def test_embedded_outputs_are_invalidated_before_same_target_rerun_backend_execu
         "deep-gameplay.json",
     ):
         assert f'"{name}"' in helper
-    stage = source.index('stage(4,4,"Lua/JS/Hermes deep')
+    stage = source.index('stage(4,4,"Runtime-targeted deep:')
     invalidate = source.index("invalidateEmbeddedRunOutputs();", stage)
     backend = source.index('getModule("modkit.mobile.embedded_pipeline")', invalidate)
     assert stage < invalidate < backend
