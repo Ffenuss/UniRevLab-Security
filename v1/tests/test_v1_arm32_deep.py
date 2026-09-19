@@ -509,3 +509,179 @@ def test_arm32_cfg_join_drops_conflicting_argument_fact_fail_closed():
     assert len(args) >= 2
     assert args[1] is None
     assert report["policy"]["joinPolicy"] == "IDENTICAL_FACTS_ONLY"
+
+
+def _arm32_plt_elf() -> bytes:
+    shstr, sh = _cstr_offsets([
+        ".shstrtab", ".strtab", ".symtab", ".dynstr", ".dynsym",
+        ".rel.plt", ".rodata", ".text", ".plt",
+    ])
+    strtab, st = _cstr_offsets(["plt_source"])
+    dynstr, ds = _cstr_offsets(["dlsym"])
+
+    symtab = bytearray(b"\0" * 16)
+    symtab += struct.pack("<IIIBBH", st["plt_source"], 0x1000, 0x18, 0x12, 0, 8)
+
+    dynsym = bytearray(b"\0" * 16)
+    dynsym += struct.pack("<IIIBBH", ds["dlsym"], 0, 0, 0x12, 0, 0)
+
+    rel = struct.pack("<II", 0x3000, (1 << 8) | 22)
+    rodata = b"target_plt\0"
+    text = b"\0" * 0x18
+    plt = b"\0" * 0x08
+
+    payloads = [
+        b"", shstr, strtab, bytes(symtab), dynstr, bytes(dynsym),
+        rel, rodata, text, plt,
+    ]
+    offsets = [0] * len(payloads)
+    blob = bytearray(b"\0" * 52)
+    cursor = 52
+    for idx in range(1, len(payloads)):
+        cursor = (cursor + 3) & ~3
+        if len(blob) < cursor:
+            blob += b"\0" * (cursor - len(blob))
+        offsets[idx] = cursor
+        blob += payloads[idx]
+        cursor += len(payloads[idx])
+
+    shoff = (len(blob) + 3) & ~3
+    if len(blob) < shoff:
+        blob += b"\0" * (shoff - len(blob))
+
+    headers = [
+        (0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+        (sh[".shstrtab"], 3, 0, 0, offsets[1], len(shstr), 0, 0, 1, 0),
+        (sh[".strtab"], 3, 0, 0, offsets[2], len(strtab), 0, 0, 1, 0),
+        (sh[".symtab"], 2, 0, 0, offsets[3], len(symtab), 2, 1, 4, 16),
+        (sh[".dynstr"], 3, 0x2, 0x2800, offsets[4], len(dynstr), 0, 0, 1, 0),
+        (sh[".dynsym"], 11, 0x2, 0x2900, offsets[5], len(dynsym), 4, 1, 4, 16),
+        (sh[".rel.plt"], 9, 0x2, 0x2A00, offsets[6], len(rel), 5, 0, 4, 8),
+        (sh[".rodata"], 1, 0x2, 0x2000, offsets[7], len(rodata), 0, 0, 1, 0),
+        (sh[".text"], 1, 0x6, 0x1000, offsets[8], len(text), 0, 0, 4, 0),
+        (sh[".plt"], 1, 0x6, 0x1100, offsets[9], len(plt), 0, 0, 4, 0),
+    ]
+    for row in headers:
+        blob += struct.pack("<IIIIIIIIII", *row)
+
+    ident = bytearray(16)
+    ident[:4] = b"\x7fELF"
+    ident[4] = 1
+    ident[5] = 1
+    ident[6] = 1
+    hdr = struct.pack(
+        "<16sHHIIIIIHHHHHH",
+        bytes(ident), 3, 40, 1, 0x1000, 0, shoff, 0,
+        52, 0, 0, 40, len(headers), 1,
+    )
+    blob[:52] = hdr
+    return bytes(blob)
+
+
+def _arm_plt_decoder(code: bytes, address: int, thumb: bool, max_instructions: int):
+    if address == 0x1100:
+        assert thumb is False
+        return {
+            "available": True,
+            "version": "5.0",
+            "instructions": [
+                {
+                    "address": 0x1100, "size": 4, "mnemonic": "add",
+                    "opStr": "ip, pc, #0x1ef8",
+                    "isCall": False, "isJump": False, "isRet": False,
+                    "regsRead": ["pc"], "regsWrite": ["ip"],
+                    "operands": [
+                        {"type": "REG", "reg": "ip", "access": 2},
+                        {"type": "REG", "reg": "pc", "access": 1},
+                        {"type": "IMM", "imm": 0x1EF8, "access": 1},
+                    ],
+                },
+                {
+                    "address": 0x1104, "size": 4, "mnemonic": "ldr",
+                    "opStr": "pc, [ip]",
+                    "isCall": False, "isJump": True, "isRet": False,
+                    "hasImmediateTarget": False,
+                    "regsRead": ["ip"], "regsWrite": ["pc"],
+                    "operands": [
+                        {"type": "REG", "reg": "pc", "access": 2},
+                        {"type": "MEM", "access": 1,
+                         "mem": {"base": "ip", "index": "", "scale": 1, "disp": 0}},
+                    ],
+                },
+            ],
+        }
+
+    assert address == 0x1000
+    return {
+        "available": True,
+        "version": "5.0",
+        "instructions": [
+            {
+                "address": 0x1000, "size": 4, "mnemonic": "mov",
+                "opStr": "r1, #0x2000",
+                "isCall": False, "isJump": False, "isRet": False,
+                "regsRead": [], "regsWrite": ["r1"],
+                "operands": [
+                    {"type": "REG", "reg": "r1", "access": 2},
+                    {"type": "IMM", "imm": 0x2000, "access": 1},
+                ],
+            },
+            {
+                "address": 0x1004, "size": 4, "mnemonic": "mov",
+                "opStr": "r0, #0",
+                "isCall": False, "isJump": False, "isRet": False,
+                "regsRead": [], "regsWrite": ["r0"],
+                "operands": [
+                    {"type": "REG", "reg": "r0", "access": 2},
+                    {"type": "IMM", "imm": 0, "access": 1},
+                ],
+            },
+            {
+                "address": 0x1008, "size": 4, "mnemonic": "bl",
+                "opStr": "0x1100",
+                "isCall": True, "isJump": False, "isRet": False,
+                "hasImmediateTarget": True, "immediateTarget": 0x1100,
+                "regsRead": [], "regsWrite": ["lr"],
+                "operands": [{"type": "IMM", "imm": 0x1100, "access": 1}],
+            },
+            {
+                "address": 0x100C, "size": 4, "mnemonic": "mov",
+                "opStr": "r5, r0",
+                "isCall": False, "isJump": False, "isRet": False,
+                "regsRead": ["r0"], "regsWrite": ["r5"],
+                "operands": [
+                    {"type": "REG", "reg": "r5", "access": 2},
+                    {"type": "REG", "reg": "r0", "access": 1},
+                ],
+            },
+            {
+                "address": 0x1010, "size": 4, "mnemonic": "blx",
+                "opStr": "r5",
+                "isCall": True, "isJump": False, "isRet": False,
+                "hasImmediateTarget": False,
+                "regsRead": ["r5"], "regsWrite": ["lr"],
+                "operands": [{"type": "REG", "reg": "r5", "access": 1}],
+            },
+        ],
+    }
+
+
+def test_arm32_resolves_relocation_backed_plt_veneer_and_dlsym_result():
+    report = arm32_deep.analyze_elf(
+        _arm32_plt_elf(),
+        apk_name="fixture.apk",
+        entry="lib/armeabi-v7a/libgame.so",
+        decoder=_arm_plt_decoder,
+    )
+
+    assert report["pltImportTargetCount"] == 1
+    direct = next(row for row in report["edges"] if row["instructionRva"] == 0x1008)
+    assert direct["targetRva"] == 0x1100
+    assert direct["targetFunction"] == "dlsym"
+    assert direct["targetResolution"] == "ELF_RELOCATION_PLT"
+    assert direct["lookupIdentifier"] == "target_plt"
+
+    indirect = next(row for row in report["edges"] if row["instructionRva"] == 0x1010)
+    assert indirect["targetFunction"] == "target_plt"
+    assert indirect["targetResolution"] == "DLSYM_RESULT_FLOW"
+    assert report["policy"]["armPltRelocationFlow"] is True
