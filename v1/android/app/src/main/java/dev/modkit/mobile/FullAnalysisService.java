@@ -93,7 +93,13 @@ public class FullAnalysisService extends Service {
         if(!file.delete()&&file.exists())throw new java.io.IOException("Не удалось очистить старый embedded artifact: "+file.getName());
     }
     private void invalidateEmbeddedRunOutputs()throws Exception{
-        for(String name:new String[]{"artifact-families.json","embedded-analysis.json","lua-deep.json","hermes-deep","hermes-deep.json","native-deep.json","cocos-deep.json","flutter-deep.json","deep-gameplay.json"}){
+        for(String name:new String[]{
+                "artifact-families.json","embedded-analysis.json","runtime-profiler.json","engine-router.json",
+                "deobfuscation.json","native-inventory.json","native-portable.json","arm32-deep.json",
+                "x86-deep.json","dotnet-deep.json","unreal-deep.json","godot-deep.json","defold-deep.json",
+                "qml-deep.json","jsc-deep.json","wasm-deep.json","lua-deep.json","hermes-deep",
+                "hermes-deep.json","native-deep.json","cocos-deep.json","flutter-deep.json","deep-gameplay.json"
+        }){
             deleteRunTree(app.file(name));
         }
     }
@@ -196,7 +202,7 @@ public class FullAnalysisService extends Service {
                 }
 
                 if(app.cancelled.get()){chain=false;progress("Полный анализ отменён пользователем.");return;}
-                stage(4,4,"Lua/JS/Hermes deep + ARM64 deep + Flutter AOT + Cocos correlation");
+                stage(4,4,"Runtime-targeted deep: ARMv7/Thumb, x86/x86-64, ARM64, scripts, Flutter, Cocos");
                 invalidateEmbeddedRunOutputs();
                 try{
                     Python.getInstance().getModule("modkit.mobile.embedded_pipeline").callAttr(
