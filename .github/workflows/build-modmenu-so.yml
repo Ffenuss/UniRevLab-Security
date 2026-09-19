@@ -1,0 +1,119 @@
+name: Build ModMenu SO
+
+on:
+  push:
+    branches:
+      - modmenu-so-build-20260919
+    paths:
+      - ".ci/modmenu/**"
+      - ".github/workflows/build-modmenu-so.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout build branch
+        uses: actions/checkout@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK r22b
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "ndk;22.1.7171670"
+          test -x "$ANDROID_SDK_ROOT/ndk/22.1.7171670/ndk-build"
+          echo "NDK=$ANDROID_SDK_ROOT/ndk/22.1.7171670" >> "$GITHUB_ENV"
+
+      - name: Reconstruct exact custom source layer
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/modmenu /tmp/modmenu-out
+          mkdir -p /tmp/modmenu /tmp/modmenu-out
+          cat .ci/modmenu/p* | base64 -d > /tmp/modmenu-custom.tar.xz
+          echo "0dae2b05c87637513ed4033d4ab4e977a4f8718c966d17aba0ae91035cfb287a  /tmp/modmenu-custom.tar.xz" | sha256sum -c -
+          tar -xJf /tmp/modmenu-custom.tar.xz -C /tmp/modmenu
+          test -f /tmp/modmenu/Main.cpp
+          test -f /tmp/modmenu/Android.mk
+
+      - name: Fetch pinned native dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git clone --quiet https://github.com/infinixsunat-collab/inject-mod.git /tmp/inject-mod
+          git -C /tmp/inject-mod checkout --quiet 05bb059da6585a2b4bc14f4e82e51f9d50e84263
+          cp -a /tmp/inject-mod/KittyMemory /tmp/modmenu/
+          cp -a /tmp/inject-mod/Substrate /tmp/modmenu/
+          cp -a /tmp/inject-mod/And64InlineHook /tmp/modmenu/
+
+          git clone --quiet https://github.com/NepMods/Android-Mod-Menu.git /tmp/nepmods
+          git -C /tmp/nepmods checkout --quiet 3488c35024c97a1c794a20f57eaaa07404f619d8
+          cp -a /tmp/nepmods/app/src/main/jni/Dobby /tmp/modmenu/
+
+          git clone --quiet https://github.com/hexhacking/xDL.git /tmp/xdl-upstream
+          git -C /tmp/xdl-upstream checkout --quiet 1e0b6254165a2ddcbd32f77a371700c69155acf8
+          mkdir -p /tmp/modmenu/xdl
+          cp /tmp/xdl-upstream/xdl/src/main/cpp/*.c /tmp/modmenu/xdl/
+          cp /tmp/xdl-upstream/xdl/src/main/cpp/*.h /tmp/modmenu/xdl/
+          cp /tmp/xdl-upstream/xdl/src/main/cpp/include/*.h /tmp/modmenu/xdl/
+
+          git clone --quiet --branch v1.92.9b --depth 1 https://github.com/ocornut/imgui.git /tmp/imgui-upstream
+          mkdir -p /tmp/modmenu/imgui/backends
+          cp /tmp/imgui-upstream/imgui*.cpp /tmp/modmenu/imgui/
+          cp /tmp/imgui-upstream/*.h /tmp/modmenu/imgui/
+          cp /tmp/imgui-upstream/backends/imgui_impl_opengl3* /tmp/modmenu/imgui/backends/
+
+          test -f /tmp/modmenu/Dobby/libraries/arm64-v8a/libdobby.a
+          test -f /tmp/modmenu/Dobby/libraries/armeabi-v7a/libdobby.a
+          test -f /tmp/modmenu/xdl/xdl.h
+          test -f /tmp/modmenu/imgui/imgui.h
+
+      - name: Build arm64-v8a and armeabi-v7a
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/modmenu
+          "$NDK/ndk-build" \
+            NDK_PROJECT_PATH=. \
+            APP_BUILD_SCRIPT="$PWD/Android.mk" \
+            NDK_APPLICATION_MK="$PWD/Application.mk" \
+            NDK_OUT=/tmp/modmenu-out/obj \
+            NDK_LIBS_OUT=/tmp/modmenu-out/libs \
+            -j2 V=1
+
+      - name: Verify ELF outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s /tmp/modmenu-out/libs/arm64-v8a/libleon4ikmods.so
+          test -s /tmp/modmenu-out/libs/armeabi-v7a/libleon4ikmods.so
+
+          file /tmp/modmenu-out/libs/arm64-v8a/libleon4ikmods.so
+          file /tmp/modmenu-out/libs/armeabi-v7a/libleon4ikmods.so
+          readelf -h /tmp/modmenu-out/libs/arm64-v8a/libleon4ikmods.so
+          readelf -h /tmp/modmenu-out/libs/armeabi-v7a/libleon4ikmods.so
+
+          mkdir -p /tmp/artifact/arm64-v8a /tmp/artifact/armeabi-v7a
+          cp /tmp/modmenu-out/libs/arm64-v8a/libleon4ikmods.so /tmp/artifact/arm64-v8a/
+          cp /tmp/modmenu-out/libs/armeabi-v7a/libleon4ikmods.so /tmp/artifact/armeabi-v7a/
+          (
+            cd /tmp/artifact
+            sha256sum arm64-v8a/libleon4ikmods.so armeabi-v7a/libleon4ikmods.so | tee SHA256SUMS.txt
+          )
+
+      - name: Upload SO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: leon4ikmods-so
+          path: /tmp/artifact
+          if-no-files-found: error
+          compression-level: 9
