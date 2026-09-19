@@ -1,0 +1,274 @@
+--- a/Main.cpp
++++ b/Main.cpp
+@@ -19,6 +19,12 @@
+ #define NS_CONTROLS OBFUSCATE("Chillow.StandChillow.Controls")
+ #define NS_AUDIO OBFUSCATE("Chillow.StandChillow.Settings.Audio")
+ #define NS_SPECIAL OBFUSCATE("Chillow.StandChillow.Settings.SpecialAbilities")
++#define NS_GAME OBFUSCATE("Chillow.StandChillow.Game")
++#define NS_PLAYER OBFUSCATE("Chillow.StandChillow.Player")
++#define NS_WEAPONRY OBFUSCATE("Chillow.StandChillow.Player.Weaponry")
++#define NS_AIM OBFUSCATE("Chillow.StandChillow.Player.Aim")
++#define NS_GUN OBFUSCATE("Chillow.StandChillow.Inventory.Gun")
++#define NS_INVENTORY OBFUSCATE("Chillow.StandChillow.Inventory")
+ #define NS_GLOBAL OBFUSCATE("")
+ 
+ // Objects exposed by CheatParameters in dump.cs.
+@@ -101,6 +107,23 @@
+ static bool  vShowSkinId = false;         static bool dShowSkinId = false;
+ static bool  vShowInventoryIds = false;   static bool dShowInventoryIds = false;
+ 
++// Runtime Aim/Weapon controls proven by dump.cs field layout. These are applied
++// only when changed and only to the currently live local AimController/GunController.
++static float vAimSensitivityX = 1.0f;     static bool dAimSensitivityX = false;
++static float vAimSensitivityY = 1.0f;     static bool dAimSensitivityY = false;
++static float vAimVerticalClamp = 89.0f;   static bool dAimVerticalClamp = false;
++static float vAimHorizontalClamp = 89.0f; static bool dAimHorizontalClamp = false;
++static bool  vShowHitMarker = true;       static bool dShowHitMarker = false;
++static int   vFireRate = 600;             static bool dFireRate = false;
++static float vHitRange = 100.0f;          static bool dHitRange = false;
++static float vScopeSensitivity = 1.0f;    static bool dScopeSensitivity = false;
++static int   vHeadDamage = 100;           static bool dHeadDamage = false;
++static int   vChestDamage = 100;          static bool dChestDamage = false;
++static int   vStomachDamage = 100;        static bool dStomachDamage = false;
++static int   vLegsDamage = 100;           static bool dLegsDamage = false;
++static float vRecoilHorizontal = 1.0f;    static bool dRecoilHorizontal = false;
++static float vRecoilVertical = 1.0f;      static bool dRecoilVertical = false;
++
+ using GetCP = void *(*)(void *);
+ using SetBool = void (*)(void *, bool);
+ using SetFloat = void (*)(void *, float);
+@@ -136,6 +159,40 @@
+     return true;
+ }
+ 
++template <typename T>
++static bool WriteOffset(void *object, size_t offset, const T &value) {
++    if (!object) return false;
++    *reinterpret_cast<T *>(reinterpret_cast<uintptr_t>(object) + offset) = value;
++    return true;
++}
++
++static void *g_offlineController = nullptr;
++
++static void *GetLocalPlayer() {
++    if (!g_offlineController) return nullptr;
++    auto fn = reinterpret_cast<GetCP>(Method(NS_GAME, OBFUSCATE("GameController"), OBFUSCATE("wzn"), 0));
++    return fn ? fn(g_offlineController) : nullptr;
++}
++
++static void *GetLocalAimController() {
++    void *player = GetLocalPlayer();
++    if (!player) return nullptr;
++    auto fn = reinterpret_cast<GetCP>(Method(NS_PLAYER, OBFUSCATE("PlayerController"), OBFUSCATE("mxb"), 0));
++    return fn ? fn(player) : nullptr;
++}
++
++static void *GetCurrentGunController() {
++    void *player = GetLocalPlayer();
++    if (!player) return nullptr;
++    auto getWeaponry = reinterpret_cast<GetCP>(Method(NS_PLAYER, OBFUSCATE("PlayerController"), OBFUSCATE("mxd"), 0));
++    void *weaponry = getWeaponry ? getWeaponry(player) : nullptr;
++    if (!weaponry) return nullptr;
++    auto getCurrent = reinterpret_cast<GetCP>(Method(NS_WEAPONRY, OBFUSCATE("WeaponryController"), OBFUSCATE("ngk"), 0));
++    void *weapon = getCurrent ? getCurrent(weaponry) : nullptr;
++    if (!weapon || !Il2CppObjectIsClass(weapon, NS_GUN, OBFUSCATE("GunController"))) return nullptr;
++    return weapon;
++}
++
+ static bool SetUnityToggle(void *toggle, bool value) {
+     if (!toggle) return false;
+     auto setter = reinterpret_cast<InstanceBoolAction>(
+@@ -467,11 +524,72 @@
+     }
+ }
+ 
++static void ApplyDirtyAimWeaponRuntime() {
++    if (dAimSensitivityX || dAimSensitivityY || dAimVerticalClamp || dAimHorizontalClamp) {
++        void *aim = GetLocalAimController();
++        if (aim) {
++            if (dAimSensitivityX)
++                WriteField(aim, NS_AIM, OBFUSCATE("AimController"), OBFUSCATE("sensitivityX"), vAimSensitivityX);
++            if (dAimSensitivityY)
++                WriteField(aim, NS_AIM, OBFUSCATE("AimController"), OBFUSCATE("sensitivityY"), vAimSensitivityY);
++            if (dAimVerticalClamp || dAimHorizontalClamp) {
++                void *params = ReadObjectField(aim, NS_AIM, OBFUSCATE("AimController"), OBFUSCATE("aimingParameters"));
++                if (params) {
++                    if (dAimVerticalClamp)
++                        WriteOffset(params, 0xA0, vAimVerticalClamp); // dump: AimController.AimingParameters.verticalClamp
++                    if (dAimHorizontalClamp)
++                        WriteOffset(params, 0xA4, vAimHorizontalClamp); // dump: AimController.AimingParameters.horizontalClamp
++                }
++            }
++        }
++    }
++
++    if (!(dShowHitMarker || dFireRate || dHitRange || dScopeSensitivity ||
++          dHeadDamage || dChestDamage || dStomachDamage || dLegsDamage ||
++          dRecoilHorizontal || dRecoilVertical)) return;
++
++    void *gun = GetCurrentGunController();
++    if (!gun) return;
++    auto getParams = reinterpret_cast<GetCP>(Method(NS_GUN, OBFUSCATE("GunController"), OBFUSCATE("vxn"), 0));
++    void *params = getParams ? getParams(gun) : nullptr;
++    if (!params) return;
++
++    if (dShowHitMarker)
++        WriteField(params, NS_INVENTORY, OBFUSCATE("WeaponParameters"), OBFUSCATE("_showHitMarker"), vShowHitMarker);
++    if (dFireRate)
++        WriteField(params, NS_GUN, OBFUSCATE("GunParameters"), OBFUSCATE("_fireRate"), vFireRate);
++    if (dHitRange)
++        WriteField(params, NS_GUN, OBFUSCATE("GunParameters"), OBFUSCATE("_hitRange"), vHitRange);
++    if (dScopeSensitivity)
++        WriteField(params, NS_GUN, OBFUSCATE("GunParameters"), OBFUSCATE("_scopeAimSensitivityMult"), vScopeSensitivity);
++
++    if (dHeadDamage || dChestDamage || dStomachDamage || dLegsDamage) {
++        void *damage = ReadObjectField(params, NS_GUN, OBFUSCATE("GunParameters"), OBFUSCATE("_damage"));
++        if (damage) {
++            if (dHeadDamage) WriteField(damage, NS_INVENTORY, OBFUSCATE("Damage"), OBFUSCATE("_headDamage"), vHeadDamage);
++            if (dChestDamage) WriteField(damage, NS_INVENTORY, OBFUSCATE("Damage"), OBFUSCATE("_chestAndArmsDamage"), vChestDamage);
++            if (dStomachDamage) WriteField(damage, NS_INVENTORY, OBFUSCATE("Damage"), OBFUSCATE("_stomachDamage"), vStomachDamage);
++            if (dLegsDamage) WriteField(damage, NS_INVENTORY, OBFUSCATE("Damage"), OBFUSCATE("_legsDamage"), vLegsDamage);
++        }
++    }
++
++    if (dRecoilHorizontal || dRecoilVertical) {
++        void *recoil = ReadObjectField(params, NS_GUN, OBFUSCATE("GunParameters"), OBFUSCATE("_recoilParameters"));
++        if (recoil) {
++            if (dRecoilHorizontal)
++                WriteField(recoil, NS_GUN, OBFUSCATE("RecoilParameters"), OBFUSCATE("horizontalRange"), vRecoilHorizontal);
++            if (dRecoilVertical)
++                WriteField(recoil, NS_GUN, OBFUSCATE("RecoilParameters"), OBFUSCATE("verticalRange"), vRecoilVertical);
++        }
++    }
++}
++
+ static void ApplyDirtyLocalSettings() {
+     ApplyDirtyVideoSettings();
+     ApplyDirtyCrosshair();
+     ApplyDirtyAudioSettings();
+     ApplyDirtySpecialAbilities();
++    ApplyDirtyAimWeaponRuntime();
+ }
+ 
+ static bool AddMatchTwoMinutes() {
+@@ -509,6 +627,7 @@
+ 
+ static void *(*old_OfflineZaj)(void *instance) = nullptr;
+ static void *OfflineZaj(void *instance) {
++    g_offlineController = instance;
+     void *result = old_OfflineZaj ? old_OfflineZaj(instance) : nullptr;
+     if (result) {
+         RefreshParameterObjects(result);
+@@ -632,11 +751,43 @@
+     Imgui::Toggle(OBFUSCATE("Show Inventory Item IDs"),
+                   OBFUSCATE("dump: SpecialAbilitiesSettings.ShowInventoryItemIds")); // 52
+ 
++    Imgui::Tab(OBFUSCATE("Aim / Weapon Runtime"));
++    Imgui::SeekBar(OBFUSCATE("Aim Sensitivity X"), 1, 300,
++                   OBFUSCATE("dump: AimController.sensitivityX, x0.01; current live AimController")); // 53
++    Imgui::SeekBar(OBFUSCATE("Aim Sensitivity Y"), 1, 300,
++                   OBFUSCATE("dump: AimController.sensitivityY, x0.01; current live AimController")); // 54
++    Imgui::SeekBar(OBFUSCATE("Vertical Aim Clamp"), 0, 1800,
++                   OBFUSCATE("dump: AimController.aimingParameters.verticalClamp, x0.1")); // 55
++    Imgui::SeekBar(OBFUSCATE("Horizontal Aim Clamp"), 0, 1800,
++                   OBFUSCATE("dump: AimController.aimingParameters.horizontalClamp, x0.1")); // 56
++    Imgui::Toggle(OBFUSCATE("Current Weapon Hit Marker"),
++                  OBFUSCATE("dump: WeaponParameters._showHitMarker; current GunController.vxn()")); // 57
++    Imgui::SeekBar(OBFUSCATE("Current Weapon Fire Rate"), 1, 2000,
++                   OBFUSCATE("dump: GunParameters._fireRate; note _safeFireRate may validate/revert it")); // 58
++    Imgui::SeekBar(OBFUSCATE("Current Weapon Hit Range"), 1, 2000,
++                   OBFUSCATE("dump: GunParameters._hitRange")); // 59
++    Imgui::SeekBar(OBFUSCATE("Scope Aim Sensitivity"), 1, 50,
++                   OBFUSCATE("dump: GunParameters._scopeAimSensitivityMult, x0.1")); // 60
++    Imgui::SeekBar(OBFUSCATE("Head Damage"), 0, 2000,
++                   OBFUSCATE("dump: GunParameters._damage -> Damage._headDamage")); // 61
++    Imgui::SeekBar(OBFUSCATE("Chest / Arms Damage"), 0, 2000,
++                   OBFUSCATE("dump: GunParameters._damage -> Damage._chestAndArmsDamage")); // 62
++    Imgui::SeekBar(OBFUSCATE("Stomach Damage"), 0, 2000,
++                   OBFUSCATE("dump: GunParameters._damage -> Damage._stomachDamage")); // 63
++    Imgui::SeekBar(OBFUSCATE("Legs Damage"), 0, 2000,
++                   OBFUSCATE("dump: GunParameters._damage -> Damage._legsDamage")); // 64
++    Imgui::SeekBar(OBFUSCATE("Recoil Horizontal Range"), 0, 300,
++                   OBFUSCATE("dump: GunParameters._recoilParameters -> RecoilParameters.horizontalRange, x0.1")); // 65
++    Imgui::SeekBar(OBFUSCATE("Recoil Vertical Range"), 0, 300,
++                   OBFUSCATE("dump: GunParameters._recoilParameters -> RecoilParameters.verticalRange, x0.1")); // 66
++
+     Imgui::Tab(OBFUSCATE("Diagnostics"));
+-    Imgui::RichText(OBFUSCATE("53 interactive controls are dump-backed: 26 CheatParameters + 6 Debug/Admin + 18 local/settings + 3 developer controls."));
++    Imgui::RichText(OBFUSCATE("67 interactive controls are dump-backed: the original 53 plus 14 live Aim/Gun runtime controls."));
+     Imgui::RichText(OBFUSCATE("Kill All Bots exists in PauseMenuView, but its obfuscated callback is not uniquely proven by this dump alone, so no unsafe guess is wired."));
+     Imgui::RichText(OBFUSCATE("Local/settings controls resolve live Unity objects with FindObjectOfType and use dump field/method bindings."));
+     Imgui::RichText(OBFUSCATE("Parameter root is obtained from OfflineModeController::zaj; debug state uses cqt/cqu."));
++    Imgui::RichText(OBFUSCATE("No built-in player Aimbot/AimAssist/TriggerBot was proven in dump.cs. Aim Runtime controls tune the real AimController only."));
++    Imgui::RichText(OBFUSCATE("Fire Rate is marked runtime-only because GunParameters also contains _safeFireRate; the game may validate or restore it."));
+ }
+ 
+ void Changes(JNIEnv *env, jclass clazz, jobject obj, jint featNum, jstring featName,
+@@ -695,6 +846,20 @@
+         case 50: vDebugConsole = boolean; dDebugConsole = true; break;
+         case 51: vShowSkinId = boolean; dShowSkinId = true; break;
+         case 52: vShowInventoryIds = boolean; dShowInventoryIds = true; break;
++        case 53: vAimSensitivityX = value / 100.0f; dAimSensitivityX = true; break;
++        case 54: vAimSensitivityY = value / 100.0f; dAimSensitivityY = true; break;
++        case 55: vAimVerticalClamp = value / 10.0f; dAimVerticalClamp = true; break;
++        case 56: vAimHorizontalClamp = value / 10.0f; dAimHorizontalClamp = true; break;
++        case 57: vShowHitMarker = boolean; dShowHitMarker = true; break;
++        case 58: vFireRate = value; dFireRate = true; break;
++        case 59: vHitRange = static_cast<float>(value); dHitRange = true; break;
++        case 60: vScopeSensitivity = value / 10.0f; dScopeSensitivity = true; break;
++        case 61: vHeadDamage = value; dHeadDamage = true; break;
++        case 62: vChestDamage = value; dChestDamage = true; break;
++        case 63: vStomachDamage = value; dStomachDamage = true; break;
++        case 64: vLegsDamage = value; dLegsDamage = true; break;
++        case 65: vRecoilHorizontal = value / 10.0f; dRecoilHorizontal = true; break;
++        case 66: vRecoilVertical = value / 10.0f; dRecoilVertical = true; break;
+         default: return;
+     }
+     ApplyDirtyAll();
+--- a/AutoHook/Il2Cpp.cpp
++++ b/AutoHook/Il2Cpp.cpp
+@@ -35,6 +35,9 @@
+     void* (*il2cpp_class_get_methods)(void *klass, void* *iter);
+     const char* (*il2cpp_method_get_name)(void *method);
+     void *(*il2cpp_object_new)(void *klass);
++    void *(*il2cpp_object_get_class)(void *object);
++    const char *(*il2cpp_class_get_name)(void *klass);
++    const char *(*il2cpp_class_get_namespace)(void *klass);
+     const Il2CppType *(*il2cpp_class_get_type)(void *klass);
+     void *(*il2cpp_type_get_object)(const Il2CppType *type);
+ }
+@@ -172,6 +175,15 @@
+     return findOne ? findOne(systemType) : nullptr;
+ }
+ 
++bool Il2CppObjectIsClass(void *object, const char *namespaze, const char *clazz) {
++    if (!object || !il2cpp_object_get_class || !il2cpp_class_get_name || !il2cpp_class_get_namespace) return false;
++    void *klass = il2cpp_object_get_class(object);
++    if (!klass) return false;
++    const char *name = il2cpp_class_get_name(klass);
++    const char *ns = il2cpp_class_get_namespace(klass);
++    return name && ns && strcmp(name, clazz) == 0 && strcmp(ns, namespaze) == 0;
++}
++
+ void *Il2CppCreateClassInstance(const char *image, const char *namespaze, const char *clazz) {
+ 	void *img = Il2CppGetImageByName(image);
+ 	if (!img) {
+@@ -378,6 +390,9 @@
+     il2cpp_class_get_methods = (void *(*)(void *, void **)) xdl_sym(handle, "il2cpp_class_get_methods",0);
+     il2cpp_method_get_name = (const char *(*)(void *)) xdl_sym(handle, "il2cpp_method_get_name",0);
+     il2cpp_object_new = (void *(*)(void *)) xdl_sym(handle, "il2cpp_object_new",0);
++    il2cpp_object_get_class = (void *(*)(void *)) xdl_sym(handle, "il2cpp_object_get_class",0);
++    il2cpp_class_get_name = (const char *(*)(void *)) xdl_sym(handle, "il2cpp_class_get_name",0);
++    il2cpp_class_get_namespace = (const char *(*)(void *)) xdl_sym(handle, "il2cpp_class_get_namespace",0);
+     il2cpp_class_get_type = (const Il2CppType *(*)(void *)) xdl_sym(handle, "il2cpp_class_get_type",0);
+     il2cpp_type_get_object = (void *(*)(const Il2CppType *)) xdl_sym(handle, "il2cpp_type_get_object",0);
+     xdl_close(handle);
+--- a/AutoHook/Il2Cpp.h
++++ b/AutoHook/Il2Cpp.h
+@@ -277,6 +277,7 @@
+ void *Il2CppGetImageByName(const char *image);
+ void *Il2CppGetClassType(const char *image, const char *namespaze, const char *clazz);
+ void *Il2CppFindObjectOfType(const char *image, const char *namespaze, const char *clazz, bool includeInactive = true);
++bool Il2CppObjectIsClass(void *object, const char *namespaze, const char *clazz);
+ void *Il2CppCreateClassInstance(const char *image, const char *namespaze, const char *clazz);
+ void* Il2CppCreateArray(const char *image, const char *namespaze, const char *clazz, size_t length);
