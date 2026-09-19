@@ -644,6 +644,12 @@ def analyze_elf(
             "entry": entry,
             "arch": arch,
             **edge,
+            "nativeEdgeKind": edge.get("kind"),
+            "kind": (
+                "X86_DYNAMIC_LOOKUP_FLOW"
+                if edge.get("targetResolution") == "DLSYM_RESULT_FLOW"
+                else "X86_CONTROL_FLOW_EDGE"
+            ),
             "instructionBoundaryConfirmed": True,
             "functionBoundarySource": "ELF_FUNCTION_SYMBOL",
             "patchReady": False,
