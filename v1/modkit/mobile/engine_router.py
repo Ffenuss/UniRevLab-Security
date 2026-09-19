@@ -136,9 +136,10 @@ def route(profile_report: dict[str, Any], output_path: str | Path | None = None)
                     )
                 elif abi in {"x86", "x86_64"}:
                     route_missing.append(
-                        f"stripped binaries without usable unwind metadata, indirect jump-table target "
-                        f"recovery and interprocedural propagation for {abi}; ELF symbols + .eh_frame_hdr "
-                        "exact function recovery, Capstone basic-block CFG, cross-block identical-fact "
+                        f"stripped binaries without usable unwind metadata and without decoded direct-call/"
+                        f"entry seeds, indirect jump-table target recovery and interprocedural propagation "
+                        f"for {abi}; ELF symbols + .eh_frame_hdr exact recovery plus fail-closed Capstone "
+                        "direct-call/ELF-entry seeding, basic-block CFG, cross-block identical-fact "
                         "propagation, register/stack argument flow, RIP/GOT relocation flow and dlsym "
                         "result tracking are bundled"
                     )
