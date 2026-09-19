@@ -27,6 +27,9 @@ MAX_INSTRUCTIONS_PER_FUNCTION = 8192
 MAX_EDGES = 16000
 MAX_FINDINGS = 2000
 MAX_STRING_BYTES = 512
+MAX_STRIPPED_RECOVERY_SECTION_BYTES = 4 * 1024 * 1024
+MAX_STRIPPED_RECOVERY_INSTRUCTIONS = 65536
+MAX_STRIPPED_RECOVERED_FUNCTIONS = 4096
 
 Decoder = Callable[[bytes, int, str, int], dict[str, Any]]
 
@@ -179,6 +182,133 @@ def _java_capstone_decode(
             "instructions": [],
         }
 
+
+
+def _direct_call_recovered_regions(
+    view: ElfView,
+    existing_regions: list[dict[str, Any]],
+    *,
+    arch: str,
+    decoder: Decoder,
+    cb: Any | None,
+) -> list[dict[str, Any]]:
+    """Recover weak-but-structured starts in otherwise-unbounded x86 code.
+
+    This fallback is used only for executable sections which have no symbol or
+    unwind-backed regions at all. A start is accepted only if Capstone decoded
+    the target as an instruction boundary and a direct CALL points to it. The
+    ELF entry point may also seed a region when it is a decoded instruction.
+    These boundaries remain correlated evidence and never become patch-ready.
+    """
+    owned_sections = {
+        int(row["section"].index)
+        for row in existing_regions
+        if row.get("section") is not None
+    }
+    out: list[dict[str, Any]] = []
+    total_bytes = 0
+
+    for sec in view.sections:
+        _check(cb)
+        if (
+            int(sec.index) in owned_sections
+            or not sec.executable
+            or sec.size <= 0
+            or sec.name in {".plt", ".plt.sec", ".iplt", ".init", ".fini"}
+        ):
+            continue
+        if total_bytes >= MAX_TOTAL_CODE_BYTES:
+            break
+        take = min(
+            int(sec.size),
+            MAX_STRIPPED_RECOVERY_SECTION_BYTES,
+            MAX_TOTAL_CODE_BYTES - total_bytes,
+        )
+        if take <= 0:
+            continue
+        raw = view._slice(sec)[:take]
+        if not raw:
+            continue
+        total_bytes += len(raw)
+        decoded = decoder(
+            raw, int(sec.addr), arch, MAX_STRIPPED_RECOVERY_INSTRUCTIONS
+        )
+        if not isinstance(decoded, dict) or not decoded.get("available"):
+            continue
+        instructions = decoded.get("instructions") or []
+        if not isinstance(instructions, list):
+            continue
+
+        addresses = {
+            int(insn.get("address") or 0)
+            for insn in instructions
+            if isinstance(insn, dict)
+            and int(insn.get("address") or 0) >= int(sec.addr)
+            and int(insn.get("address") or 0) < int(sec.addr) + take
+            and int(insn.get("size") or 0) > 0
+        }
+        starts: set[int] = set()
+        if int(view.entry or 0) in addresses:
+            starts.add(int(view.entry))
+
+        for index, insn in enumerate(instructions):
+            if (index & 0xFFF) == 0:
+                _check(cb)
+            if not isinstance(insn, dict) or not bool(insn.get("isCall")):
+                continue
+            if not bool(insn.get("hasImmediateTarget")):
+                continue
+            target = insn.get("immediateTarget")
+            if not isinstance(target, int):
+                continue
+            if target not in addresses:
+                continue
+            if not (int(sec.addr) <= target < int(sec.addr) + take):
+                continue
+            starts.add(int(target))
+            if len(starts) >= MAX_STRIPPED_RECOVERED_FUNCTIONS:
+                break
+
+        if not starts:
+            continue
+        ordered = sorted(starts)
+        for pos, start in enumerate(ordered):
+            next_start = (
+                ordered[pos + 1]
+                if pos + 1 < len(ordered)
+                else min(int(sec.addr) + take, int(sec.addr) + int(sec.size))
+            )
+            end = min(
+                next_start,
+                int(sec.addr) + int(sec.size),
+                start + MAX_FUNCTION_BYTES,
+            )
+            if end <= start:
+                continue
+            out.append({
+                "name": f"recovered_call_{start:x}",
+                "rva": start,
+                "endRva": end,
+                "size": end - start,
+                "section": sec,
+                "boundarySource": (
+                    "ELF_ENTRY_POINT"
+                    if start == int(view.entry or 0)
+                    else "CAPSTONE_DIRECT_CALL_TARGET"
+                ),
+                "boundaryConfidence": (
+                    "EXACT_ELF_ENTRY"
+                    if start == int(view.entry or 0)
+                    else "CORRELATED_INSTRUCTION_BOUNDARY"
+                ),
+                "recoveredBoundary": True,
+                "directCallSeededBoundary": start != int(view.entry or 0),
+            })
+            if len(out) >= MAX_STRIPPED_RECOVERED_FUNCTIONS:
+                return out
+
+    out.sort(key=lambda row: (int(row["rva"]), str(row["name"])))
+    return out
 
 def _canonical_reg(name: Any, arch: str) -> str | None:
     low = str(name or "").casefold()
@@ -677,10 +807,16 @@ def analyze_elf(
         }
 
     arch = "x86" if view.machine == EM_386 else "x86_64"
+    decode = decoder or _java_capstone_decode
     regions = _function_regions(view)
+    regions.extend(
+        _direct_call_recovered_regions(
+            view, regions, arch=arch, decoder=decode, cb=cb
+        )
+    )
+    regions.sort(key=lambda row: (int(row["rva"]), str(row["name"])))
     targets = {int(row["rva"]): str(row["name"]) for row in regions}
     boundary_rows = {int(row["rva"]): row for row in regions}
-    decode = decoder or _java_capstone_decode
     relocation_symbols = _relocation_symbols(view)
     plt_targets = _plt_import_targets(view, arch, decode, relocation_symbols)
 
@@ -693,6 +829,14 @@ def analyze_elf(
     operand_detail_available = False
     recovered_function_count = sum(
         1 for row in regions if bool(row.get("recoveredBoundary"))
+    )
+    direct_call_recovered_count = sum(
+        1 for row in regions if bool(row.get("directCallSeededBoundary"))
+    )
+    unwind_recovered_count = sum(
+        1 for row in regions
+        if bool(row.get("recoveredBoundary"))
+        and str(row.get("boundarySource") or "") == "EH_FRAME_HDR"
     )
     symbol_function_count = len(regions) - recovered_function_count
     basic_block_count = 0
@@ -823,6 +967,8 @@ def analyze_elf(
         "functionCount": len(regions),
         "symbolFunctionCount": symbol_function_count,
         "recoveredFunctionCount": recovered_function_count,
+        "unwindRecoveredFunctionCount": unwind_recovered_count,
+        "directCallRecoveredFunctionCount": direct_call_recovered_count,
         "analyzedFunctionCount": analyzed,
         "scannedCodeBytes": total,
         "relocationSymbolCount": len(relocation_symbols),
@@ -839,7 +985,9 @@ def analyze_elf(
         "policy": {
             "symbolBoundedOnly": recovered_function_count == 0,
             "symbolOrExactUnwindBounded": True,
-            "unwindFunctionRecovery": recovered_function_count > 0,
+            "unwindFunctionRecovery": unwind_recovered_count > 0,
+            "directCallSeededRecovery": direct_call_recovered_count > 0,
+            "directCallSeedRequiresDecodedInstructionBoundary": True,
             "strippedRegionGuessing": False,
             "rawOpcodeByteScanning": False,
             "instructionBoundaryFromCapstone": True,
