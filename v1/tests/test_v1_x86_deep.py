@@ -685,3 +685,93 @@ def test_x86_64_stripped_elf_recovers_functions_from_eh_frame_hdr():
     assert call["targetBoundarySource"] == "EH_FRAME_HDR"
     assert call["functionBoundarySource"] == "EH_FRAME_HDR"
     assert call["recoveredFunctionBoundary"] is True
+
+
+def _x64_stripped_no_unwind_elf() -> bytes:
+    shstr, sh = _cstr_offsets([".shstrtab", ".text"])
+    text = b"\x90" * 0x20
+    payloads = [b"", shstr, text]
+    offsets = [0] * len(payloads)
+    blob = bytearray(b"\0" * 64)
+    cursor = 64
+    for idx in range(1, len(payloads)):
+        cursor = (cursor + 7) & ~7
+        if len(blob) < cursor:
+            blob += b"\0" * (cursor - len(blob))
+        offsets[idx] = cursor
+        blob += payloads[idx]
+        cursor += len(payloads[idx])
+
+    shoff = (len(blob) + 7) & ~7
+    if len(blob) < shoff:
+        blob += b"\0" * (shoff - len(blob))
+    headers = [
+        (0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+        (sh[".shstrtab"], 3, 0, 0, offsets[1], len(shstr), 0, 0, 1, 0),
+        (sh[".text"], 1, 0x6, 0x1000, offsets[2], len(text), 0, 0, 16, 0),
+    ]
+    for row in headers:
+        blob += struct.pack("<IIQQQQIIQQ", *row)
+
+    ident = bytearray(16)
+    ident[:4] = b"\x7fELF"
+    ident[4] = 2
+    ident[5] = 1
+    ident[6] = 1
+    hdr = struct.pack(
+        "<16sHHIQQQIHHHHHH",
+        bytes(ident), 3, 62, 1, 0x1000, 0, shoff, 0,
+        64, 0, 0, 64, len(headers), 1,
+    )
+    blob[:64] = hdr
+    return bytes(blob)
+
+
+def test_x86_64_stripped_without_unwind_uses_fail_closed_direct_call_seeds():
+    def ret(address: int):
+        return {
+            "address": address, "size": 1, "mnemonic": "ret", "opStr": "",
+            "isCall": False, "isJump": False, "isRet": True,
+            "regsRead": ["rsp"], "regsWrite": ["rsp"], "operands": [],
+        }
+
+    def call(address: int, target: int):
+        return {
+            "address": address, "size": 5, "mnemonic": "call",
+            "opStr": hex(target),
+            "isCall": True, "isJump": False, "isRet": False,
+            "hasImmediateTarget": True, "immediateTarget": target,
+            "regsRead": [], "regsWrite": ["rsp"],
+            "operands": [{"type": "IMM", "imm": target, "size": 8, "access": 1}],
+        }
+
+    def decoder(code: bytes, address: int, arch: str, max_instructions: int):
+        if address == 0x1000 and len(code) >= 0x20:
+            instructions = [call(0x1000, 0x1010), ret(0x1005), ret(0x1010)]
+        elif address == 0x1000:
+            instructions = [call(0x1000, 0x1010), ret(0x1005)]
+        else:
+            instructions = [ret(address)]
+        return {"available": True, "version": "5.0", "instructions": instructions}
+
+    report = x86_deep.analyze_elf(
+        _x64_stripped_no_unwind_elf(),
+        apk_name="stripped-no-unwind.apk",
+        entry="lib/x86_64/libgame.so",
+        decoder=decoder,
+    )
+
+    assert report["symbolFunctionCount"] == 0
+    assert report["unwindRecoveredFunctionCount"] == 0
+    assert report["directCallRecoveredFunctionCount"] == 1
+    assert report["recoveredFunctionCount"] == 2
+    assert report["policy"]["directCallSeededRecovery"] is True
+    assert report["policy"]["directCallSeedRequiresDecodedInstructionBoundary"] is True
+    assert report["policy"]["symbolOrExactUnwindBounded"] is False
+    assert report["policy"]["patchReadyFromControlFlow"] is False
+
+    edge = next(row for row in report["edges"] if row["instructionRva"] == 0x1000)
+    assert edge["targetRva"] == 0x1010
+    assert edge["targetResolution"] == "CORRELATED_DIRECT_CALL_START"
+    assert edge["targetBoundarySource"] == "CAPSTONE_DIRECT_CALL_TARGET"
+    assert edge["patchReady"] is False if "patchReady" in edge else True
