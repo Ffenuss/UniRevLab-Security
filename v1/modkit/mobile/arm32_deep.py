@@ -911,7 +911,8 @@ def _merge_capstone_flow(
         for key in (
             "targetFunction", "targetResolution", "argumentEvidence",
             "dynamicLookup", "lookupIdentifier", "lookupIdentifierAddress",
-            "decoder",
+            "dynamicLookupCallRva", "relocationSlotRva",
+            "basicBlockRva", "cfgReachable", "decoder",
         ):
             value = flow.get(key)
             if value not in (None, "", []):
