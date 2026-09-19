@@ -116,7 +116,9 @@ def test_router_reports_arm32_remaining_cfg_gap(tmp_path: Path):
     row = routed["routes"][0]
     assert row["coverage"] == "PARTIAL_BUNDLED"
     assert any(
-        "ARMv7/Thumb" in item and "stripped-function" in item
+        "stripped-function" in item
+        and "indirect branch/table" in item
+        and "relocation-backed PLT veneers" in item
         for item in row["missingBackends"]
     )
 
