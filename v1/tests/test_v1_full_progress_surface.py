@@ -20,7 +20,7 @@ def test_full_reconstruction_persists_stage_remaining_and_elapsed():
     assert 'stage(2,4,"JADX bounded: cache hit' in source
     assert 'stage(2,4,"JADX bounded: APK/split' in source
     assert 'stage(3,4,"Apktool ' in source
-    assert 'stage(4,4,"Lua/JS/Hermes deep' in source
+    assert 'stage(4,4,"Runtime-targeted deep:' in source
 
 
 def test_auto_analysis_renders_elapsed_without_fake_eta():
