@@ -774,4 +774,9 @@ def test_x86_64_stripped_without_unwind_uses_fail_closed_direct_call_seeds():
     assert edge["targetRva"] == 0x1010
     assert edge["targetResolution"] == "CORRELATED_DIRECT_CALL_START"
     assert edge["targetBoundarySource"] == "CAPSTONE_DIRECT_CALL_TARGET"
-    assert edge["patchReady"] is False if "patchReady" in edge else True
+    finding = next(
+        row for row in report["findings"]
+        if row["instructionRva"] == 0x1000
+    )
+    assert finding["patchReady"] is False
+    assert finding["automationExcluded"] is True
