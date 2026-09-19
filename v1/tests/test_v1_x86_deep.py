@@ -23,7 +23,7 @@ def _x64_flow_elf() -> bytes:
     dynstr, ds = _cstr_offsets(["dlsym"])
 
     symtab = bytearray(b"\0" * 24)
-    symtab += struct.pack("<IBBHQQ", st["source"], 0x12, 0, 7, 0x1000, 0x20)
+    symtab += struct.pack("<IBBHQQ", st["source"], 0x12, 0, 8, 0x1000, 0x20)
 
     dynsym = bytearray(b"\0" * 24)
     dynsym += struct.pack("<IBBHQQ", ds["dlsym"], 0x12, 0, 0, 0, 0)
