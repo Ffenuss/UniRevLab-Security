@@ -344,6 +344,137 @@ def _relocation_symbols(view: ElfView) -> dict[int, str]:
             out.setdefault(offset, symbol)
     return out
 
+def _plt_import_targets(
+    view: ElfView,
+    decoder: Decoder,
+    relocations: dict[int, str],
+) -> dict[int, str]:
+    """Resolve ARM/Thumb PLT entry starts only when decoded address arithmetic
+    lands exactly on an ELF relocation slot carrying a symbol name.
+    """
+    out: dict[int, str] = {}
+    if not relocations:
+        return out
+
+    for sec in view.sections:
+        if sec.name not in {".plt", ".plt.sec", ".iplt"}:
+            continue
+        if not sec.executable or sec.size <= 0 or sec.size > MAX_FUNCTION_BYTES:
+            continue
+        raw = view._slice(sec)
+        if not raw:
+            continue
+
+        # Android ARM PLT is normally A32. Thumb is attempted only when A32
+        # produced no relocation-backed entries for the section.
+        for thumb in (False, True):
+            decoded = decoder(
+                raw, int(sec.addr), thumb, MAX_INSTRUCTIONS_PER_FUNCTION
+            )
+            if not isinstance(decoded, dict) or not decoded.get("available"):
+                continue
+            instructions = decoded.get("instructions") or []
+            if not isinstance(instructions, list):
+                continue
+
+            constants: dict[str, int] = {}
+            entry_start: int | None = None
+            found_before = len(out)
+            ordered = [
+                insn for insn in instructions
+                if isinstance(insn, dict) and int(insn.get("address") or 0) > 0
+            ]
+            for idx, insn in enumerate(ordered):
+                address = int(insn.get("address") or 0)
+                if entry_start is None:
+                    entry_start = address
+                mnemonic = str(insn.get("mnemonic") or "").casefold()
+                ops = _operands(insn)
+
+                if (
+                    mnemonic in {"add", "addw", "sub", "subw"}
+                    and len(ops) >= 3
+                    and ops[0].get("type") == "REG"
+                    and ops[1].get("type") == "REG"
+                    and ops[2].get("type") == "IMM"
+                ):
+                    dest = _arm_reg(ops[0].get("reg"))
+                    source = _arm_reg(ops[1].get("reg"))
+                    if dest and source:
+                        if source == "r15":
+                            base = ((address + 4) & ~3) if thumb else address + 8
+                        else:
+                            base = constants.get(source)
+                        if base is None:
+                            constants.pop(dest, None)
+                        else:
+                            imm = int(ops[2].get("imm") or 0)
+                            constants[dest] = (
+                                base - imm if mnemonic.startswith("sub")
+                                else base + imm
+                            )
+
+                elif (
+                    mnemonic == "adr"
+                    and len(ops) >= 2
+                    and ops[0].get("type") == "REG"
+                    and ops[1].get("type") == "IMM"
+                ):
+                    dest = _arm_reg(ops[0].get("reg"))
+                    if dest:
+                        constants[dest] = int(ops[1].get("imm") or 0)
+
+                elif (
+                    mnemonic in {"mov", "movs"}
+                    and len(ops) >= 2
+                    and ops[0].get("type") == "REG"
+                    and ops[1].get("type") == "IMM"
+                ):
+                    dest = _arm_reg(ops[0].get("reg"))
+                    if dest:
+                        constants[dest] = int(ops[1].get("imm") or 0)
+
+                writes_pc = False
+                if mnemonic.startswith("ldr") and len(ops) >= 2:
+                    dest = _arm_reg(ops[0].get("reg")) if ops[0].get("type") == "REG" else None
+                    if dest == "r15" and ops[1].get("type") == "MEM":
+                        writes_pc = True
+                        mem = ops[1].get("mem")
+                        if isinstance(mem, dict):
+                            base_reg = _arm_reg(mem.get("base"))
+                            index_reg = _arm_reg(mem.get("index"))
+                            if index_reg is None:
+                                if base_reg == "r15":
+                                    base = (
+                                        ((address + 4) & ~3)
+                                        if thumb else address + 8
+                                    )
+                                else:
+                                    base = constants.get(base_reg or "")
+                                if base is not None:
+                                    slot = base + int(mem.get("disp") or 0)
+                                    symbol = relocations.get(slot)
+                                    if symbol and entry_start is not None:
+                                        out.setdefault(entry_start, symbol)
+
+                terminates = (
+                    bool(insn.get("isJump"))
+                    or bool(insn.get("isRet"))
+                    or writes_pc
+                )
+                if terminates:
+                    constants.clear()
+                    entry_start = (
+                        int(ordered[idx + 1].get("address") or 0)
+                        if idx + 1 < len(ordered) else None
+                    )
+
+            if len(out) > found_before:
+                break
+
+    return out
+
+
 
 def _section_for_rva(view: ElfView, rva: int):
     return next(
@@ -485,6 +616,7 @@ def _run_capstone_block(
     view: ElfView,
     targets: dict[int, str],
     relocations: dict[int, str],
+    plt_targets: dict[int, str],
     initial_state: dict[str, dict[str, Any]],
     initial_stack_slots: dict[str, dict[str, Any]],
     cb: Any | None,
@@ -580,6 +712,9 @@ def _run_capstone_block(
                 else "DIRECT_IMMEDIATE" if target is not None
                 else "REGISTER_INDIRECT_UNRESOLVED"
             )
+            if target is not None and target in plt_targets:
+                target_name = plt_targets[target]
+                resolution = "ELF_RELOCATION_PLT"
 
             if not target_name and ops and ops[0].get("type") == "REG":
                 reg = _arm_reg(ops[0].get("reg"))
@@ -659,6 +794,7 @@ def _capstone_call_flow(
     view: ElfView,
     targets: dict[int, str],
     relocations: dict[int, str],
+    plt_targets: dict[int, str],
     cb: Any | None,
 ) -> dict[str, Any]:
     cfg = build_cfg(instructions, arch="arm")
@@ -701,6 +837,7 @@ def _capstone_call_flow(
             view=view,
             targets=targets,
             relocations=relocations,
+            plt_targets=plt_targets,
             initial_state=incoming_state.get(block_start, {}),
             initial_stack_slots=incoming_stack.get(block_start, {}),
             cb=cb,
@@ -798,6 +935,7 @@ def analyze_elf(
     targets = _target_names(regions)
     relocations = _relocation_symbols(view)
     decode = decoder or _java_capstone_decode
+    plt_targets = _plt_import_targets(view, decode, relocations)
     edges: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
     total = 0
@@ -856,6 +994,7 @@ def analyze_elf(
                     view=view,
                     targets=targets,
                     relocations=relocations,
+                    plt_targets=plt_targets,
                     cb=cb,
                 )
                 basic_block_count += int(flow.get("basicBlockCount") or 0)
@@ -934,6 +1073,7 @@ def analyze_elf(
         "a32FunctionCount": a32_count,
         "scannedCodeBytes": total,
         "relocationSymbolCount": len(relocations),
+        "pltImportTargetCount": len(plt_targets),
         "basicBlockCount": basic_block_count,
         "reachableBasicBlockCount": reachable_block_count,
         "cfgEdgeCount": cfg_edge_count,
@@ -951,6 +1091,7 @@ def analyze_elf(
             "armEabiRegisterArguments": True,
             "stackSlotFlow": True,
             "pcRelativeLiteralFlow": True,
+            "armPltRelocationFlow": True,
             "dlsymReturnFlow": True,
             "basicBlockCfg": True,
             "crossBasicBlockValuePropagation": True,
