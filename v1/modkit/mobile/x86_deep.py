@@ -679,6 +679,7 @@ def analyze_elf(
     arch = "x86" if view.machine == EM_386 else "x86_64"
     regions = _function_regions(view)
     targets = {int(row["rva"]): str(row["name"]) for row in regions}
+    boundary_rows = {int(row["rva"]): row for row in regions}
     decode = decoder or _java_capstone_decode
     relocation_symbols = _relocation_symbols(view)
     plt_targets = _plt_import_targets(view, arch, decode, relocation_symbols)
@@ -753,6 +754,19 @@ def analyze_elf(
         cfg_edge_count += int(flow.get("cfgEdgeCount") or 0)
         cfg_converged = cfg_converged and bool(flow.get("cfgConverged", True))
         new_edges = flow.get("edges") or []
+        for edge in new_edges:
+            target_rva = edge.get("targetRva")
+            target_boundary = (
+                boundary_rows.get(int(target_rva))
+                if isinstance(target_rva, int) else None
+            )
+            if (
+                target_boundary
+                and bool(target_boundary.get("recoveredBoundary"))
+                and edge.get("targetResolution") == "STATIC_SYMBOL"
+            ):
+                edge["targetResolution"] = "EXACT_UNWIND_START"
+                edge["targetBoundarySource"] = target_boundary.get("boundarySource")
         remaining = MAX_EDGES - len(edges)
         if remaining <= 0:
             break
