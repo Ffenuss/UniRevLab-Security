@@ -133,8 +133,9 @@ def route(profile_report: dict[str, Any], output_path: str | Path | None = None)
                     )
                 elif abi in {"x86", "x86_64"}:
                     route_missing.append(
-                        f"advanced {abi} register/stack data-flow; "
-                        "Capstone instruction/control-flow and portable relocations are bundled"
+                        f"full {abi} CFG and cross-basic-block value propagation; "
+                        "Capstone control-flow, register/stack argument flow, RIP/GOT relocation flow "
+                        "and dlsym result tracking are bundled"
                     )
                 else:
                     route_missing.append(
