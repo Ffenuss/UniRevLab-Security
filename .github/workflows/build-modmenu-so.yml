@@ -24,11 +24,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          command -v sdkmanager
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "ndk;22.1.7171670"
-          test -x "$ANDROID_SDK_ROOT/ndk/22.1.7171670/ndk-build"
-          echo "NDK=$ANDROID_SDK_ROOT/ndk/22.1.7171670" >> "$GITHUB_ENV"
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [[ ! -x "$SDKMANAGER" ]]; then SDKMANAGER="$SDK_ROOT/cmdline-tools/16.0/bin/sdkmanager"; fi
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "ndk;22.1.7171670"
+          test -x "$SDK_ROOT/ndk/22.1.7171670/ndk-build"
+          echo "NDK=$SDK_ROOT/ndk/22.1.7171670" >> "$GITHUB_ENV"
 
       - name: Reconstruct exact custom source layer
         shell: bash
