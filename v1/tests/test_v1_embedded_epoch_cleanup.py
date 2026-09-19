@@ -16,10 +16,15 @@ def test_embedded_rerun_recursively_clears_hermes_output_tree_before_backend():
     invalidation = source.split("private void invalidateEmbeddedRunOutputs()", 1)[1].split("/** Chaquopy", 1)[0]
     assert '"hermes-deep"' in invalidation
     assert '"hermes-deep.json"' in invalidation
+    assert '"arm32-deep.json"' in invalidation
+    assert '"x86-deep.json"' in invalidation
+    assert '"native-portable.json"' in invalidation
+    assert '"runtime-profiler.json"' in invalidation
+    assert '"engine-router.json"' in invalidation
     assert "deleteRunTree(app.file(name));" in invalidation
     assert '"native-deep-cache"' not in invalidation
 
-    stage = source.index('stage(4,4,"Lua/JS/Hermes deep')
+    stage = source.index('stage(4,4,"Runtime-targeted deep:')
     clear = source.index("invalidateEmbeddedRunOutputs();", stage)
     backend = source.index('getModule("modkit.mobile.embedded_pipeline")', clear)
     assert stage < clear < backend
