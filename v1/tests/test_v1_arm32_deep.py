@@ -322,3 +322,19 @@ def test_arm32_capstone_tracks_literal_import_arguments_and_dlsym_result():
     assert finding["kind"] == "ARM32_DYNAMIC_LOOKUP_FLOW"
     assert finding["patchReady"] is False
     assert finding["automationExcluded"] is True
+
+
+def test_arm32_apk_scan_propagates_cancellation(tmp_path):
+    import zipfile
+
+    apk = tmp_path / "cancel.apk"
+    with zipfile.ZipFile(apk, "w") as zf:
+        zf.writestr("lib/armeabi-v7a/libgame.so", _arm32_code_elf())
+
+    class Cancel:
+        def isCancelled(self):
+            return True
+
+    import pytest
+    with pytest.raises(arm32_deep.Arm32ScanCancelled):
+        arm32_deep.scan_apk_paths([apk], cb=Cancel())
