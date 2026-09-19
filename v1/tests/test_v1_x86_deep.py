@@ -226,6 +226,173 @@ def test_x86_64_tracks_rip_relative_import_args_and_dlsym_result():
     assert finding["automationExcluded"] is True
 
 
+
+def _x86_flow_elf() -> bytes:
+    shstr, sh = _cstr_offsets([
+        ".shstrtab", ".strtab", ".symtab", ".dynstr", ".dynsym",
+        ".rel.dyn", ".rodata", ".text",
+    ])
+    strtab, st = _cstr_offsets(["source32"])
+    dynstr, ds = _cstr_offsets(["dlsym"])
+
+    symtab = bytearray(b"\0" * 16)
+    symtab += struct.pack("<IIIBBH", st["source32"], 0x1000, 0x20, 0x12, 0, 8)
+
+    dynsym = bytearray(b"\0" * 16)
+    dynsym += struct.pack("<IIIBBH", ds["dlsym"], 0, 0, 0x12, 0, 0)
+
+    rel = struct.pack("<II", 0x3000, (1 << 8) | 7)
+    rodata = b"target32\0"
+    text = b"\x90" * 0x20
+
+    payloads = [
+        b"", shstr, strtab, bytes(symtab), dynstr, bytes(dynsym),
+        rel, rodata, text,
+    ]
+    offsets = [0] * len(payloads)
+    blob = bytearray(b"\0" * 52)
+    cursor = 52
+    for idx in range(1, len(payloads)):
+        cursor = (cursor + 3) & ~3
+        if len(blob) < cursor:
+            blob += b"\0" * (cursor - len(blob))
+        offsets[idx] = cursor
+        blob += payloads[idx]
+        cursor += len(payloads[idx])
+
+    shoff = (len(blob) + 3) & ~3
+    if len(blob) < shoff:
+        blob += b"\0" * (shoff - len(blob))
+
+    headers = [
+        (0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+        (sh[".shstrtab"], 3, 0, 0, offsets[1], len(shstr), 0, 0, 1, 0),
+        (sh[".strtab"], 3, 0, 0, offsets[2], len(strtab), 0, 0, 1, 0),
+        (sh[".symtab"], 2, 0, 0, offsets[3], len(symtab), 2, 1, 4, 16),
+        (sh[".dynstr"], 3, 0x2, 0x2800, offsets[4], len(dynstr), 0, 0, 1, 0),
+        (sh[".dynsym"], 11, 0x2, 0x2900, offsets[5], len(dynsym), 4, 1, 4, 16),
+        (sh[".rel.dyn"], 9, 0x2, 0x2A00, offsets[6], len(rel), 5, 0, 4, 8),
+        (sh[".rodata"], 1, 0x2, 0x2000, offsets[7], len(rodata), 0, 0, 1, 0),
+        (sh[".text"], 1, 0x6, 0x1000, offsets[8], len(text), 0, 0, 16, 0),
+    ]
+    for row in headers:
+        blob += struct.pack("<IIIIIIIIII", *row)
+
+    ident = bytearray(16)
+    ident[:4] = b"\x7fELF"
+    ident[4] = 1
+    ident[5] = 1
+    ident[6] = 1
+    hdr = struct.pack(
+        "<16sHHIIIIIHHHHHH",
+        bytes(ident), 3, 3, 1, 0x1000, 0, shoff, 0,
+        52, 0, 0, 40, len(headers), 1,
+    )
+    blob[:52] = hdr
+    return bytes(blob)
+
+
+def _decoder32(code: bytes, address: int, arch: str, max_instructions: int):
+    assert arch == "x86"
+    return {
+        "available": True,
+        "version": "5.0",
+        "instructions": [
+            {
+                "address": 0x1000, "size": 6, "mnemonic": "lea",
+                "opStr": "eax, [0x2000]",
+                "isCall": False, "isJump": False, "isRet": False,
+                "regsRead": [], "regsWrite": ["eax"],
+                "operands": [
+                    {"type": "REG", "reg": "eax", "size": 4, "access": 2},
+                    {
+                        "type": "MEM", "size": 4, "access": 1,
+                        "mem": {
+                            "segment": "", "base": "", "index": "",
+                            "scale": 1, "disp": 0x2000,
+                        },
+                    },
+                ],
+            },
+            {
+                "address": 0x1006, "size": 1, "mnemonic": "push",
+                "opStr": "eax",
+                "isCall": False, "isJump": False, "isRet": False,
+                "regsRead": ["eax", "esp"], "regsWrite": ["esp"],
+                "operands": [
+                    {"type": "REG", "reg": "eax", "size": 4, "access": 1},
+                ],
+            },
+            {
+                "address": 0x1007, "size": 2, "mnemonic": "push",
+                "opStr": "0",
+                "isCall": False, "isJump": False, "isRet": False,
+                "regsRead": ["esp"], "regsWrite": ["esp"],
+                "operands": [
+                    {"type": "IMM", "imm": 0, "size": 4, "access": 1},
+                ],
+            },
+            {
+                "address": 0x1009, "size": 6, "mnemonic": "call",
+                "opStr": "dword ptr [0x3000]",
+                "isCall": True, "isJump": False, "isRet": False,
+                "hasImmediateTarget": False,
+                "regsRead": ["esp"], "regsWrite": ["esp"],
+                "operands": [
+                    {
+                        "type": "MEM", "size": 4, "access": 1,
+                        "mem": {
+                            "segment": "", "base": "", "index": "",
+                            "scale": 1, "disp": 0x3000,
+                        },
+                    },
+                ],
+            },
+            {
+                "address": 0x100F, "size": 2, "mnemonic": "mov",
+                "opStr": "ebx, eax",
+                "isCall": False, "isJump": False, "isRet": False,
+                "regsRead": ["eax"], "regsWrite": ["ebx"],
+                "operands": [
+                    {"type": "REG", "reg": "ebx", "size": 4, "access": 2},
+                    {"type": "REG", "reg": "eax", "size": 4, "access": 1},
+                ],
+            },
+            {
+                "address": 0x1011, "size": 2, "mnemonic": "call",
+                "opStr": "ebx",
+                "isCall": True, "isJump": False, "isRet": False,
+                "hasImmediateTarget": False,
+                "regsRead": ["ebx", "esp"], "regsWrite": ["esp"],
+                "operands": [
+                    {"type": "REG", "reg": "ebx", "size": 4, "access": 1},
+                ],
+            },
+        ],
+    }
+
+
+def test_x86_32_tracks_cdecl_stack_arguments_and_dlsym_result():
+    report = x86_deep.analyze_elf(_x86_flow_elf(), decoder=_decoder32)
+
+    dlsym_call = next(
+        row for row in report["edges"]
+        if row["instructionRva"] == 0x1009
+    )
+    assert dlsym_call["targetFunction"] == "dlsym"
+    assert dlsym_call["lookupIdentifier"] == "target32"
+    assert dlsym_call["argumentEvidence"][0]["kind"] == "immediate"
+    assert dlsym_call["argumentEvidence"][1]["value"] == "target32"
+
+    indirect = next(
+        row for row in report["edges"]
+        if row["instructionRva"] == 0x1011
+    )
+    assert indirect["targetFunction"] == "target32"
+    assert indirect["targetResolution"] == "DLSYM_RESULT_FLOW"
+    assert report["policy"]["x86StackArgumentFlow"] is True
+
+
 def test_x86_without_structured_operands_does_not_invent_indirect_target():
     def minimal_decoder(code: bytes, address: int, arch: str, max_instructions: int):
         return {
