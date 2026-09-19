@@ -52,9 +52,12 @@ jobs:
 
           git clone --quiet https://github.com/infinixsunat-collab/inject-mod.git /tmp/inject-mod
           git -C /tmp/inject-mod checkout --quiet 05bb059da6585a2b4bc14f4e82e51f9d50e84263
-          cp -a /tmp/inject-mod/KittyMemory /tmp/modmenu/
           cp -a /tmp/inject-mod/Substrate /tmp/modmenu/
           cp -a /tmp/inject-mod/And64InlineHook /tmp/modmenu/
+
+          git clone --quiet https://github.com/traitimtrongvag/Android-Imgui-Template.git /tmp/legacy-template
+          git -C /tmp/legacy-template checkout --quiet 7cb1994a898e5edf5033aec1b1a95c11a6a0c51a
+          cp -a /tmp/legacy-template/app/src/main/jni/KittyMemory /tmp/modmenu/
 
           git clone --quiet https://github.com/NepMods/Android-Mod-Menu.git /tmp/nepmods
           git -C /tmp/nepmods checkout --quiet 3488c35024c97a1c794a20f57eaaa07404f619d8
