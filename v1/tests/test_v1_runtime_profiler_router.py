@@ -106,6 +106,21 @@ def test_router_marks_non_arm64_native_deep_backend_partial(tmp_path: Path):
     )
 
 
+
+def test_router_reports_arm32_remaining_cfg_gap(tmp_path: Path):
+    apk = _apk(tmp_path / "arm32.apk", {
+        "lib/armeabi-v7a/libgame.so": b"\x7fELF",
+    })
+    profile = runtime_profiler.scan_apk_paths([apk])
+    routed = engine_router.route(profile)
+    row = routed["routes"][0]
+    assert row["coverage"] == "PARTIAL_BUNDLED"
+    assert any(
+        "ARMv7/Thumb" in item and "cross-basic-block" in item
+        for item in row["missingBackends"]
+    )
+
+
 def test_unknown_package_gets_generic_fallback_not_empty_support(tmp_path: Path):
     apk = _apk(tmp_path / "unknown.apk", {
         "assets/custom.vm": b"opaque custom runtime",
