@@ -15,6 +15,7 @@ import zipfile
 from modkit.mobile.cfg_flow import (
     build_cfg, clone_token_list, clone_token_map, merge_token_lists, merge_token_maps,
 )
+from modkit.mobile.native_function_recovery import recovered_regions
 from modkit.mobile.native_portable import ElfView, EM_386, EM_X86_64
 
 SCHEMA = "modkit-x86-deep-1.2"
@@ -135,7 +136,13 @@ def _function_regions(view: ElfView) -> list[dict[str, Any]]:
                 "endRva": end,
                 "size": end - start,
                 "section": sec,
+                "boundarySource": "ELF_FUNCTION_SYMBOL",
+                "boundaryConfidence": "EXACT_SYMBOL",
+                "recoveredBoundary": False,
             })
+    rows.extend(
+        recovered_regions(view, rows, max_function_bytes=MAX_FUNCTION_BYTES)
+    )
     rows.sort(key=lambda row: (row["rva"], row["name"]))
     return rows
 
@@ -538,6 +545,12 @@ def _run_block(
         if edge:
             edge["basicBlockRva"] = block_start
             edge["cfgReachable"] = True
+            edge["functionBoundarySource"] = str(
+                row.get("boundarySource") or "ELF_FUNCTION_SYMBOL"
+            )
+            edge["recoveredFunctionBoundary"] = bool(
+                row.get("recoveredBoundary")
+            )
             edges.append(edge)
 
         for written in insn.get("regsWrite") or []:
@@ -677,6 +690,10 @@ def analyze_elf(
     decoder_available = False
     decoder_version: str | None = None
     operand_detail_available = False
+    recovered_function_count = sum(
+        1 for row in regions if bool(row.get("recoveredBoundary"))
+    )
+    symbol_function_count = len(regions) - recovered_function_count
     basic_block_count = 0
     reachable_block_count = 0
     cfg_edge_count = 0
@@ -771,7 +788,8 @@ def analyze_elf(
                 else "X86_CONTROL_FLOW_EDGE"
             ),
             "instructionBoundaryConfirmed": True,
-            "functionBoundarySource": "ELF_FUNCTION_SYMBOL",
+            "functionBoundarySource": edge.get("functionBoundarySource"),
+            "recoveredFunctionBoundary": bool(edge.get("recoveredFunctionBoundary")),
             "patchReady": False,
             "automationExcluded": True,
             "runtimeConfirmed": False,
@@ -789,6 +807,8 @@ def analyze_elf(
         "arch": arch,
         "bits": view.bits,
         "functionCount": len(regions),
+        "symbolFunctionCount": symbol_function_count,
+        "recoveredFunctionCount": recovered_function_count,
         "analyzedFunctionCount": analyzed,
         "scannedCodeBytes": total,
         "relocationSymbolCount": len(relocation_symbols),
@@ -803,7 +823,9 @@ def analyze_elf(
         "findings": findings,
         "errors": errors,
         "policy": {
-            "symbolBoundedOnly": True,
+            "symbolBoundedOnly": recovered_function_count == 0,
+            "symbolOrExactUnwindBounded": True,
+            "unwindFunctionRecovery": recovered_function_count > 0,
             "strippedRegionGuessing": False,
             "rawOpcodeByteScanning": False,
             "instructionBoundaryFromCapstone": True,
