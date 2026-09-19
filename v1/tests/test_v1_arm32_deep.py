@@ -338,3 +338,174 @@ def test_arm32_apk_scan_propagates_cancellation(tmp_path):
     import pytest
     with pytest.raises(arm32_deep.Arm32ScanCancelled):
         arm32_deep.scan_apk_paths([apk], cb=Cancel())
+
+
+def test_arm32_cfg_propagates_literal_fact_across_branch_and_skips_dead_block():
+    def decoder(code: bytes, address: int, thumb: bool, max_instructions: int):
+        return {
+            "available": True,
+            "version": "5.0",
+            "instructions": [
+                {
+                    "address": 0x1000, "size": 4, "mnemonic": "ldr",
+                    "opStr": "r1, [pc, #0xff8]",
+                    "isCall": False, "isJump": False, "isRet": False,
+                    "regsRead": ["pc"], "regsWrite": ["r1"],
+                    "operands": [
+                        {"type": "REG", "reg": "r1", "access": 2},
+                        {"type": "MEM", "access": 1,
+                         "mem": {"base": "pc", "index": "", "scale": 1, "disp": 0xFF8}},
+                    ],
+                },
+                {
+                    "address": 0x1004, "size": 4, "mnemonic": "ldr",
+                    "opStr": "r4, [pc, #0xff8]",
+                    "isCall": False, "isJump": False, "isRet": False,
+                    "regsRead": ["pc"], "regsWrite": ["r4"],
+                    "operands": [
+                        {"type": "REG", "reg": "r4", "access": 2},
+                        {"type": "MEM", "access": 1,
+                         "mem": {"base": "pc", "index": "", "scale": 1, "disp": 0xFF8}},
+                    ],
+                },
+                {
+                    "address": 0x1008, "size": 4, "mnemonic": "b",
+                    "opStr": "0x1014",
+                    "isCall": False, "isJump": True, "isRet": False,
+                    "hasImmediateTarget": True, "immediateTarget": 0x1014,
+                    "regsRead": [], "regsWrite": ["pc"],
+                    "operands": [{"type": "IMM", "imm": 0x1014, "access": 1}],
+                },
+                {
+                    "address": 0x100C, "size": 4, "mnemonic": "mov",
+                    "opStr": "r1, #0",
+                    "isCall": False, "isJump": False, "isRet": False,
+                    "regsRead": [], "regsWrite": ["r1"],
+                    "operands": [
+                        {"type": "REG", "reg": "r1", "access": 2},
+                        {"type": "IMM", "imm": 0, "access": 1},
+                    ],
+                },
+                {
+                    "address": 0x1014, "size": 4, "mnemonic": "mov",
+                    "opStr": "r0, #0",
+                    "isCall": False, "isJump": False, "isRet": False,
+                    "regsRead": [], "regsWrite": ["r0"],
+                    "operands": [
+                        {"type": "REG", "reg": "r0", "access": 2},
+                        {"type": "IMM", "imm": 0, "access": 1},
+                    ],
+                },
+                {
+                    "address": 0x1018, "size": 4, "mnemonic": "blx",
+                    "opStr": "r4",
+                    "isCall": True, "isJump": False, "isRet": False,
+                    "hasImmediateTarget": False,
+                    "regsRead": ["r4"], "regsWrite": ["lr"],
+                    "operands": [{"type": "REG", "reg": "r4", "access": 1}],
+                },
+            ],
+        }
+
+    report = arm32_deep.analyze_elf(_arm32_flow_elf(), decoder=decoder)
+    call = next(row for row in report["edges"] if row["instructionRva"] == 0x1018)
+    assert call["targetFunction"] == "dlsym"
+    assert call["lookupIdentifier"] == "target_arm"
+    assert call["argumentEvidence"][1]["value"] == "target_arm"
+    assert call["basicBlockRva"] == 0x1014
+    assert report["basicBlockCount"] == 3
+    assert report["reachableBasicBlockCount"] == 2
+    assert report["cfgConverged"] is True
+    assert report["policy"]["crossBasicBlockValuePropagation"] is True
+
+
+def test_arm32_cfg_join_drops_conflicting_argument_fact_fail_closed():
+    def decoder(code: bytes, address: int, thumb: bool, max_instructions: int):
+        return {
+            "available": True,
+            "version": "5.0",
+            "instructions": [
+                {
+                    "address": 0x1000, "size": 4, "mnemonic": "ldr",
+                    "opStr": "r1, [pc, #0xff8]",
+                    "isCall": False, "isJump": False, "isRet": False,
+                    "regsRead": ["pc"], "regsWrite": ["r1"],
+                    "operands": [
+                        {"type": "REG", "reg": "r1", "access": 2},
+                        {"type": "MEM", "access": 1,
+                         "mem": {"base": "pc", "index": "", "scale": 1, "disp": 0xFF8}},
+                    ],
+                },
+                {
+                    "address": 0x1004, "size": 4, "mnemonic": "ldr",
+                    "opStr": "r4, [pc, #0xff8]",
+                    "isCall": False, "isJump": False, "isRet": False,
+                    "regsRead": ["pc"], "regsWrite": ["r4"],
+                    "operands": [
+                        {"type": "REG", "reg": "r4", "access": 2},
+                        {"type": "MEM", "access": 1,
+                         "mem": {"base": "pc", "index": "", "scale": 1, "disp": 0xFF8}},
+                    ],
+                },
+                {
+                    "address": 0x1008, "size": 4, "mnemonic": "bne",
+                    "opStr": "0x1014",
+                    "isCall": False, "isJump": True, "isRet": False,
+                    "hasImmediateTarget": True, "immediateTarget": 0x1014,
+                    "regsRead": [], "regsWrite": ["pc"],
+                    "operands": [{"type": "IMM", "imm": 0x1014, "access": 1}],
+                },
+                {
+                    "address": 0x100C, "size": 4, "mnemonic": "mov",
+                    "opStr": "r1, #0",
+                    "isCall": False, "isJump": False, "isRet": False,
+                    "regsRead": [], "regsWrite": ["r1"],
+                    "operands": [
+                        {"type": "REG", "reg": "r1", "access": 2},
+                        {"type": "IMM", "imm": 0, "access": 1},
+                    ],
+                },
+                {
+                    "address": 0x1010, "size": 4, "mnemonic": "b",
+                    "opStr": "0x1018",
+                    "isCall": False, "isJump": True, "isRet": False,
+                    "hasImmediateTarget": True, "immediateTarget": 0x1018,
+                    "regsRead": [], "regsWrite": ["pc"],
+                    "operands": [{"type": "IMM", "imm": 0x1018, "access": 1}],
+                },
+                {
+                    "address": 0x1014, "size": 4, "mnemonic": "nop",
+                    "opStr": "",
+                    "isCall": False, "isJump": False, "isRet": False,
+                    "regsRead": [], "regsWrite": [],
+                    "operands": [],
+                },
+                {
+                    "address": 0x1018, "size": 4, "mnemonic": "mov",
+                    "opStr": "r0, #0",
+                    "isCall": False, "isJump": False, "isRet": False,
+                    "regsRead": [], "regsWrite": ["r0"],
+                    "operands": [
+                        {"type": "REG", "reg": "r0", "access": 2},
+                        {"type": "IMM", "imm": 0, "access": 1},
+                    ],
+                },
+                {
+                    "address": 0x101C, "size": 4, "mnemonic": "blx",
+                    "opStr": "r4",
+                    "isCall": True, "isJump": False, "isRet": False,
+                    "hasImmediateTarget": False,
+                    "regsRead": ["r4"], "regsWrite": ["lr"],
+                    "operands": [{"type": "REG", "reg": "r4", "access": 1}],
+                },
+            ],
+        }
+
+    report = arm32_deep.analyze_elf(_arm32_flow_elf(), decoder=decoder)
+    call = next(row for row in report["edges"] if row["instructionRva"] == 0x101C)
+    assert call["targetFunction"] == "dlsym"
+    assert "lookupIdentifier" not in call
+    args = call.get("argumentEvidence") or []
+    assert len(args) >= 2
+    assert args[1] is None
+    assert report["policy"]["joinPolicy"] == "IDENTICAL_FACTS_ONLY"
