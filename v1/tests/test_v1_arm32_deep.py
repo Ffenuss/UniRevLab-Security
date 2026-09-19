@@ -685,3 +685,81 @@ def test_arm32_resolves_relocation_backed_plt_veneer_and_dlsym_result():
     assert indirect["targetFunction"] == "target_plt"
     assert indirect["targetResolution"] == "DLSYM_RESULT_FLOW"
     assert report["policy"]["armPltRelocationFlow"] is True
+
+
+def _arm32_stripped_exidx_elf() -> bytes:
+    shstr, sh = _cstr_offsets([".shstrtab", ".ARM.exidx", ".text"])
+    text = bytearray(b"\0" * 0x20)
+    struct.pack_into("<I", text, 0x00, 0xEB000002)  # BL 0x1010
+    struct.pack_into("<I", text, 0x04, 0xE12FFF1E)  # BX LR
+    struct.pack_into("<I", text, 0x10, 0xE12FFF1E)  # recovered target
+
+    def prel31(place: int, target: int) -> int:
+        return (target - place) & 0x7FFFFFFF
+
+    exidx = (
+        struct.pack("<II", prel31(0x3000, 0x1000), 1)
+        + struct.pack("<II", prel31(0x3008, 0x1010), 1)
+    )
+    payloads = [b"", shstr, exidx, bytes(text)]
+    offsets = [0] * len(payloads)
+    blob = bytearray(b"\0" * 52)
+    cursor = 52
+    for idx in range(1, len(payloads)):
+        cursor = (cursor + 3) & ~3
+        if len(blob) < cursor:
+            blob += b"\0" * (cursor - len(blob))
+        offsets[idx] = cursor
+        blob += payloads[idx]
+        cursor += len(payloads[idx])
+
+    shoff = (len(blob) + 3) & ~3
+    if len(blob) < shoff:
+        blob += b"\0" * (shoff - len(blob))
+    headers = [
+        (0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+        (sh[".shstrtab"], 3, 0, 0, offsets[1], len(shstr), 0, 0, 1, 0),
+        (sh[".ARM.exidx"], 1, 0x2, 0x3000, offsets[2], len(exidx), 0, 0, 4, 8),
+        (sh[".text"], 1, 0x6, 0x1000, offsets[3], len(text), 0, 0, 4, 0),
+    ]
+    for row in headers:
+        blob += struct.pack("<IIIIIIIIII", *row)
+
+    ident = bytearray(16)
+    ident[:4] = b"\x7fELF"
+    ident[4] = 1
+    ident[5] = 1
+    ident[6] = 1
+    hdr = struct.pack(
+        "<16sHHIIIIIHHHHHH",
+        bytes(ident), 3, 40, 1, 0x1000, 0, shoff, 0,
+        52, 0, 0, 40, len(headers), 1,
+    )
+    blob[:52] = hdr
+    return bytes(blob)
+
+
+def test_arm32_stripped_elf_recovers_functions_from_exidx():
+    def decoder(code: bytes, address: int, thumb: bool, max_instructions: int):
+        return {"available": True, "version": "5.0", "instructions": []}
+
+    report = arm32_deep.analyze_elf(
+        _arm32_stripped_exidx_elf(),
+        apk_name="stripped.apk",
+        entry="lib/armeabi-v7a/libgame.so",
+        decoder=decoder,
+    )
+
+    assert report["symbolFunctionCount"] == 0
+    assert report["recoveredFunctionCount"] == 2
+    assert report["functionCount"] == 2
+    assert report["policy"]["symbolBoundedOnly"] is False
+    assert report["policy"]["symbolOrExactUnwindBounded"] is True
+    assert report["policy"]["unwindFunctionRecovery"] is True
+
+    call = next(row for row in report["edges"] if row["instructionRva"] == 0x1000)
+    assert call["targetRva"] == 0x1010
+    assert call["targetResolution"] == "EXACT_UNWIND_START"
+    assert call["targetBoundarySource"] == "ARM_EXIDX"
+    assert call["functionBoundarySource"] == "ARM_EXIDX"
+    assert call["recoveredFunctionBoundary"] is True
