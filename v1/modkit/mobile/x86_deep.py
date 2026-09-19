@@ -12,9 +12,9 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 import zipfile
 
-from modkit.mobile.native_portable import ElfView, EM_386, EM_X86_64
+from modkit.mobile.cfg_flow import (\n    build_cfg, clone_token_list, clone_token_map, merge_token_lists, merge_token_maps,\n)\nfrom modkit.mobile.native_portable import ElfView, EM_386, EM_X86_64
 
-SCHEMA = "modkit-x86-deep-1.1"
+SCHEMA = "modkit-x86-deep-1.2"
 ENGINE_ID = "native.x86-deep-embedded"
 MAX_LIBRARY_BYTES = 256 * 1024 * 1024
 MAX_FUNCTION_BYTES = 512 * 1024
@@ -442,19 +442,26 @@ def _enrich_call_edge(
     return item, return_value
 
 
-def _function_flow(
+def _run_block(
     instructions: list[dict[str, Any]],
     *,
+    block_start: int,
     row: dict[str, Any],
     arch: str,
     view: ElfView,
     targets: dict[int, str],
     relocation_symbols: dict[int, str],
     plt_targets: dict[int, str],
+    initial_state: dict[str, dict[str, Any]],
+    initial_stack_args: list[dict[str, Any] | None],
     cb: Any | None,
-) -> list[dict[str, Any]]:
-    state: dict[str, dict[str, Any]] = {}
-    stack_args: list[dict[str, Any] | None] = []
+) -> tuple[
+    dict[str, dict[str, Any]],
+    list[dict[str, Any] | None],
+    list[dict[str, Any]],
+]:
+    state = clone_token_map(initial_state)
+    stack_args = clone_token_list(initial_stack_args)
     edges: list[dict[str, Any]] = []
 
     for index, insn in enumerate(instructions):
@@ -526,6 +533,8 @@ def _function_flow(
                 state["rax" if arch == "x86_64" else "eax"] = return_value
             stack_args.clear()
         if edge:
+            edge["basicBlockRva"] = block_start
+            edge["cfgReachable"] = True
             edges.append(edge)
 
         for written in insn.get("regsWrite") or []:
@@ -534,8 +543,107 @@ def _function_flow(
                 if not (edge and edge["edgeKind"] in {"call", "indirect-call"}):
                     state.pop(reg, None)
 
-    return edges
+    return state, stack_args, edges
 
+
+def _function_flow(
+    instructions: list[dict[str, Any]],
+    *,
+    row: dict[str, Any],
+    arch: str,
+    view: ElfView,
+    targets: dict[int, str],
+    relocation_symbols: dict[int, str],
+    plt_targets: dict[int, str],
+    cb: Any | None,
+) -> dict[str, Any]:
+    cfg = build_cfg(instructions, arch=arch)
+    blocks = cfg.get("blocks") or []
+    entry = cfg.get("entry")
+    if entry is None or not blocks:
+        return {
+            "edges": [],
+            "basicBlockCount": 0,
+            "reachableBlockCount": 0,
+            "cfgEdgeCount": 0,
+            "cfgConverged": True,
+        }
+
+    by_start = {int(block["start"]): block for block in blocks}
+    incoming_state: dict[int, dict[str, dict[str, Any]]] = {int(entry): {}}
+    incoming_stack: dict[int, list[dict[str, Any] | None]] = {int(entry): []}
+    worklist: list[int] = [int(entry)]
+    queued: set[int] = {int(entry)}
+    block_edges: dict[int, list[dict[str, Any]]] = {}
+    reached: set[int] = set()
+    iterations = 0
+    max_iterations = max(64, len(blocks) * 64)
+
+    while worklist and iterations < max_iterations:
+        _check(cb)
+        block_start = worklist.pop(0)
+        queued.discard(block_start)
+        block = by_start.get(block_start)
+        if block is None:
+            continue
+        reached.add(block_start)
+        iterations += 1
+        state, stack_args, produced = _run_block(
+            block.get("instructions") or [],
+            block_start=block_start,
+            row=row,
+            arch=arch,
+            view=view,
+            targets=targets,
+            relocation_symbols=relocation_symbols,
+            plt_targets=plt_targets,
+            initial_state=incoming_state.get(block_start, {}),
+            initial_stack_args=incoming_stack.get(block_start, []),
+            cb=cb,
+        )
+        block_edges[block_start] = produced
+
+        for raw_successor in block.get("successors") or []:
+            successor = int(raw_successor)
+            if successor not in by_start:
+                continue
+            candidate_state = clone_token_map(state)
+            candidate_stack = clone_token_list(stack_args)
+            if successor not in incoming_state:
+                incoming_state[successor] = candidate_state
+                incoming_stack[successor] = candidate_stack
+                changed = True
+            else:
+                merged_state = merge_token_maps(
+                    incoming_state[successor], candidate_state
+                )
+                merged_stack = merge_token_lists(
+                    incoming_stack.get(successor, []), candidate_stack
+                )
+                changed = (
+                    merged_state != incoming_state[successor]
+                    or merged_stack != incoming_stack.get(successor, [])
+                )
+                if changed:
+                    incoming_state[successor] = merged_state
+                    incoming_stack[successor] = merged_stack
+            if changed and successor not in queued:
+                worklist.append(successor)
+                queued.add(successor)
+
+    edges: list[dict[str, Any]] = []
+    for block in blocks:
+        block_start = int(block["start"])
+        if block_start in reached:
+            edges.extend(block_edges.get(block_start, []))
+
+    return {
+        "edges": edges,
+        "basicBlockCount": len(blocks),
+        "reachableBlockCount": len(reached),
+        "cfgEdgeCount": int(cfg.get("edgeCount") or 0),
+        "cfgConverged": not worklist,
+    }
 
 def analyze_elf(
     data: bytes,
@@ -566,6 +674,10 @@ def analyze_elf(
     decoder_available = False
     decoder_version: str | None = None
     operand_detail_available = False
+    basic_block_count = 0
+    reachable_block_count = 0
+    cfg_edge_count = 0
+    cfg_converged = True
 
     for row in regions:
         _check(cb)
@@ -606,7 +718,7 @@ def analyze_elf(
             operand_detail_available = True
 
         analyzed += 1
-        new_edges = _function_flow(
+        flow = _function_flow(
             instructions,
             row=row,
             arch=arch,
@@ -616,6 +728,11 @@ def analyze_elf(
             plt_targets=plt_targets,
             cb=cb,
         )
+        basic_block_count += int(flow.get("basicBlockCount") or 0)
+        reachable_block_count += int(flow.get("reachableBlockCount") or 0)
+        cfg_edge_count += int(flow.get("cfgEdgeCount") or 0)
+        cfg_converged = cfg_converged and bool(flow.get("cfgConverged", True))
+        new_edges = flow.get("edges") or []
         remaining = MAX_EDGES - len(edges)
         if remaining <= 0:
             break
@@ -673,6 +790,10 @@ def analyze_elf(
         "scannedCodeBytes": total,
         "relocationSymbolCount": len(relocation_symbols),
         "pltImportTargetCount": len(plt_targets),
+        "basicBlockCount": basic_block_count,
+        "reachableBasicBlockCount": reachable_block_count,
+        "cfgEdgeCount": cfg_edge_count,
+        "cfgConverged": cfg_converged,
         "edgeCount": len(edges),
         "edges": edges,
         "findingCount": len(findings),
@@ -688,6 +809,9 @@ def analyze_elf(
             "x86StackArgumentFlow": True,
             "ripRelativeRelocationFlow": True,
             "dlsymReturnFlow": True,
+            "basicBlockCfg": True,
+            "crossBasicBlockValuePropagation": True,
+            "joinPolicy": "IDENTICAL_FACTS_ONLY",
             "indirectTargetsResolvedWithoutProof": False,
             "patchReadyFromControlFlow": False,
         },
