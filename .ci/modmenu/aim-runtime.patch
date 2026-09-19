@@ -272,3 +272,4 @@
 +bool Il2CppObjectIsClass(void *object, const char *namespaze, const char *clazz);
  void *Il2CppCreateClassInstance(const char *image, const char *namespaze, const char *clazz);
  void* Il2CppCreateArray(const char *image, const char *namespaze, const char *clazz, size_t length);
+ 
