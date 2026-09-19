@@ -128,8 +128,9 @@ def route(profile_report: dict[str, Any], output_path: str | Path | None = None)
             for abi in sorted(abi for abi in abis if abi != "arm64-v8a"):
                 if abi == "armeabi-v7a":
                     route_missing.append(
-                        "advanced ARMv7/Thumb register/stack data-flow; "
-                        "symbol-bounded control-flow and portable relocations are bundled"
+                        "full ARMv7/Thumb CFG, cross-basic-block value propagation and PLT veneer mapping; "
+                        "symbol-bounded control-flow, PC-relative literal flow, register/stack arguments, "
+                        "portable relocations and dlsym result tracking are bundled"
                     )
                 elif abi in {"x86", "x86_64"}:
                     route_missing.append(
