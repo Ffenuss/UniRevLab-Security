@@ -419,3 +419,160 @@ def test_x86_without_structured_operands_does_not_invent_indirect_target():
     assert edge["targetFunction"] is None
     assert edge["targetResolution"] == "INDIRECT_UNRESOLVED"
     assert report["operandDetailAvailable"] is False
+
+
+def test_x86_cfg_propagates_value_across_unconditional_branch_and_skips_dead_block():
+    def decoder(code: bytes, address: int, arch: str, max_instructions: int):
+        assert arch == "x86_64"
+        return {
+            "available": True,
+            "version": "5.0",
+            "instructions": [
+                {
+                    "address": 0x1000, "size": 7, "mnemonic": "lea",
+                    "opStr": "rsi, [rip + 0xff9]",
+                    "isCall": False, "isJump": False, "isRet": False,
+                    "regsRead": ["rip"], "regsWrite": ["rsi"],
+                    "operands": [
+                        {"type": "REG", "reg": "rsi", "size": 8, "access": 2},
+                        {"type": "MEM", "size": 8, "access": 1,
+                         "mem": {"segment": "", "base": "rip", "index": "", "scale": 1, "disp": 0xFF9}},
+                    ],
+                },
+                {
+                    "address": 0x1007, "size": 2, "mnemonic": "jmp",
+                    "opStr": "0x1010",
+                    "isCall": False, "isJump": True, "isRet": False,
+                    "hasImmediateTarget": True, "immediateTarget": 0x1010,
+                    "regsRead": [], "regsWrite": [],
+                    "operands": [{"type": "IMM", "imm": 0x1010, "size": 8, "access": 1}],
+                },
+                {
+                    "address": 0x1009, "size": 2, "mnemonic": "xor",
+                    "opStr": "esi, esi",
+                    "isCall": False, "isJump": False, "isRet": False,
+                    "regsRead": ["esi"], "regsWrite": ["esi"],
+                    "operands": [
+                        {"type": "REG", "reg": "esi", "size": 4, "access": 3},
+                        {"type": "REG", "reg": "esi", "size": 4, "access": 1},
+                    ],
+                },
+                {
+                    "address": 0x1010, "size": 2, "mnemonic": "xor",
+                    "opStr": "edi, edi",
+                    "isCall": False, "isJump": False, "isRet": False,
+                    "regsRead": ["edi"], "regsWrite": ["edi"],
+                    "operands": [
+                        {"type": "REG", "reg": "edi", "size": 4, "access": 3},
+                        {"type": "REG", "reg": "edi", "size": 4, "access": 1},
+                    ],
+                },
+                {
+                    "address": 0x1012, "size": 6, "mnemonic": "call",
+                    "opStr": "qword ptr [rip + 0x2fe8]",
+                    "isCall": True, "isJump": False, "isRet": False,
+                    "hasImmediateTarget": False,
+                    "regsRead": ["rsp", "rip"], "regsWrite": ["rsp"],
+                    "operands": [
+                        {"type": "MEM", "size": 8, "access": 1,
+                         "mem": {"segment": "", "base": "rip", "index": "", "scale": 1, "disp": 0x2FE8}},
+                    ],
+                },
+            ],
+        }
+
+    report = x86_deep.analyze_elf(_x64_flow_elf(), decoder=decoder)
+    call = next(row for row in report["edges"] if row["instructionRva"] == 0x1012)
+    assert call["targetFunction"] == "dlsym"
+    assert call["lookupIdentifier"] == "target_fn"
+    assert call["argumentEvidence"][1]["value"] == "target_fn"
+    assert call["basicBlockRva"] == 0x1010
+    assert report["basicBlockCount"] == 3
+    assert report["reachableBasicBlockCount"] == 2
+    assert report["cfgConverged"] is True
+    assert report["policy"]["crossBasicBlockValuePropagation"] is True
+
+
+def test_x86_cfg_join_drops_conflicting_register_fact_fail_closed():
+    def decoder(code: bytes, address: int, arch: str, max_instructions: int):
+        return {
+            "available": True,
+            "version": "5.0",
+            "instructions": [
+                {
+                    "address": 0x1000, "size": 2, "mnemonic": "je",
+                    "opStr": "0x1010",
+                    "isCall": False, "isJump": True, "isRet": False,
+                    "hasImmediateTarget": True, "immediateTarget": 0x1010,
+                    "regsRead": [], "regsWrite": [],
+                    "operands": [{"type": "IMM", "imm": 0x1010, "size": 8, "access": 1}],
+                },
+                {
+                    "address": 0x1002, "size": 7, "mnemonic": "lea",
+                    "opStr": "rsi, [rip + 0xff7]",
+                    "isCall": False, "isJump": False, "isRet": False,
+                    "regsRead": ["rip"], "regsWrite": ["rsi"],
+                    "operands": [
+                        {"type": "REG", "reg": "rsi", "size": 8, "access": 2},
+                        {"type": "MEM", "size": 8, "access": 1,
+                         "mem": {"segment": "", "base": "rip", "index": "", "scale": 1, "disp": 0xFF7}},
+                    ],
+                },
+                {
+                    "address": 0x1009, "size": 2, "mnemonic": "jmp",
+                    "opStr": "0x1018",
+                    "isCall": False, "isJump": True, "isRet": False,
+                    "hasImmediateTarget": True, "immediateTarget": 0x1018,
+                    "regsRead": [], "regsWrite": [],
+                    "operands": [{"type": "IMM", "imm": 0x1018, "size": 8, "access": 1}],
+                },
+                {
+                    "address": 0x1010, "size": 2, "mnemonic": "xor",
+                    "opStr": "esi, esi",
+                    "isCall": False, "isJump": False, "isRet": False,
+                    "regsRead": ["esi"], "regsWrite": ["esi"],
+                    "operands": [
+                        {"type": "REG", "reg": "esi", "size": 4, "access": 3},
+                        {"type": "REG", "reg": "esi", "size": 4, "access": 1},
+                    ],
+                },
+                {
+                    "address": 0x1012, "size": 2, "mnemonic": "jmp",
+                    "opStr": "0x1018",
+                    "isCall": False, "isJump": True, "isRet": False,
+                    "hasImmediateTarget": True, "immediateTarget": 0x1018,
+                    "regsRead": [], "regsWrite": [],
+                    "operands": [{"type": "IMM", "imm": 0x1018, "size": 8, "access": 1}],
+                },
+                {
+                    "address": 0x1018, "size": 2, "mnemonic": "xor",
+                    "opStr": "edi, edi",
+                    "isCall": False, "isJump": False, "isRet": False,
+                    "regsRead": ["edi"], "regsWrite": ["edi"],
+                    "operands": [
+                        {"type": "REG", "reg": "edi", "size": 4, "access": 3},
+                        {"type": "REG", "reg": "edi", "size": 4, "access": 1},
+                    ],
+                },
+                {
+                    "address": 0x101A, "size": 6, "mnemonic": "call",
+                    "opStr": "qword ptr [rip + 0x2fe0]",
+                    "isCall": True, "isJump": False, "isRet": False,
+                    "hasImmediateTarget": False,
+                    "regsRead": ["rsp", "rip"], "regsWrite": ["rsp"],
+                    "operands": [
+                        {"type": "MEM", "size": 8, "access": 1,
+                         "mem": {"segment": "", "base": "rip", "index": "", "scale": 1, "disp": 0x2FE0}},
+                    ],
+                },
+            ],
+        }
+
+    report = x86_deep.analyze_elf(_x64_flow_elf(), decoder=decoder)
+    call = next(row for row in report["edges"] if row["instructionRva"] == 0x101A)
+    assert call["targetFunction"] == "dlsym"
+    assert "lookupIdentifier" not in call
+    args = call.get("argumentEvidence") or []
+    assert len(args) >= 2
+    assert args[1] is None
+    assert report["policy"]["joinPolicy"] == "IDENTICAL_FACTS_ONLY"
